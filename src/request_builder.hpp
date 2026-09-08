@@ -1,0 +1,38 @@
+#ifndef KARU_REQUEST_BUILDER_HPP
+#define KARU_REQUEST_BUILDER_HPP
+
+#include "config.hpp"
+#include "credential_cache.hpp"
+#include "locator.hpp"
+#include "request.hpp"
+
+#include <cstdint>
+#include <expected>
+#include <string_view>
+
+namespace karu {
+
+namespace backends {
+struct CloudProvider;
+}
+
+// Per-client request materializer. Locators stay free of endpoints and
+// credentials; this object resolves and signs after the byte range is known.
+class RequestBuilder {
+  public:
+    explicit RequestBuilder(ConfigSnapshot config) : config_(std::move(config)) {}
+
+    [[nodiscard]] std::expected<PreparedRequest, RequestError>
+    prepare(const Locator& locator, std::uint64_t first, std::uint64_t length,
+            std::string_view region_hint = {}, std::string_view if_match = {});
+
+    [[nodiscard]] const ConfigSnapshot& config() const noexcept { return config_; }
+
+  private:
+    ConfigSnapshot config_;
+    CredentialCache credentials_;
+};
+
+} // namespace karu
+
+#endif
