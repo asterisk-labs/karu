@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define KARU_API_VERSION 2
+#define KARU_API_VERSION 1
 #define KARU_TO_END UINT64_MAX
 
 KARU_API int karu_api_version(void);
