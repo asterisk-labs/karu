@@ -76,6 +76,13 @@ std::chrono::milliseconds retry_delay(const Transfer& transfer, std::mt19937& ra
     return std::chrono::milliseconds(base + jitter(random));
 }
 
+std::string timeout_detail(const Transfer& transfer,
+                           std::string_view reason = "request timeout exceeded") {
+    const std::string& uri = transfer.request_url.empty() ? transfer.locator->resolved.canonical_uri
+                                                          : transfer.request_url;
+    return concat(redact_url(uri), ": ", reason);
+}
+
 } // namespace
 
 Engine::Engine(ConfigSnapshot config)
@@ -236,6 +243,12 @@ void Engine::finish_transfer(std::unique_ptr<Transfer> transfer, karu_status sta
 
 void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
     try {
+        transfer->deadline.start(options_.request_timeout_seconds);
+        if (transfer->deadline.expired()) {
+            const std::string detail = timeout_detail(*transfer);
+            finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
+            return;
+        }
         if (!transport::ensure_sink(*transfer)) {
             finish_transfer(std::move(transfer), KARU_ERR_NOMEM,
                             "out of memory allocating a coalesced transfer buffer");
@@ -252,6 +265,11 @@ void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
         if (!request) {
             finish_transfer(std::move(transfer), request.error().status,
                             std::move(request.error().message));
+            return;
+        }
+        if (transfer->deadline.expired()) {
+            const std::string detail = timeout_detail(*transfer);
+            finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
             return;
         }
         transfer->request_url = std::move(request->url);
@@ -431,6 +449,12 @@ void Engine::io_loop() {
                 continue;
             }
 
+            if (transfer->deadline.expired()) {
+                const std::string detail = timeout_detail(*transfer);
+                finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
+                continue;
+            }
+
             if (transfer->response_region.empty() &&
                 transfer->locator->resolved.backend == Backend::S3) {
                 transfer->response_region = transport::detail::s3_region(std::string_view(
@@ -463,6 +487,12 @@ void Engine::io_loop() {
                 transport::retryable(*transfer, result)) {
                 ++transfer->attempt;
                 const auto delay = retry_delay(*transfer, random);
+                if (!transfer->deadline.can_wait_for(delay)) {
+                    const std::string detail = timeout_detail(
+                        *transfer, "request timeout leaves no time for another attempt");
+                    finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
+                    continue;
+                }
                 curl_easy_reset(transfer->easy.get());
                 easy_pool_.push_back(std::move(transfer->easy));
                 retries_.push_back(Retry{SteadyClock::now() + delay, std::move(transfer)});

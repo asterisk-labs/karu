@@ -4,6 +4,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -195,6 +196,51 @@ int main(int argc, char** argv) {
     check(karu_client_size(client, large_size, &size) == KARU_OK && size == 4096,
           "large size error keeps the connection reusable");
     karu_locator_free(large_size);
+
+    karu_config* timeout_config = nullptr;
+    karu_client* timeout_client = nullptr;
+    check(karu_config_create_empty(&timeout_config) == KARU_OK, "create timeout config");
+    check(karu_config_set_option(timeout_config, "KARU_MAX_ATTEMPTS", "16") == KARU_OK,
+          "set timeout attempts");
+    check(karu_config_set_option(timeout_config, "KARU_REQUEST_TIMEOUT", "1") == KARU_OK,
+          "set request timeout");
+    check(karu_client_create(timeout_config, &timeout_client) == KARU_OK, "create timeout client");
+
+    auto started = std::chrono::steady_clock::now();
+    check(fetch(timeout_client, base + "/retry-after-deadline", 0, small) == KARU_TIMEOUT,
+          "read retry delay respects request timeout");
+    auto elapsed = std::chrono::steady_clock::now() - started;
+    check(elapsed < std::chrono::seconds(2), "read retry deadline fails promptly");
+    check(std::strstr(karu_last_error(), "request timeout") != nullptr,
+          "read retry timeout detail");
+
+    karu_locator* retrying_size = nullptr;
+    check(karu_resolve((base + "/retry-after-deadline").c_str(), &retrying_size) == KARU_OK,
+          "resolve retrying size endpoint");
+    started = std::chrono::steady_clock::now();
+    check(karu_client_size(timeout_client, retrying_size, &size) == KARU_TIMEOUT,
+          "size retry delay respects request timeout");
+    elapsed = std::chrono::steady_clock::now() - started;
+    check(elapsed < std::chrono::seconds(2), "size retry deadline fails promptly");
+    karu_locator_free(retrying_size);
+
+    started = std::chrono::steady_clock::now();
+    check(fetch(timeout_client, base + "/slow", 0, small) == KARU_TIMEOUT,
+          "active read respects request timeout");
+    elapsed = std::chrono::steady_clock::now() - started;
+    check(elapsed < std::chrono::seconds(3), "active read timeout is bounded");
+
+    karu_locator* slow_size = nullptr;
+    check(karu_resolve((base + "/slow").c_str(), &slow_size) == KARU_OK,
+          "resolve slow size endpoint");
+    started = std::chrono::steady_clock::now();
+    check(karu_client_size(timeout_client, slow_size, &size) == KARU_TIMEOUT,
+          "active size probe respects request timeout");
+    elapsed = std::chrono::steady_clock::now() - started;
+    check(elapsed < std::chrono::seconds(3), "active size timeout is bounded");
+    karu_locator_free(slow_size);
+    karu_client_free(timeout_client);
+    karu_config_free(timeout_config);
 
     check(fetch(client, base + "/missing", 0, small) == KARU_ERR_NOT_FOUND, "404 mapping");
     check(fetch(client, base + "/unauthorized", 0, small) == KARU_ERR_AUTH, "401 mapping");

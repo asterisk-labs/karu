@@ -6,6 +6,7 @@
 #include "../request.hpp"
 #include "batch.hpp"
 #include "curl_types.hpp"
+#include "deadline.hpp"
 
 #include <array>
 #include <cstddef>
@@ -80,6 +81,7 @@ struct Transfer {
     bool region_retried = false;
     bool credentials_retried = false;
     int attempt = 0;
+    RequestDeadline deadline;
 
     int retry_after = 0;
     std::size_t error_body_size = 0;

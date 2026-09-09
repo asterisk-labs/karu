@@ -47,6 +47,7 @@ struct ClientOptions {
     std::uint64_t coalesce_amplification = 16;
     std::uint64_t range_fallback_limit = 8u << 20;
     int max_attempts = 3;
+    long request_timeout_seconds = 120;
     long connect_timeout_seconds = 30;
     long low_speed_time_seconds = 60;
     long low_speed_limit = 1024;

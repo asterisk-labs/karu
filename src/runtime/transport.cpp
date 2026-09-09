@@ -21,6 +21,11 @@ namespace {
 
 constexpr std::uint64_t kDrainLimit = 256u << 10;
 
+Failure timeout_failure(std::string_view uri,
+                        std::string_view reason = "request timeout exceeded") {
+    return {KARU_TIMEOUT, concat(redact_url(uri), ": ", reason)};
+}
+
 long curl_http_version(HttpVersion version) noexcept {
     switch (version) {
     case HttpVersion::Automatic:
@@ -513,8 +518,9 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
         CURLOPT_ERRORBUFFER, transfer.http_buffers->error.data(), CURLOPT_NOSIGNAL, 1L,
         CURLOPT_PATH_AS_IS, 1L, CURLOPT_UNRESTRICTED_AUTH, 0L, CURLOPT_MAXREDIRS, 10L,
         CURLOPT_TCP_KEEPALIVE, 1L, CURLOPT_CONNECTTIMEOUT, options.connect_timeout_seconds,
-        CURLOPT_LOW_SPEED_LIMIT, options.low_speed_limit, CURLOPT_LOW_SPEED_TIME,
-        options.low_speed_time_seconds, CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
+        CURLOPT_TIMEOUT_MS, transfer.deadline.curl_timeout_ms(), CURLOPT_LOW_SPEED_LIMIT,
+        options.low_speed_limit, CURLOPT_LOW_SPEED_TIME, options.low_speed_time_seconds,
+        CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
     if (!configured)
         return configured;
     if (auto protocols = restrict_to_http(transfer.easy.get()); !protocols)
@@ -553,11 +559,17 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
     std::string region_hint;
     bool region_retried = false;
     bool credentials_retried = false;
+    RequestDeadline deadline;
+    deadline.start(options.request_timeout_seconds);
     for (int attempt = 0; attempt < options.max_attempts;) {
+        if (deadline.expired())
+            return std::unexpected(timeout_failure(locator.resolved.canonical_uri));
         auto request = request_builder.prepare(locator, 0, 1, region_hint);
         if (!request) {
             return std::unexpected(Failure{request.error().status, request.error().message});
         }
+        if (deadline.expired())
+            return std::unexpected(timeout_failure(request->url));
         auto headers = build_headers(request->headers, "bytes=0-0");
         if (!headers) {
             return std::unexpected(Failure{KARU_ERR_NOMEM, headers.error()});
@@ -570,6 +582,10 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
         }
         if (auto result = apply_http_options(easy, request->http); !result)
             return std::unexpected(Failure{KARU_ERR_NETWORK, result.error()});
+        if (auto result = set_option(easy, CURLOPT_TIMEOUT_MS, deadline.curl_timeout_ms());
+            !result) {
+            return std::unexpected(Failure{KARU_ERR_NETWORK, result.error()});
+        }
         region_hint = request->routing_region;
 
         state = SizeState{.easy = easy,
@@ -648,6 +664,9 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
                                               http_status, " response to size request")});
         }
 
+        if (deadline.expired())
+            return std::unexpected(timeout_failure(request->url));
+
         ++attempt;
         const bool request_timeout =
             http_status == 400 && error_body.find("RequestTimeout") != std::string_view::npos;
@@ -657,7 +676,11 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
             std::uniform_int_distribution<int> jitter(0, base);
             const int delay = state.retry_after > 0 ? std::min(state.retry_after, 60) * 1000
                                                     : base + jitter(random);
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+            const auto wait = std::chrono::milliseconds(delay);
+            if (!deadline.can_wait_for(wait))
+                return std::unexpected(timeout_failure(
+                    request->url, "request timeout leaves no time for another attempt"));
+            std::this_thread::sleep_for(wait);
             continue;
         }
 

@@ -6,6 +6,7 @@ import http.server
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 
 
@@ -46,6 +47,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/retry" and Handler.retries == 0:
             Handler.retries += 1
             self.reply(503, b"try again", Retry_After="0")
+            return
+        if path == "/retry-after-deadline":
+            self.reply(503, b"try later", Retry_After="60")
             return
         if path == "/large-error-retry":
             if Handler.large_error_retries == 0:
@@ -134,6 +138,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not range_header.startswith("bytes=") or "-" not in range_header:
             self.reply(400, b"missing range")
             return
+        if path == "/slow":
+            time.sleep(4)
         first_text, last_text = range_header[6:].split("-", 1)
         first = int(first_text)
         last = min(int(last_text), len(DATA) - 1)

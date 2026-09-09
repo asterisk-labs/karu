@@ -115,7 +115,9 @@ void test_config_precedence() {
     OK(vocabulary.set("CURL_CA_BUNDLE", "/certificates.pem"));
     OK(vocabulary.set("GDAL_HTTP_PROXY", "http://proxy.example.test:8080"));
     OK(vocabulary.set("GDAL_HTTP_USERAGENT", "karu-test"));
+    OK(vocabulary.set("KARU_REQUEST_TIMEOUT", "17"));
     OK(vocabulary.freeze());
+    EQ(must_freeze(vocabulary).client_options().request_timeout_seconds, 17L);
 
     RequestBuilder http_builder(must_freeze(vocabulary));
     auto http_request =
@@ -150,6 +152,10 @@ void test_config_precedence() {
     karu::ConfigBuilder invalid_http(false);
     OK(invalid_http.set("GDAL_HTTP_VERSION", "3"));
     OK(!invalid_http.freeze());
+
+    karu::ConfigBuilder invalid_timeout(false);
+    OK(invalid_timeout.set("KARU_REQUEST_TIMEOUT", "86401"));
+    OK(!invalid_timeout.freeze());
 
 #ifdef _WIN32
     constexpr const char* home_name = "USERPROFILE";

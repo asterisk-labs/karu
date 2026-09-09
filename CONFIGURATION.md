@@ -31,6 +31,7 @@ under their canonical name. `SOURCE_PROXY_URL` is an alias for
 | `KARU_COALESCE_AMPLIFICATION` | `16` | largest ratio of transferred bytes to requested bytes in a merge |
 | `KARU_RANGE_FALLBACK_LIMIT` | `8388608` | largest prefix Karu may discard when a server ignores `Range`; `0` disables nonzero-offset fallback |
 | `KARU_MAX_ATTEMPTS` / `KARU_MAX_RETRIES` | `3` | total attempts for transient failures |
+| `KARU_REQUEST_TIMEOUT` | `120` | total seconds available to one remote transfer, including retry delays; `0` disables the deadline |
 | `KARU_CONNECT_TIMEOUT` | `30` | connection timeout in seconds |
 | `KARU_LOW_SPEED_TIME` | `60` | seconds below the low-speed threshold before aborting |
 | `KARU_LOW_SPEED_LIMIT` | `1024` | low-speed threshold in bytes per second |

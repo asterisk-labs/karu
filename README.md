@@ -45,8 +45,9 @@ token created by the Hugging Face CLI.
 | Source Cooperative | `source://account/product/key` | `/vsisource/account/product/key` |
 
 `/vsisubfile/OFFSET_LENGTH,<path>` and `#bytes=FIRST-LAST` select a byte
-window. Karu does not use separate `_streaming` paths because all remote
-reads are stateless.
+window. When combined, `#bytes` defines the inner window and each surrounding
+`/vsisubfile` offset is relative to that window. Karu does not use separate
+`_streaming` paths because all remote reads are stateless.
 
 Source Cooperative reads use `https://data.source.coop` and are anonymous by
 default. Set `SOURCE_PROFILE=source-coop` after `source-coop login` when a

@@ -421,6 +421,10 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
         parse_integer<int>("KARU_MAX_ATTEMPTS", global("KARU_MAX_ATTEMPTS", "3"), 1, 16);
     if (!attempts)
         return std::unexpected(attempts.error());
+    auto request_timeout = parse_integer<long>("KARU_REQUEST_TIMEOUT",
+                                               global("KARU_REQUEST_TIMEOUT", "120"), 0, 86400);
+    if (!request_timeout)
+        return std::unexpected(request_timeout.error());
     auto connect =
         parse_integer<long>("KARU_CONNECT_TIMEOUT", global("KARU_CONNECT_TIMEOUT", "30"), 1, 3600);
     if (!connect)
@@ -442,6 +446,7 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
                                    .coalesce_amplification = *coalesce_amplification,
                                    .range_fallback_limit = *range_fallback_limit,
                                    .max_attempts = *attempts,
+                                   .request_timeout_seconds = *request_timeout,
                                    .connect_timeout_seconds = *connect,
                                    .low_speed_time_seconds = *low_time,
                                    .low_speed_limit = *low_limit};
