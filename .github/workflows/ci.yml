@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC
+            os: ubuntu-24.04
+            cc: gcc
+            cxx: g++
+          - name: Linux Clang
+            os: ubuntu-24.04
+            cc: clang-19
+            cxx: clang++-19
+          - name: macOS AppleClang
+            os: macos-15
+            cc: clang
+            cxx: clang++
+          - name: Windows MSVC
+            os: windows-2022
+            cc: ''
+            cxx: ''
+    steps:
+      - name: Check out Karu
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install native dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          packages=(libcurl4-openssl-dev libssl-dev)
+          if [[ "${{ matrix.name }}" == "Linux Clang" ]]; then
+            packages+=(clang-19)
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "${packages[@]}"
+
+      - name: Install native dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install curl:x64-windows openssl:x64-windows
+
+      - name: Install native dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl@3
+
+      - name: Configure
+        shell: bash
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          args=(
+            -DCMAKE_BUILD_TYPE=Release
+            -DKARU_BUILD_TESTS=ON
+            -DKARU_WERROR=ON
+          )
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            args+=("-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake")
+          elif [[ "$RUNNER_OS" == macOS ]]; then
+            args+=("-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)")
+          fi
+          cmake -S . -B build "${args[@]}"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Install
+        shell: bash
+        run: cmake --install build --config Release --prefix "$GITHUB_WORKSPACE/build/stage"
+
+      - name: Test installed package
+        shell: bash
+        run: |
+          args=(
+            "-DCMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/build/stage"
+            -DCMAKE_BUILD_TYPE=Release
+          )
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            args+=("-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake")
+          elif [[ "$RUNNER_OS" == macOS ]]; then
+            args+=("-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)")
+          fi
+          cmake -S tests/package -B build/package-test "${args[@]}"
+          cmake --build build/package-test --config Release --parallel 4
+          ctest --test-dir build/package-test -C Release --output-on-failure
+
+  sanitizers:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan + UBSan
+            sanitize: address,undefined
+          - name: TSan
+            sanitize: thread
+    steps:
+      - name: Check out Karu
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install native dependencies
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends
+          libcurl4-openssl-dev libssl-dev
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DKARU_BUILD_TESTS=ON
+          -DKARU_SANITIZE=${{ matrix.sanitize }}
+
+      - name: Build
+        run: cmake --build build --parallel 4
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build --output-on-failure
