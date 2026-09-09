@@ -98,24 +98,23 @@ void test_config_precedence() {
 
     OK(builder.set("AWS_DEFAULT_REGION", "eu-west-1"));
     OK(builder.set_path("/vsis3/a/", "AWS_DEFAULT_PROFILE", "bucket-profile"));
-    OK(builder.set("CPL_AWS_CREDENTIALS_FILE", "/credentials"));
+    OK(builder.set("AWS_SHARED_CREDENTIALS_FILE", "/credentials"));
     snapshot = must_freeze(builder);
     EQS(snapshot.option("/vsis3/b/k", "AWS_REGION"), "eu-west-1");
     EQS(snapshot.option("/vsis3/a/k", "AWS_PROFILE"), "bucket-profile");
     EQS(snapshot.option("/vsis3/a/k", "AWS_SHARED_CREDENTIALS_FILE"), "/credentials");
 
     karu::ConfigBuilder vocabulary(false);
-    OK(vocabulary.set("GS_OAUTH2_PRIVATE_KEY_FILE", "/key.pem"));
-    OK(vocabulary.set("GS_OAUTH2_CLIENT_EMAIL", "reader@example.test"));
-    OK(vocabulary.set("GS_OAUTH2_SCOPE", "scope"));
-    OK(vocabulary.set("CPL_GS_CREDENTIALS_FILE", "/credentials.boto"));
-    OK(vocabulary.set("CPL_MACHINE_IS_GCE", "NO"));
+    OK(vocabulary.set("GCS_PRIVATE_KEY_FILE", "/key.pem"));
+    OK(vocabulary.set("GCS_CLIENT_EMAIL", "reader@example.test"));
+    OK(vocabulary.set("GCS_SCOPE", "scope"));
+    OK(vocabulary.set("GCS_METADATA_DISABLED", "NO"));
     OK(vocabulary.set("AZURE_IMDS_OBJECT_ID", "identity"));
     OK(vocabulary.set("SOURCE_PROFILE", "source-coop"));
-    OK(vocabulary.set("GDAL_HTTP_VERSION", "2TLS"));
+    OK(vocabulary.set("KARU_HTTP_VERSION", "2TLS"));
     OK(vocabulary.set("CURL_CA_BUNDLE", "/certificates.pem"));
-    OK(vocabulary.set("GDAL_HTTP_PROXY", "http://proxy.example.test:8080"));
-    OK(vocabulary.set("GDAL_HTTP_USERAGENT", "karu-test"));
+    OK(vocabulary.set("KARU_HTTP_PROXY", "http://proxy.example.test:8080"));
+    OK(vocabulary.set("KARU_HTTP_USER_AGENT", "karu-test"));
     OK(vocabulary.set("KARU_REQUEST_TIMEOUT", "17"));
     OK(vocabulary.freeze());
     EQ(must_freeze(vocabulary).client_options().request_timeout_seconds, 17L);
@@ -133,16 +132,16 @@ void test_config_precedence() {
 
 #ifdef __linux__
     {
-        ScopedEnvironment gdal_ca("GDAL_CURL_CA_BUNDLE", nullptr);
+        ScopedEnvironment karu_ca("KARU_HTTP_CA_BUNDLE", nullptr);
         ScopedEnvironment curl_ca("CURL_CA_BUNDLE", nullptr);
         ScopedEnvironment ssl_ca("SSL_CERT_FILE", nullptr);
-        ScopedEnvironment ca_path("GDAL_HTTP_CAPATH", nullptr);
+        ScopedEnvironment ca_path("KARU_HTTP_CA_PATH", nullptr);
         ConfigBuilder detected(true);
         const auto options = must_freeze(detected).http_options("https://example.test");
         OK(!options.ca_bundle.empty());
         OK(std::filesystem::is_regular_file(options.ca_bundle));
 
-        OK(detected.set("GDAL_HTTP_CAPATH", "/custom/certificates"));
+        OK(detected.set("KARU_HTTP_CA_PATH", "/custom/certificates"));
         const auto overridden = must_freeze(detected).http_options("https://example.test");
         OK(overridden.ca_bundle.empty());
         EQS(overridden.ca_path, "/custom/certificates");
@@ -169,7 +168,7 @@ void test_config_precedence() {
     OK(!invalid.set_path("/vsis3/", "KARU_CONCURRENCY", "2"));
 
     karu::ConfigBuilder invalid_http(false);
-    OK(invalid_http.set("GDAL_HTTP_VERSION", "3"));
+    OK(invalid_http.set("KARU_HTTP_VERSION", "3"));
     OK(!invalid_http.freeze());
 
     karu::ConfigBuilder invalid_timeout(false);

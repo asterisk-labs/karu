@@ -51,7 +51,7 @@ std::expected<PreparedRequest, RequestError> prepare_hugging_face(const ConfigSn
         request.headers.emplace_back("Authorization", "Bearer " + *token);
     if (!if_match.empty())
         request.headers.emplace_back("If-Match", if_match);
-    if (auto headers = add_gdal_headers(config, object.canonical_uri, request.headers, true);
+    if (auto headers = add_configured_headers(config, object.canonical_uri, request.headers, true);
         !headers) {
         return std::unexpected(headers.error());
     }

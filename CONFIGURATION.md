@@ -8,17 +8,17 @@ prefix. A client copies the result and never reads the environment again.
 `karu_config_create_empty()` starts without environment values or implicit
 home-directory or metadata-service credential discovery; it is useful for
 hermetic clients and tests. Explicit credential files, metadata endpoints, or
-the corresponding `..._SKIP=NO`/`..._DISABLED=NO` options still opt back in.
+the corresponding `..._DISABLED=NO` options still opt back in.
 
 Names are case-insensitive. Unknown names are rejected instead of being
 silently ignored.
 
 Aliases are canonicalized before precedence is evaluated. In particular,
 `AWS_DEFAULT_PROFILE`, `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL_S3`,
-`AWS_ENDPOINT_URL`, `CPL_AWS_CREDENTIALS_FILE`, `GOOGLE_STORAGE_ENDPOINT`, and
-`HUGGING_FACE_HUB_TOKEN` cannot bypass a more specific path option written
-under their canonical name. `SOURCE_PROXY_URL` is an alias for
-`SOURCE_ENDPOINT`.
+`AWS_ENDPOINT_URL`, and `HUGGING_FACE_HUB_TOKEN` cannot bypass a more specific
+path option written under their canonical name. `SOURCE_PROXY_URL` is an alias
+for `SOURCE_ENDPOINT`. `CURL_CA_BUNDLE` and `SSL_CERT_FILE` are aliases for
+`KARU_HTTP_CA_BUNDLE`.
 
 ## Runtime
 
@@ -47,7 +47,7 @@ not persist object data or metadata beyond that batch.
 | `AWS_SECRET_ACCESS_KEY` | static secret; must accompany the access key ID |
 | `AWS_SESSION_TOKEN` | optional temporary session token |
 | `AWS_PROFILE` / `AWS_DEFAULT_PROFILE` | shared profile name |
-| `AWS_SHARED_CREDENTIALS_FILE` / `CPL_AWS_CREDENTIALS_FILE` | credentials file path |
+| `AWS_SHARED_CREDENTIALS_FILE` | credentials file path |
 | `AWS_CONFIG_FILE` | config file path |
 | `AWS_REGION` / `AWS_DEFAULT_REGION` | SigV4 region; default `us-east-1` |
 | `AWS_S3_ENDPOINT` | service-root host or URL |
@@ -99,7 +99,7 @@ the proxy.
 | `SOURCE_NO_SIGN_REQUEST` | force (`YES`) or disable (`NO`) anonymous access |
 
 `SOURCE_PROXY_URL` is a compatibility spelling for the Source data-service
-endpoint. It is not an HTTP forward-proxy setting; use `GDAL_HTTP_PROXY` for
+endpoint. It is not an HTTP forward-proxy setting; use `KARU_HTTP_PROXY` for
 that.
 
 Installing a Source credential option or a
@@ -128,34 +128,32 @@ The profile's `endpoint_url` is intentionally ignored because
 
 | Option | Purpose |
 |---|---|
-| `GS_OAUTH2_ACCESS_TOKEN` | static bearer token |
-| `GS_ACCESS_KEY_ID` | interoperable HMAC access ID |
-| `GS_SECRET_ACCESS_KEY` | interoperable HMAC secret |
+| `GCS_ACCESS_TOKEN` | static bearer token |
+| `GCS_HMAC_ACCESS_KEY_ID` | interoperable HMAC access ID |
+| `GCS_HMAC_SECRET_ACCESS_KEY` | interoperable HMAC secret |
 | `GOOGLE_APPLICATION_CREDENTIALS` | ADC JSON path |
 | `CLOUDSDK_CONFIG` | directory containing gcloud's ADC JSON |
-| `GS_OAUTH2_REFRESH_TOKEN` | authorized-user refresh token |
-| `GS_OAUTH2_CLIENT_ID` | authorized-user client ID |
-| `GS_OAUTH2_CLIENT_SECRET` | authorized-user client secret |
-| `GS_OAUTH2_PRIVATE_KEY` | inline PEM key for legacy GDAL-style service-account OAuth |
-| `GS_OAUTH2_PRIVATE_KEY_FILE` | PEM key file; alternative to the inline key |
-| `GS_OAUTH2_CLIENT_EMAIL` | service-account email used with a PEM key |
-| `GS_OAUTH2_SCOPE` | OAuth scope; defaults to read-only object access |
-| `CPL_GS_CREDENTIALS_FILE` | legacy `.boto` HMAC or refresh-token file |
-| `GS_USER_PROJECT` | requester-pays billing project header |
-| `CPL_GS_ENDPOINT` / `GOOGLE_STORAGE_ENDPOINT` | XML API service-root URL |
-| `CPL_GCE_CREDENTIALS_URL` | metadata token endpoint |
-| `CPL_MACHINE_IS_GCE` | explicitly enable GCE metadata discovery |
-| `CPL_GCE_SKIP` | disable metadata discovery |
-| `GS_NO_SIGN_REQUEST` | explicit anonymous access |
+| `GCS_REFRESH_TOKEN` | authorized-user refresh token |
+| `GCS_CLIENT_ID` | authorized-user client ID |
+| `GCS_CLIENT_SECRET` | authorized-user client secret |
+| `GCS_PRIVATE_KEY` | inline service-account PEM key |
+| `GCS_PRIVATE_KEY_FILE` | PEM key file; alternative to the inline key |
+| `GCS_CLIENT_EMAIL` | service-account email used with a PEM key |
+| `GCS_SCOPE` | OAuth scope; defaults to read-only object access |
+| `GCS_USER_PROJECT` | requester-pays billing project header |
+| `GCS_ENDPOINT` | XML API service-root URL |
+| `GCS_METADATA_ENDPOINT` | metadata token endpoint |
+| `GCS_METADATA_DISABLED` | disable metadata discovery |
+| `GCS_NO_SIGN_REQUEST` | explicit anonymous access |
 
 ADC supports `service_account`, `authorized_user`, and OIDC
 `external_account` sources backed by a file or a simple URL. Service-account
 impersonation is supported. Environment-specific external-account suppliers
 can use the callback API.
 
-`CPL_GS_ENDPOINT` is a long-standing GDAL implementation/testing spelling,
-although it is not listed in GDAL's public VSI option table. Karu documents it
-as its GCS custom-endpoint extension instead of adding a new `GS_HTTPS` name.
+With environment discovery enabled, metadata credentials are attempted after
+ADC files. An explicit `GCS_METADATA_ENDPOINT` also enables that source for an
+otherwise empty configuration. `GCS_METADATA_DISABLED=YES` always disables it.
 
 ## Azure Storage
 
@@ -185,26 +183,26 @@ Connection-string `DefaultEndpointsProtocol`, `EndpointSuffix`, `BlobEndpoint`,
 and `DfsEndpoint` values are honored. `AZURE_AUTHORITY_HOST`,
 `AZURE_STORAGE_SCOPE`, and
 `AZURE_STORAGE_RESOURCE` keep identity and storage endpoints explicit for
-sovereign clouds. `AZURE_STORAGE_ENDPOINT` is a Karu convenience extension;
-GDAL users can keep using the standard endpoint fields in
-`AZURE_STORAGE_CONNECTION_STRING` unchanged.
+sovereign clouds. `AZURE_STORAGE_ENDPOINT` is a convenience option; the
+standard endpoint fields in `AZURE_STORAGE_CONNECTION_STRING` are also
+supported.
 
 ## HTTP and Hugging Face
 
-`GDAL_HTTP_HEADERS` accepts newline-separated `Name: value` entries. HTTP and
+`KARU_HTTP_HEADERS` accepts newline-separated `Name: value` entries. HTTP and
 Hugging Face requests may follow HTTP(S) redirects; authenticated cloud
 requests return a redirect as an error so that credentials and signatures are
 never replayed against a different request target.
 
 | Option | Purpose |
 |---|---|
-| `GDAL_HTTP_HEADERS` | newline-separated request headers |
-| `GDAL_HTTP_VERSION` | `1.1` (default), `2TLS`/`2`, `2PRIOR_KNOWLEDGE`, or `AUTO` |
-| `GDAL_CURL_CA_BUNDLE` / `CURL_CA_BUNDLE` / `SSL_CERT_FILE` | explicit CA bundle passed to libcurl |
-| `GDAL_HTTP_CAPATH` | directory containing CA certificates |
-| `GDAL_HTTP_PROXY` | explicit HTTP proxy; libcurl proxy environment variables also work |
-| `GDAL_HTTP_PROXYUSERPWD` | proxy credentials in `user:password` form |
-| `GDAL_HTTP_USERAGENT` | explicit User-Agent value |
+| `KARU_HTTP_HEADERS` | newline-separated request headers |
+| `KARU_HTTP_VERSION` | `1.1` (default), `2TLS`/`2`, `2PRIOR_KNOWLEDGE`, or `AUTO` |
+| `KARU_HTTP_CA_BUNDLE` / `CURL_CA_BUNDLE` / `SSL_CERT_FILE` | explicit CA bundle passed to libcurl |
+| `KARU_HTTP_CA_PATH` | directory containing CA certificates |
+| `KARU_HTTP_PROXY` | explicit HTTP proxy; libcurl proxy environment variables also work |
+| `KARU_HTTP_PROXY_CREDENTIALS` | proxy credentials in `user:password` form |
+| `KARU_HTTP_USER_AGENT` | explicit User-Agent value |
 | `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | bearer token; takes precedence over token files |
 | `HF_TOKEN_PATH` | path to the token written by Hugging Face tooling |
 | `HF_HOME` | Hugging Face state directory; the token is read from `<HF_HOME>/token` |
@@ -225,7 +223,7 @@ reports an existing but unreadable token file as a credential error.
 `Range` and `Host` are always owned by Karu. Cloud and Hugging Face requests
 also reserve authentication and provider-signature headers. Use the dedicated
 credential options or callback instead of injecting those headers through
-`GDAL_HTTP_HEADERS`.
+`KARU_HTTP_HEADERS`.
 
 Object transfers and their redirects are restricted to HTTP and HTTPS.
 On Linux, Karu uses the system CA bundle available at runtime when none of the

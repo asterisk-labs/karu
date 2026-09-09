@@ -68,8 +68,8 @@ RequestBuilder::prepare(const Locator& locator, std::uint64_t first, std::uint64
     auto prepared = provider->prepare_request(request);
     if (!prepared)
         return std::unexpected(prepared.error());
-    if (auto headers =
-            backends::add_gdal_headers(config_, object.canonical_uri, prepared->headers, true);
+    if (auto headers = backends::add_configured_headers(config_, object.canonical_uri,
+                                                        prepared->headers, true);
         !headers) {
         return std::unexpected(headers.error());
     }

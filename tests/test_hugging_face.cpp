@@ -18,7 +18,7 @@ void test_hugging_face_request() {
     ConfigBuilder config(false);
     OK(config.set("HF_ENDPOINT", "https://mirror.example.test/base/"));
     OK(config.set("HF_TOKEN", "token"));
-    OK(config.set("GDAL_HTTP_HEADERS", "X-Karu-Test: yes"));
+    OK(config.set("KARU_HTTP_HEADERS", "X-Karu-Test: yes"));
     RequestBuilder request_builder(must_freeze(config));
     auto request = request_builder.prepare(Locator{std::move(resolved)}, 0, 1, {}, "\"etag\"");
     OK(request.has_value());

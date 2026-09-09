@@ -54,10 +54,10 @@ oauth_token(const std::string& url, const std::string& form,
 [[nodiscard]] std::expected<ProviderCredentials, RequestError>
 copy_callback_credentials(const std::shared_ptr<CredentialCallback>& callback,
                           karu_credentials_kind kind, std::string_view path);
-[[nodiscard]] std::expected<void, RequestError> add_gdal_headers(const ConfigSnapshot& config,
-                                                                 std::string_view path,
-                                                                 std::vector<Header>& headers,
-                                                                 bool protect_authentication);
+[[nodiscard]] std::expected<void, RequestError> add_configured_headers(const ConfigSnapshot& config,
+                                                                       std::string_view path,
+                                                                       std::vector<Header>& headers,
+                                                                       bool protect_authentication);
 
 } // namespace karu::backends
 

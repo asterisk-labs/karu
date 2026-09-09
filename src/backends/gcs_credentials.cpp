@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <array>
 #include <ctime>
-#include <filesystem>
 #include <memory>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -136,8 +135,8 @@ gcs_service_account(std::string_view json, const ConfigSnapshot& config, std::st
             RequestError{KARU_ERR_CREDENTIALS, "GCS service_account JSON is incomplete"});
     const std::string token_uri =
         json_string(json, "token_uri").value_or("https://oauth2.googleapis.com/token");
-    const std::string scope = config.option(path, "GS_OAUTH2_SCOPE",
-                                            "https://www.googleapis.com/auth/devstorage.read_only");
+    const std::string scope =
+        config.option(path, "GCS_SCOPE", "https://www.googleapis.com/auth/devstorage.read_only");
     return gcs_service_account_values(*email, normalize_pem(*private_key), token_uri, scope,
                                       config.http_options(path));
 }
@@ -145,11 +144,11 @@ gcs_service_account(std::string_view json, const ConfigSnapshot& config, std::st
 std::expected<ProviderCredentials, RequestError>
 gcs_authorized_user(std::string_view json, const ConfigSnapshot& config, std::string_view path) {
     const std::string client_id =
-        config.option(path, "GS_OAUTH2_CLIENT_ID", json_string(json, "client_id").value_or(""));
-    const std::string client_secret = config.option(
-        path, "GS_OAUTH2_CLIENT_SECRET", json_string(json, "client_secret").value_or(""));
-    const std::string refresh_token = config.option(
-        path, "GS_OAUTH2_REFRESH_TOKEN", json_string(json, "refresh_token").value_or(""));
+        config.option(path, "GCS_CLIENT_ID", json_string(json, "client_id").value_or(""));
+    const std::string client_secret =
+        config.option(path, "GCS_CLIENT_SECRET", json_string(json, "client_secret").value_or(""));
+    const std::string refresh_token =
+        config.option(path, "GCS_REFRESH_TOKEN", json_string(json, "refresh_token").value_or(""));
     const std::string token_uri =
         json_string(json, "token_uri").value_or("https://oauth2.googleapis.com/token");
     if (client_id.empty() || client_secret.empty() || refresh_token.empty()) {
@@ -172,8 +171,8 @@ gcs_external_account(std::string_view json, const ConfigSnapshot& config, std::s
         json_string(json, "token_url").value_or("https://sts.googleapis.com/v1/token");
     const auto subject_file = json_string(json, "file");
     const auto subject_url = json_string(json, "url");
-    const std::string scope = config.option(path, "GS_OAUTH2_SCOPE",
-                                            "https://www.googleapis.com/auth/devstorage.read_only");
+    const std::string scope =
+        config.option(path, "GCS_SCOPE", "https://www.googleapis.com/auth/devstorage.read_only");
     if (!audience || !subject_type || (!subject_file && !subject_url)) {
         return std::unexpected(RequestError{
             KARU_ERR_CREDENTIALS, "GCS external_account credential_source is incomplete"});
@@ -244,9 +243,9 @@ gcs_external_account(std::string_view json, const ConfigSnapshot& config, std::s
 std::expected<ProviderCredentials, RequestError> load_gcs_credentials(const ConfigSnapshot& config,
                                                                       std::string_view path) {
     ProviderCredentials direct;
-    direct.bearer_token = config.option(path, "GS_OAUTH2_ACCESS_TOKEN");
-    direct.access_key_id = config.option(path, "GS_ACCESS_KEY_ID");
-    direct.secret_access_key = config.option(path, "GS_SECRET_ACCESS_KEY");
+    direct.bearer_token = config.option(path, "GCS_ACCESS_TOKEN");
+    direct.access_key_id = config.option(path, "GCS_HMAC_ACCESS_KEY_ID");
+    direct.secret_access_key = config.option(path, "GCS_HMAC_SECRET_ACCESS_KEY");
     if (!direct.bearer_token.empty())
         return direct;
     if (!direct.access_key_id.empty() || !direct.secret_access_key.empty()) {
@@ -258,7 +257,7 @@ std::expected<ProviderCredentials, RequestError> load_gcs_credentials(const Conf
         return direct;
     }
 
-    if (!config.option(path, "GS_OAUTH2_REFRESH_TOKEN").empty())
+    if (!config.option(path, "GCS_REFRESH_TOKEN").empty())
         return gcs_authorized_user("{}", config, path);
 
     std::string adc_path =
@@ -295,15 +294,14 @@ std::expected<ProviderCredentials, RequestError> load_gcs_credentials(const Conf
                          "GOOGLE_APPLICATION_CREDENTIALS has unsupported type '" + type + "'"});
     }
 
-    std::string private_key = config.option(path, "GS_OAUTH2_PRIVATE_KEY");
+    std::string private_key = config.option(path, "GCS_PRIVATE_KEY");
     const std::string private_key_file =
-        config.expand_user_path(config.option(path, "GS_OAUTH2_PRIVATE_KEY_FILE"));
-    const std::string client_email = config.option(path, "GS_OAUTH2_CLIENT_EMAIL");
+        config.expand_user_path(config.option(path, "GCS_PRIVATE_KEY_FILE"));
+    const std::string client_email = config.option(path, "GCS_CLIENT_EMAIL");
     if (!private_key.empty() || !private_key_file.empty() || !client_email.empty()) {
         if (!private_key.empty() && !private_key_file.empty()) {
             return std::unexpected(RequestError{
-                KARU_ERR_CREDENTIALS,
-                "set only one of GS_OAUTH2_PRIVATE_KEY and GS_OAUTH2_PRIVATE_KEY_FILE"});
+                KARU_ERR_CREDENTIALS, "set only one of GCS_PRIVATE_KEY and GCS_PRIVATE_KEY_FILE"});
         }
         if (private_key.empty() && !private_key_file.empty()) {
             auto loaded = read_text_file(private_key_file, "GCS OAuth private key");
@@ -312,83 +310,31 @@ std::expected<ProviderCredentials, RequestError> load_gcs_credentials(const Conf
             private_key = std::move(*loaded);
         }
         if (private_key.empty() || client_email.empty()) {
-            return std::unexpected(RequestError{
-                KARU_ERR_CREDENTIALS,
-                "GS_OAUTH2_CLIENT_EMAIL and a GCS OAuth private key must be set together"});
+            return std::unexpected(
+                RequestError{KARU_ERR_CREDENTIALS,
+                             "GCS_CLIENT_EMAIL and a GCS private key must be set together"});
         }
         const std::string scope = config.option(
-            path, "GS_OAUTH2_SCOPE", "https://www.googleapis.com/auth/devstorage.read_only");
+            path, "GCS_SCOPE", "https://www.googleapis.com/auth/devstorage.read_only");
         return gcs_service_account_values(client_email, normalize_pem(std::move(private_key)),
                                           "https://oauth2.googleapis.com/token", scope,
                                           config.http_options(path));
     }
 
-    const bool explicit_boto = config.has_option(path, "CPL_GS_CREDENTIALS_FILE");
-    std::string boto_path = config.expand_user_path(config.option(path, "CPL_GS_CREDENTIALS_FILE"));
-    if (boto_path.empty() && config.discover_default_credentials())
-        boto_path = config.expand_user_path("~/.boto");
-    auto boto_exists = path_exists(boto_path, "GCS credentials file");
-    if (!boto_exists)
-        return std::unexpected(boto_exists.error());
-    if (explicit_boto && !*boto_exists) {
-        return std::unexpected(RequestError{
-            KARU_ERR_CREDENTIALS, "GCS credentials file does not exist: '" + boto_path + "'"});
-    }
-    if (!boto_path.empty() && *boto_exists) {
-        auto file = read_ini(boto_path, "GCS credentials");
-        if (!file)
-            return std::unexpected(file.error());
-        IniSection values;
-        for (const auto& [section, entries] : *file) {
-            const std::string normalized = lower(section);
-            if (normalized != "credentials" && normalized != "oauth2")
-                continue;
-            for (const auto& [name, value] : entries)
-                values.insert_or_assign(name, value);
-        }
-        const auto value = [&](std::string_view name) {
-            const auto found = values.find(std::string(name));
-            return found == values.end() ? std::string{} : found->second;
-        };
-        ProviderCredentials hmac_credentials;
-        hmac_credentials.access_key_id = value("gs_access_key_id");
-        hmac_credentials.secret_access_key = value("gs_secret_access_key");
-        if (!hmac_credentials.access_key_id.empty() ||
-            !hmac_credentials.secret_access_key.empty()) {
-            if (hmac_credentials.access_key_id.empty() ||
-                hmac_credentials.secret_access_key.empty()) {
-                return std::unexpected(
-                    RequestError{KARU_ERR_CREDENTIALS,
-                                 "CPL_GS_CREDENTIALS_FILE has an incomplete GCS HMAC key pair"});
-            }
-            return hmac_credentials;
-        }
-        const std::string refresh_token = value("gs_oauth2_refresh_token");
-        if (!refresh_token.empty()) {
-            const std::string json = "{\"client_id\":\"" + json_escape(value("client_id")) +
-                                     "\",\"client_secret\":\"" +
-                                     json_escape(value("client_secret")) +
-                                     "\",\"refresh_token\":\"" + json_escape(refresh_token) + "\"}";
-            return gcs_authorized_user(json, config, path);
-        }
-    }
-
-    const bool try_metadata = config.discover_default_credentials() ||
-                              config.has_option(path, "CPL_GCE_CREDENTIALS_URL") ||
-                              option_is_true(config.option(path, "CPL_MACHINE_IS_GCE", "NO")) ||
-                              (config.has_option(path, "CPL_GCE_SKIP") &&
-                               !option_is_true(config.option(path, "CPL_GCE_SKIP")));
-    if (try_metadata && !option_is_true(config.option(path, "CPL_GCE_SKIP", "NO"))) {
+    const bool metadata_configured = config.has_option(path, "GCS_METADATA_ENDPOINT") ||
+                                     config.has_option(path, "GCS_METADATA_DISABLED");
+    const bool try_metadata = config.discover_default_credentials() || metadata_configured;
+    if (try_metadata && !option_is_true(config.option(path, "GCS_METADATA_DISABLED", "NO"))) {
         const std::string endpoint = config.option(
-            path, "CPL_GCE_CREDENTIALS_URL",
+            path, "GCS_METADATA_ENDPOINT",
             "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/"
             "default/token");
         auto response = credential_request("GET", endpoint, {}, {{"Metadata-Flavor", "Google"}}, 1,
                                            config.http_options(path));
-        if (!response && config.has_option(path, "CPL_GCE_CREDENTIALS_URL"))
+        if (!response && config.has_option(path, "GCS_METADATA_ENDPOINT"))
             return std::unexpected(response.error());
         if (response && (response->status < 200 || response->status >= 300) &&
-            config.has_option(path, "CPL_GCE_CREDENTIALS_URL")) {
+            config.has_option(path, "GCS_METADATA_ENDPOINT")) {
             return std::unexpected(
                 RequestError{KARU_ERR_CREDENTIALS,
                              concat("GCS credential endpoint returned HTTP ", response->status)});
@@ -400,7 +346,7 @@ std::expected<ProviderCredentials, RequestError> load_gcs_credentials(const Conf
                                 json_integer(response->body, "expires_in").value_or(3600);
             if (!result.bearer_token.empty())
                 return result;
-            if (config.has_option(path, "CPL_GCE_CREDENTIALS_URL")) {
+            if (config.has_option(path, "GCS_METADATA_ENDPOINT")) {
                 return std::unexpected(RequestError{
                     KARU_ERR_CREDENTIALS, "GCS credential endpoint response has no access token"});
             }

@@ -403,10 +403,10 @@ copy_callback_credentials(const std::shared_ptr<CredentialCallback>& callback,
                                raw.expires_at};
 }
 
-std::expected<void, RequestError> add_gdal_headers(const ConfigSnapshot& config,
-                                                   std::string_view path,
-                                                   std::vector<Header>& headers,
-                                                   bool protect_authentication) {
+std::expected<void, RequestError> add_configured_headers(const ConfigSnapshot& config,
+                                                         std::string_view path,
+                                                         std::vector<Header>& headers,
+                                                         bool protect_authentication) {
     for (const auto& [name, value] : headers) {
         if (name.empty() || name.find_first_of(":\r\n") != std::string::npos ||
             value.find_first_of("\r\n") != std::string::npos) {
@@ -414,7 +414,7 @@ std::expected<void, RequestError> add_gdal_headers(const ConfigSnapshot& config,
                 RequestError{KARU_ERR_CONFIG, "a generated HTTP header is invalid"});
         }
     }
-    std::string text = config.option(path, "GDAL_HTTP_HEADERS");
+    std::string text = config.option(path, "KARU_HTTP_HEADERS");
     std::size_t start = 0;
     while (start < text.size()) {
         const std::size_t end = text.find_first_of("\r\n", start);
@@ -423,7 +423,7 @@ std::expected<void, RequestError> add_gdal_headers(const ConfigSnapshot& config,
             const std::size_t colon = line.find(':');
             if (colon == std::string::npos || colon == 0) {
                 return std::unexpected(
-                    RequestError{KARU_ERR_CONFIG, "GDAL_HTTP_HEADERS contains a malformed header"});
+                    RequestError{KARU_ERR_CONFIG, "KARU_HTTP_HEADERS contains a malformed header"});
             }
             std::string name = trim(line.substr(0, colon));
             const std::string normalized = lower(name);
@@ -437,7 +437,7 @@ std::expected<void, RequestError> add_gdal_headers(const ConfigSnapshot& config,
             if (normalized == "host" || normalized == "range" || duplicate || protected_header) {
                 return std::unexpected(RequestError{
                     KARU_ERR_CONFIG,
-                    "GDAL_HTTP_HEADERS cannot override Karu-managed header '" + name + "'"});
+                    "KARU_HTTP_HEADERS cannot override Karu-managed header '" + name + "'"});
             }
             headers.emplace_back(std::move(name), trim(line.substr(colon + 1)));
         }

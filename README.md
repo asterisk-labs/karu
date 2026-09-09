@@ -9,8 +9,10 @@
 
 Karu is a C++23 library for reading exact byte ranges from local files, HTTP,
 S3, Google Cloud Storage, Azure Storage, Hugging Face, and
-[Source Cooperative](https://source.coop). It accepts URI and GDAL-style VSI
-paths while keeping reads positional and stateless.
+[Source Cooperative](https://source.coop). It accepts URI and VSI paths while
+keeping reads positional and stateless.
+
+Karu's VSI path syntax is strongly inspired by GDAL VSI.
 
 ## Quick start
 
@@ -34,7 +36,7 @@ token created by the Hugging Face CLI.
 
 ## Paths
 
-| Backend | URI | GDAL-style path |
+| Backend | URI | VSI path |
 |---|---|---|
 | HTTP | `https://host/object` | `/vsicurl/https://host/object` |
 | AWS S3 | `s3://bucket/key` | `/vsis3/bucket/key` |

@@ -301,7 +301,7 @@ int main(int argc, char** argv) {
     karu_client* refresh_client = nullptr;
     RefreshState refresh_state;
     check(karu_config_create_empty(&refresh_config) == KARU_OK, "create refresh config");
-    check(karu_config_set_option(refresh_config, "CPL_GS_ENDPOINT", base.c_str()) == KARU_OK,
+    check(karu_config_set_option(refresh_config, "GCS_ENDPOINT", base.c_str()) == KARU_OK,
           "set refresh endpoint");
     check(karu_config_set_credentials_provider(refresh_config, KARU_CREDENTIALS_GCS,
                                                refresh_credentials, &refresh_state,

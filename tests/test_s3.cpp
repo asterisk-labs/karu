@@ -87,7 +87,7 @@ void test_managed_headers() {
     SECTION("managed cloud headers");
     ConfigBuilder builder(false);
     OK(builder.set("AWS_NO_SIGN_REQUEST", "YES"));
-    OK(builder.set("GDAL_HTTP_HEADERS", "Range: bytes=5-6"));
+    OK(builder.set("KARU_HTTP_HEADERS", "Range: bytes=5-6"));
     RequestBuilder request_builder(must_freeze(builder));
     OK(!request_builder.prepare(Locator{must_resolve("s3://bucket/key")}, 0, 1));
 }

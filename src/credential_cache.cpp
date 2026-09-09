@@ -114,7 +114,7 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
                          !loaded->session_token.empty() || !loaded->bearer_token.empty() ||
                          !loaded->sas_token.empty();
     // Never negative-cache credential discovery. One anonymous/missing lookup
-    // must not poison later signed requests (the failure reported in GDAL #11964).
+    // must not poison later signed requests.
     if (present && (loaded->expires_at == 0 || loaded->expires_at > now))
         entries_[key] = Entry{*loaded, refresh_time(*loaded, now, true)};
     return *loaded;

@@ -11,9 +11,9 @@ namespace karu::test {
 void test_gcs_request() {
     SECTION("GCS request signing");
     karu::ConfigBuilder gcs_builder(false);
-    OK(gcs_builder.set("GS_ACCESS_KEY_ID", "GOOG123"));
-    OK(gcs_builder.set("GS_SECRET_ACCESS_KEY", "secret"));
-    OK(gcs_builder.set("GS_USER_PROJECT", "billing-project"));
+    OK(gcs_builder.set("GCS_HMAC_ACCESS_KEY_ID", "GOOG123"));
+    OK(gcs_builder.set("GCS_HMAC_SECRET_ACCESS_KEY", "secret"));
+    OK(gcs_builder.set("GCS_USER_PROJECT", "billing-project"));
     karu::RequestBuilder gcs_request_builder(must_freeze(gcs_builder));
     karu::Locator gcs{must_resolve("gs://bucket/a b")};
     auto gcs_request = gcs_request_builder.prepare(gcs, 3, 7);
@@ -25,8 +25,8 @@ void test_gcs_request() {
     }
 
     karu::ConfigBuilder invalid_gcs_endpoint(false);
-    OK(invalid_gcs_endpoint.set("GS_NO_SIGN_REQUEST", "YES"));
-    OK(invalid_gcs_endpoint.set("CPL_GS_ENDPOINT", "ftp://example.test"));
+    OK(invalid_gcs_endpoint.set("GCS_NO_SIGN_REQUEST", "YES"));
+    OK(invalid_gcs_endpoint.set("GCS_ENDPOINT", "ftp://example.test"));
     karu::RequestBuilder invalid_gcs(must_freeze(invalid_gcs_endpoint));
     auto bad_endpoint = invalid_gcs.prepare(gcs, 0, 1);
     OK(!bad_endpoint);
@@ -98,7 +98,7 @@ void test_renewable_callback_cache() {
     const karu::backends::CloudProvider provider{
         karu::Backend::Gcs,
         KARU_CREDENTIALS_GCS,
-        "GS_NO_SIGN_REQUEST",
+        "GCS_NO_SIGN_REQUEST",
         false,
         no_options,
         [](const karu::ConfigSnapshot&, std::string_view) {

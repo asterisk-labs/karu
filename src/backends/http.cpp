@@ -8,7 +8,7 @@ prepare_http(const ConfigSnapshot& config, const Resolved& object, std::string_v
     PreparedRequest request{object.target, {}};
     if (!if_match.empty())
         request.headers.emplace_back("If-Match", if_match);
-    if (auto headers = add_gdal_headers(config, object.canonical_uri, request.headers, false);
+    if (auto headers = add_configured_headers(config, object.canonical_uri, request.headers, false);
         !headers) {
         return std::unexpected(headers.error());
     }

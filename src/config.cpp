@@ -87,11 +87,10 @@ std::string append_local_path(std::string base, std::string_view suffix) {
 
 std::expected<void, std::string> validate_values(const OptionMap& values) {
     static constexpr std::array BOOLEAN_OPTIONS{
-        "AWS_NO_SIGN_REQUEST",    "AWS_HTTPS",
-        "AWS_VIRTUAL_HOSTING",    "AWS_EC2_METADATA_DISABLED",
-        "GS_NO_SIGN_REQUEST",     "CPL_GCE_SKIP",
-        "CPL_MACHINE_IS_GCE",     "AZURE_NO_SIGN_REQUEST",
-        "SOURCE_NO_SIGN_REQUEST",
+        "AWS_NO_SIGN_REQUEST",   "AWS_HTTPS",
+        "AWS_VIRTUAL_HOSTING",   "AWS_EC2_METADATA_DISABLED",
+        "GCS_NO_SIGN_REQUEST",   "GCS_METADATA_DISABLED",
+        "AZURE_NO_SIGN_REQUEST", "SOURCE_NO_SIGN_REQUEST",
     };
     for (const char* name : BOOLEAN_OPTIONS) {
         if (const std::string* value = find(values, name);
@@ -110,9 +109,10 @@ std::expected<void, std::string> validate_values(const OptionMap& values) {
         value != nullptr && uppercase(*value) != "REQUESTER") {
         return std::unexpected(std::string("AWS_REQUEST_PAYER must be 'requester'"));
     }
-    if (const std::string* value = find(values, "GDAL_HTTP_VERSION");
+    if (const std::string* value = find(values, "KARU_HTTP_VERSION");
         value != nullptr && !valid_http_version(*value)) {
-        return std::unexpected("GDAL_HTTP_VERSION must be AUTO, 1.1, 2TLS, 2, or 2PRIOR_KNOWLEDGE");
+        return std::unexpected("KARU_HTTP_VERSION must be AUTO, 1.1, 2TLS, 2, or "
+                               "2PRIOR_KNOWLEDGE");
     }
     return {};
 }
@@ -135,16 +135,12 @@ std::string canonical_option_name(std::string_view name) {
         return "AWS_PROFILE";
     if (result == "AWS_DEFAULT_REGION")
         return "AWS_REGION";
-    if (result == "CPL_AWS_CREDENTIALS_FILE")
-        return "AWS_SHARED_CREDENTIALS_FILE";
     if (result == "KARU_MAX_RETRIES")
         return "KARU_MAX_ATTEMPTS";
-    if (result == "GOOGLE_STORAGE_ENDPOINT")
-        return "CPL_GS_ENDPOINT";
     if (result == "HUGGING_FACE_HUB_TOKEN")
         return "HF_TOKEN";
     if (result == "CURL_CA_BUNDLE" || result == "SSL_CERT_FILE")
-        return "GDAL_CURL_CA_BUNDLE";
+        return "KARU_HTTP_CA_BUNDLE";
     if (result == "SOURCE_PROXY_URL")
         return "SOURCE_ENDPOINT";
     return result;
@@ -373,21 +369,21 @@ std::string ConfigSnapshot::hugging_face_token_path(std::string_view path) const
 
 HttpRequestOptions ConfigSnapshot::http_options(std::string_view path) const {
     HttpRequestOptions result;
-    const std::string version = uppercase(option(path, "GDAL_HTTP_VERSION", "1.1"));
+    const std::string version = uppercase(option(path, "KARU_HTTP_VERSION", "1.1"));
     if (version == "AUTO")
         result.version = HttpVersion::Automatic;
     else if (version == "2" || version == "2TLS")
         result.version = HttpVersion::Http2Tls;
     else if (version == "2PRIOR_KNOWLEDGE")
         result.version = HttpVersion::Http2PriorKnowledge;
-    result.ca_bundle = option(path, "GDAL_CURL_CA_BUNDLE");
-    result.ca_path = option(path, "GDAL_HTTP_CAPATH");
-    if (!has_option(path, "GDAL_CURL_CA_BUNDLE") && !has_option(path, "GDAL_HTTP_CAPATH")) {
+    result.ca_bundle = option(path, "KARU_HTTP_CA_BUNDLE");
+    result.ca_path = option(path, "KARU_HTTP_CA_PATH");
+    if (!has_option(path, "KARU_HTTP_CA_BUNDLE") && !has_option(path, "KARU_HTTP_CA_PATH")) {
         result.ca_bundle = system_ca_bundle_;
     }
-    result.proxy = option(path, "GDAL_HTTP_PROXY");
-    result.proxy_user_password = option(path, "GDAL_HTTP_PROXYUSERPWD");
-    result.user_agent = option(path, "GDAL_HTTP_USERAGENT");
+    result.proxy = option(path, "KARU_HTTP_PROXY");
+    result.proxy_user_password = option(path, "KARU_HTTP_PROXY_CREDENTIALS");
+    result.user_agent = option(path, "KARU_HTTP_USER_AGENT");
     return result;
 }
 
