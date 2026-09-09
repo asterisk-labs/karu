@@ -28,7 +28,8 @@ struct Failure {
 [[nodiscard]] bool retryable(const Transfer& transfer, CURLcode code) noexcept;
 [[nodiscard]] Failure failure(const Transfer& transfer, CURLcode code);
 
-[[nodiscard]] std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* share,
+[[nodiscard]] std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy,
+                                                            CURLSH* share,
                                                             RequestBuilder& request_builder,
                                                             const ClientOptions& options);
 

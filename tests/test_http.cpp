@@ -3,6 +3,7 @@
 #include "karu/karu.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +11,7 @@
 #include <ctime>
 #include <span>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -90,12 +92,56 @@ int main(int argc, char** argv) {
     check(karu_client_size(client, object, &size) == KARU_OK && size == 4096,
           "size from Content-Range");
 
+    karu_locator* reusable_size = nullptr;
+    check(karu_resolve((base + "/size-reuse").c_str(), &reusable_size) == KARU_OK,
+          "resolve reusable size endpoint");
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        check(karu_client_size(client, reusable_size, &size) == KARU_OK && size == 4096,
+              "successive size calls reuse their connection");
+    }
+    karu_locator_free(reusable_size);
+
+    karu_locator* concurrent_size = nullptr;
+    check(karu_resolve((base + "/concurrent-size").c_str(), &concurrent_size) == KARU_OK,
+          "resolve concurrent size endpoint");
+    std::atomic<int> size_failures{0};
+    std::array<std::thread, 4> size_workers;
+    for (std::thread& worker : size_workers) {
+        worker = std::thread([&] {
+            for (int attempt = 0; attempt < 4; ++attempt) {
+                std::uint64_t concurrent_result = 0;
+                if (karu_client_size(client, concurrent_size, &concurrent_result) != KARU_OK ||
+                    concurrent_result != 4096) {
+                    size_failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+    for (std::thread& worker : size_workers)
+        worker.join();
+    check(size_failures.load(std::memory_order_relaxed) == 0, "concurrent size calls");
+    karu_locator_free(concurrent_size);
+
     karu_locator* unknown_size = nullptr;
     check(karu_resolve((base + "/unknown-size").c_str(), &unknown_size) == KARU_OK,
           "resolve unknown size");
     check(karu_client_size(client, unknown_size, &size) == KARU_ERR_HTTP,
           "unknown Content-Range total rejected");
     karu_locator_free(unknown_size);
+
+    karu_locator* oversized_size_body = nullptr;
+    check(karu_resolve((base + "/oversized-size-body").c_str(), &oversized_size_body) == KARU_OK,
+          "resolve oversized size body endpoint");
+    check(karu_client_size(client, oversized_size_body, &size) == KARU_ERR_HTTP,
+          "oversized size response rejected");
+    karu_locator_free(oversized_size_body);
+
+    karu_locator* missing_size_body = nullptr;
+    check(karu_resolve((base + "/missing-size-body").c_str(), &missing_size_body) == KARU_OK,
+          "resolve missing size body endpoint");
+    check(karu_client_size(client, missing_size_body, &size) == KARU_ERR_HTTP,
+          "missing size response body rejected");
+    karu_locator_free(missing_size_body);
 
     karu_locator* invalid_empty_size = nullptr;
     check(karu_resolve((base + "/invalid-empty-size").c_str(), &invalid_empty_size) == KARU_OK,

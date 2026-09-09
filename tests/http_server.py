@@ -19,6 +19,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     large_error_connection = None
     large_size_retries = 0
     large_size_connection = None
+    size_connection = None
     region_retries = 0
     late_region_retries = 0
     same_region_requests = 0
@@ -62,6 +63,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.reply(503, b"x" * 8192, Retry_After="0")
                 return
             if self.connection is not Handler.large_size_connection:
+                self.reply(409, b"connection was not reused")
+                return
+        if path == "/size-reuse":
+            if Handler.size_connection is None:
+                Handler.size_connection = self.connection
+            elif self.connection is not Handler.size_connection:
                 self.reply(409, b"connection was not reused")
                 return
         if path == "/redirect":
@@ -109,6 +116,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if path == "/unknown-size":
             self.reply(206, DATA[:1], Content_Range="bytes 0-0/*")
+            return
+        if path == "/oversized-size-body":
+            self.reply(206, DATA[:2], Content_Range=f"bytes 0-0/{len(DATA)}")
+            return
+        if path == "/missing-size-body":
+            self.reply(206, Content_Range=f"bytes 0-0/{len(DATA)}")
             return
         if path == "/invalid-empty-size":
             self.reply(416, Content_Range="garbage/0")

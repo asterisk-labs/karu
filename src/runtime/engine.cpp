@@ -103,6 +103,7 @@ Engine::Engine(ConfigSnapshot config)
     require_multi_option(multi_.get(), CURLMOPT_MAX_TOTAL_CONNECTIONS, 0L);
     require_multi_option(multi_.get(), CURLMOPT_MAX_HOST_CONNECTIONS, 0L);
     easy_pool_.reserve(static_cast<std::size_t>(options_.concurrency));
+    size_pool_.reserve(static_cast<std::size_t>(options_.concurrency));
     active_.reserve(static_cast<std::size_t>(options_.concurrency));
 
     try {
@@ -609,13 +610,36 @@ karu_status Engine::size_of(const Locator& locator, std::uint64_t& size) {
         return KARU_OK;
     }
 
-    auto result = transport::size_of(locator, share_.get(), request_builder_, options_);
+    Easy handle = take_size_handle();
+    if (!handle) {
+        set_error("curl_easy_init: out of memory");
+        return KARU_ERR_NOMEM;
+    }
+    auto result =
+        transport::size_of(locator, handle.get(), share_.get(), request_builder_, options_);
+    return_size_handle(std::move(handle));
     if (!result) {
         set_error(result.error().detail);
         return result.error().status;
     }
     size = *result > resolved.window_offset ? *result - resolved.window_offset : 0;
     return KARU_OK;
+}
+
+Easy Engine::take_size_handle() {
+    std::lock_guard lock(size_pool_mutex_);
+    if (size_pool_.empty())
+        return Easy(curl_easy_init());
+    Easy handle = std::move(size_pool_.back());
+    size_pool_.pop_back();
+    return handle;
+}
+
+void Engine::return_size_handle(Easy handle) noexcept {
+    curl_easy_reset(handle.get());
+    std::lock_guard lock(size_pool_mutex_);
+    if (size_pool_.size() < static_cast<std::size_t>(options_.concurrency))
+        size_pool_.push_back(std::move(handle));
 }
 
 } // namespace karu

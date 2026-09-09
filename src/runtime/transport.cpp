@@ -357,8 +357,10 @@ std::expected<void, std::string> apply_http_options(CURL* easy, const HttpReques
 struct SizeState {
     CURL* easy = nullptr;
     std::uint64_t total = 0;
+    std::size_t body_received = 0;
     bool have_total = false;
     bool cut_short = false;
+    bool body_exceeded_range = false;
     bool content_range_valid = false;
     bool unsatisfied_content_range_valid = false;
     bool follow_redirects = true;
@@ -386,6 +388,14 @@ std::size_t size_body_callback(char* data, std::size_t size, std::size_t count,
         state.error_body_received += *bytes;
         return *bytes;
     }
+    if (status == 206 && state.content_range_valid) {
+        if (*bytes > 1 - std::min<std::size_t>(1, state.body_received)) {
+            state.body_exceeded_range = true;
+            return 0;
+        }
+        state.body_received += *bytes;
+        return *bytes;
+    }
     state.cut_short = true;
     return 0;
 }
@@ -400,8 +410,10 @@ std::size_t size_header_callback(char* data, std::size_t size, std::size_t count
 
     if (line.starts_with("HTTP/")) {
         state.total = 0;
+        state.body_received = 0;
         state.have_total = false;
         state.cut_short = false;
+        state.body_exceeded_range = false;
         state.content_range_valid = false;
         state.unsatisfied_content_range_valid = false;
         state.retry_after = 0;
@@ -515,20 +527,15 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
     return {};
 }
 
-std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* share,
+std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy, CURLSH* share,
                                               RequestBuilder& request_builder,
                                               const ClientOptions& options) {
-    Easy easy(curl_easy_init());
-    if (!easy) {
-        return std::unexpected(Failure{KARU_ERR_NOMEM, "curl_easy_init: out of memory"});
-    }
-
     std::array<char, CURL_ERROR_SIZE> error_buffer{};
     SizeState state;
-    state.easy = easy.get();
+    state.easy = easy;
     auto configured =
-        set_options(easy.get(), CURLOPT_HEADERFUNCTION, size_header_callback, CURLOPT_HEADERDATA,
-                    &state, CURLOPT_WRITEFUNCTION, size_body_callback, CURLOPT_WRITEDATA, &state,
+        set_options(easy, CURLOPT_HEADERFUNCTION, size_header_callback, CURLOPT_HEADERDATA, &state,
+                    CURLOPT_WRITEFUNCTION, size_body_callback, CURLOPT_WRITEDATA, &state,
                     CURLOPT_SHARE, share, CURLOPT_ERRORBUFFER, error_buffer.data(),
                     CURLOPT_NOSIGNAL, 1L, CURLOPT_PATH_AS_IS, 1L, CURLOPT_UNRESTRICTED_AUTH, 0L,
                     CURLOPT_MAXREDIRS, 10L, CURLOPT_CONNECTTIMEOUT, options.connect_timeout_seconds,
@@ -537,7 +544,7 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
     if (!configured) {
         return std::unexpected(Failure{KARU_ERR_NETWORK, configured.error()});
     }
-    if (auto protocols = restrict_to_http(easy.get()); !protocols) {
+    if (auto protocols = restrict_to_http(easy); !protocols) {
         return std::unexpected(Failure{KARU_ERR_NETWORK, protocols.error()});
     }
 
@@ -555,23 +562,23 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
         if (!headers) {
             return std::unexpected(Failure{KARU_ERR_NOMEM, headers.error()});
         }
-        if (auto result = set_option(easy.get(), CURLOPT_HTTPHEADER, headers->get()); !result) {
+        if (auto result = set_option(easy, CURLOPT_HTTPHEADER, headers->get()); !result) {
             return std::unexpected(Failure{KARU_ERR_NETWORK, result.error()});
         }
-        if (auto result = set_option(easy.get(), CURLOPT_URL, request->url.c_str()); !result) {
+        if (auto result = set_option(easy, CURLOPT_URL, request->url.c_str()); !result) {
             return std::unexpected(Failure{KARU_ERR_NETWORK, result.error()});
         }
-        if (auto result = apply_http_options(easy.get(), request->http); !result)
+        if (auto result = apply_http_options(easy, request->http); !result)
             return std::unexpected(Failure{KARU_ERR_NETWORK, result.error()});
         region_hint = request->routing_region;
 
-        state = SizeState{.easy = easy.get(),
+        state = SizeState{.easy = easy,
                           .follow_redirects = request->http.follow_redirects,
                           .response_region = {}};
         error_buffer[0] = '\0';
-        CURLcode code = curl_easy_perform(easy.get());
+        CURLcode code = curl_easy_perform(easy);
         long http_status = 0;
-        curl_easy_getinfo(easy.get(), CURLINFO_RESPONSE_CODE, &http_status);
+        curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &http_status);
         if (code == CURLE_WRITE_ERROR && state.cut_short)
             code = CURLE_OK;
 
@@ -603,8 +610,14 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
             }
         }
 
+        if (http_status == 206 && state.body_exceeded_range) {
+            return std::unexpected(
+                Failure{KARU_ERR_HTTP,
+                        concat(redact_url(request->url), ": size response exceeded bytes 0-0")});
+        }
+
         if (code == CURLE_OK && http_status == 206) {
-            if (!state.content_range_valid || !state.have_total) {
+            if (!state.content_range_valid || !state.have_total || state.body_received != 1) {
                 return std::unexpected(
                     Failure{KARU_ERR_HTTP, concat(redact_url(request->url),
                                                   ": partial response has no valid object size")});
@@ -615,7 +628,7 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
         if (code == CURLE_OK && http_status == 200) {
             if (!state.have_total) {
                 curl_off_t length = -1;
-                curl_easy_getinfo(easy.get(), CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &length);
+                curl_easy_getinfo(easy, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &length);
                 if (length >= 0) {
                     state.total = static_cast<std::uint64_t>(length);
                     state.have_total = true;

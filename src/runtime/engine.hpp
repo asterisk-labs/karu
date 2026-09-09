@@ -55,6 +55,8 @@ class Engine {
     void discard_transfer(std::unique_ptr<Transfer> transfer) noexcept;
     void discard_cancelled_http();
     void stop_workers() noexcept;
+    [[nodiscard]] Easy take_size_handle();
+    void return_size_handle(Easy handle) noexcept;
 
     std::atomic<bool> stop_{false};
     std::atomic<bool> cancellation_pending_{false};
@@ -67,6 +69,9 @@ class Engine {
     Multi multi_;
     Share share_;
     std::vector<Easy> easy_pool_;
+    // Size probes run on caller threads and cannot borrow the I/O thread's handles.
+    std::mutex size_pool_mutex_;
+    std::vector<Easy> size_pool_;
 
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
