@@ -337,6 +337,99 @@ int main(int argc, char** argv) {
     check_bytes(second, first.size(), "second coalesced contents");
 
     karu_batch_free(batch);
+
+    // Different subfile locators over one outer object must share the same
+    // physical range plan. Submit them in reverse physical order so tags, not
+    // completion order, are what associate each result with its caller.
+    karu_config* window_config = nullptr;
+    karu_client* window_client = nullptr;
+    check(karu_config_create_empty(&window_config) == KARU_OK, "create subfile config");
+    check(karu_config_set_option(window_config, "KARU_COALESCE_GAP", "256") == KARU_OK,
+          "set subfile coalescing");
+    check(karu_config_set_option(window_config, "KARU_CONCURRENCY", "2") == KARU_OK,
+          "set subfile concurrency");
+    check(karu_config_set_option(window_config, "KARU_MAX_ATTEMPTS", "1") == KARU_OK,
+          "set subfile attempts");
+    check(karu_client_create(window_config, &window_client) == KARU_OK, "create subfile client");
+    karu_config_free(window_config);
+
+    karu_locator* earlier = nullptr;
+    karu_locator* later = nullptr;
+    const std::string outer = base + "/subfile-coalesced";
+    check(karu_resolve(("/vsisubfile/100_100," + outer).c_str(), &earlier) == KARU_OK,
+          "resolve earlier subfile");
+    check(karu_resolve(("/vsisubfile/300_100," + outer).c_str(), &later) == KARU_OK,
+          "resolve later subfile");
+
+    std::array<unsigned char, 24> earlier_bytes{};
+    std::array<unsigned char, 24> later_bytes{};
+    const std::array<karu_req, 2> window_reads{{
+        {later, 20, later_bytes.size(), later_bytes.data(), reinterpret_cast<void*>(2), nullptr},
+        {earlier, 76, earlier_bytes.size(), earlier_bytes.data(), reinterpret_cast<void*>(1),
+         nullptr},
+    }};
+    batch = nullptr;
+    check(karu_client_submit(window_client, window_reads.data(), window_reads.size(), &batch) ==
+              KARU_OK,
+          "submit cross-subfile batch");
+    bool saw_earlier = false;
+    bool saw_later = false;
+    while (batch != nullptr) {
+        karu_done done{};
+        const karu_status status = karu_batch_next(batch, &done, -1);
+        if (status == KARU_END)
+            break;
+        check(status == KARU_OK && done.status == KARU_OK, "cross-subfile batch completion");
+        if (done.tag == reinterpret_cast<void*>(1))
+            saw_earlier = true;
+        else if (done.tag == reinterpret_cast<void*>(2))
+            saw_later = true;
+        else
+            check(false, "cross-subfile completion tag");
+    }
+    check(saw_earlier && saw_later, "cross-subfile completion tags");
+    check_bytes(earlier_bytes, 176, "earlier subfile contents");
+    check_bytes(later_bytes, 320, "later subfile contents");
+    karu_batch_free(batch);
+    karu_locator_free(earlier);
+    karu_locator_free(later);
+
+    // Prove cancellation while one coalesced HTTP transfer is active. The
+    // loopback server exposes readiness only after seeing the expected merged
+    // range, then deliberately holds that response open for four seconds.
+    karu_locator* cancel_earlier = nullptr;
+    karu_locator* cancel_later = nullptr;
+    const std::string cancel_outer = base + "/cancel-coalesced";
+    check(karu_resolve(("/vsisubfile/512_128," + cancel_outer).c_str(), &cancel_earlier) == KARU_OK,
+          "resolve cancellable earlier subfile");
+    check(karu_resolve(("/vsisubfile/768_128," + cancel_outer).c_str(), &cancel_later) == KARU_OK,
+          "resolve cancellable later subfile");
+    const std::array<karu_req, 2> cancel_reads{{
+        {cancel_later, 0, 32, nullptr, reinterpret_cast<void*>(2), nullptr},
+        {cancel_earlier, 64, 32, nullptr, reinterpret_cast<void*>(1), nullptr},
+    }};
+    batch = nullptr;
+    check(karu_client_submit(window_client, cancel_reads.data(), cancel_reads.size(), &batch) ==
+              KARU_OK,
+          "submit cancellable coalesced batch");
+
+    bool active = false;
+    std::array<unsigned char, 1> readiness{};
+    for (int attempt = 0; attempt < 100 && !active; ++attempt) {
+        active = fetch(window_client, base + "/cancel-ready", 0, readiness) == KARU_OK;
+        if (!active)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(active, "coalesced transfer became active");
+    const auto cancel_at = std::chrono::steady_clock::now();
+    karu_batch_free(batch);
+    batch = nullptr;
+    const auto cancel_time = std::chrono::steady_clock::now() - cancel_at;
+    check(cancel_time < std::chrono::seconds(2), "active coalesced cancellation is prompt");
+
+    karu_locator_free(cancel_earlier);
+    karu_locator_free(cancel_later);
+    karu_client_free(window_client);
     karu_locator_free(object);
     karu_client_free(client);
     return failures == 0 ? 0 : 1;

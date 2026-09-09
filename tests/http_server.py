@@ -24,6 +24,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     region_retries = 0
     late_region_retries = 0
     same_region_requests = 0
+    cancel_started = threading.Event()
+    cancel_range_ok = False
 
     def reply(self, status: int, body: bytes = b"", **headers: str) -> None:
         self.send_response(status)
@@ -38,6 +40,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urllib.parse.urlsplit(self.path).path
+        if path == "/cancel-ready":
+            if not Handler.cancel_started.is_set() or not Handler.cancel_range_ok:
+                self.reply(425, b"not ready")
+                return
+            self.reply(206, DATA[:1], Content_Range=f"bytes 0-0/{len(DATA)}")
+            return
         if path == "/missing":
             self.reply(404, b"missing")
             return
@@ -138,6 +146,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not range_header.startswith("bytes=") or "-" not in range_header:
             self.reply(400, b"missing range")
             return
+        if path == "/subfile-coalesced" and range_header != "bytes=176-343":
+            self.reply(409, b"subfile requests were not coalesced")
+            return
+        if path == "/cancel-coalesced":
+            Handler.cancel_range_ok = range_header == "bytes=576-799"
+            Handler.cancel_started.set()
+            if not Handler.cancel_range_ok:
+                self.reply(409, b"cancel requests were not coalesced")
+                return
+            time.sleep(4)
         if path == "/slow":
             time.sleep(4)
         first_text, last_text = range_header[6:].split("-", 1)
