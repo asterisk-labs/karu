@@ -30,10 +30,12 @@ class RequestDeadline {
     [[nodiscard]] long curl_timeout_ms() const noexcept {
         if (!bounded_)
             return 0;
-        const auto remaining =
-            std::chrono::ceil<std::chrono::milliseconds>(expires_ - Clock::now()).count();
-        const auto maximum = static_cast<long long>(std::numeric_limits<long>::max());
-        return static_cast<long>(std::clamp(remaining, 1LL, maximum));
+        using Milliseconds = std::chrono::milliseconds;
+        using Rep = Milliseconds::rep;
+        const Rep remaining = std::chrono::ceil<Milliseconds>(expires_ - Clock::now()).count();
+        constexpr Rep minimum = 1;
+        constexpr Rep maximum = static_cast<Rep>(std::numeric_limits<long>::max());
+        return static_cast<long>(std::clamp(remaining, minimum, maximum));
     }
 
   private:
