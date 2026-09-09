@@ -1,0 +1,177 @@
+<!doctype html>
+<!-- Rendered from ../CONFIGURATION.md. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Karu configuration reference.">
+  <title>Configuration — Karu</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <article class="sheet">
+    <header>
+      <a class="brand" href="index.html">karu</a>
+      <nav aria-label="Documentation links">
+        <a href="index.html">Home</a>
+        <a class="github" href="https://github.com/asterisk-labs/karu" aria-label="Karu on GitHub">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 0C3.58 0 0 3.64 0 8.13c0 3.59 2.29 6.64 5.47 7.71.4.08.55-.18.55-.39 0-.19-.01-.83-.01-1.51-2.01.38-2.53-.5-2.69-.96-.09-.23-.48-.96-.82-1.15-.28-.15-.68-.53-.01-.54.63-.01 1.08.59 1.23.83.72 1.23 1.87.88 2.33.67.07-.53.28-.88.51-1.08-1.78-.21-3.64-.91-3.64-4.02 0-.89.31-1.62.82-2.19-.08-.21-.36-1.04.08-2.16 0 0 .67-.22 2.2.84A7.44 7.44 0 0 1 8 3.91c.68 0 1.35.09 1.98.27 1.53-1.06 2.2-.84 2.2-.84.44 1.12.16 1.95.08 2.16.51.57.82 1.3.82 2.19 0 3.12-1.87 3.81-3.65 4.02.29.25.54.74.54 1.5 0 1.08-.01 1.95-.01 2.23 0 .21.15.47.55.39A8.12 8.12 0 0 0 16 8.13C16 3.64 12.42 0 8 0Z"/>
+          </svg>
+        </a>
+      </nav>
+    </header>
+
+    <main>
+      <div class="docs-layout">
+        <aside class="docs-nav">
+          <p>Configuration</p>
+          <a href="#aws-s3">AWS S3</a>
+          <a href="#source-cooperative">Source Cooperative</a>
+          <a href="#google-cloud-storage">Google Cloud Storage</a>
+          <a href="#azure-storage">Azure Storage</a>
+          <a href="#http-and-hugging-face">HTTP and Hugging Face</a>
+          <a href="#custom-providers">Custom providers</a>
+        </aside>
+
+        <article class="docs">
+          <h1 id="configuration-reference">Configuration reference</h1>
+          <p><code>karu_config_create()</code> snapshots the supported environment variables and the OS home and cache directories used for default credential discovery. Calls to <code>karu_config_set_option()</code> override that snapshot. Calls to <code>karu_config_set_path_option()</code> override both for the longest matching VSI prefix. A client copies the result and never reads the environment again. <code>karu_config_create_empty()</code> starts without environment values or implicit home-directory or metadata-service credential discovery; it is useful for hermetic clients and tests. Explicit credential files, metadata endpoints, or the corresponding <code>..._SKIP=NO</code>/<code>..._DISABLED=NO</code> options still opt back in.</p>
+          <p>Names are case-insensitive. Unknown names are rejected instead of being silently ignored.</p>
+          <p>Aliases are canonicalized before precedence is evaluated. In particular, <code>AWS_DEFAULT_PROFILE</code>, <code>AWS_DEFAULT_REGION</code>, <code>AWS_ENDPOINT_URL_S3</code>, <code>AWS_ENDPOINT_URL</code>, <code>CPL_AWS_CREDENTIALS_FILE</code>, <code>GOOGLE_STORAGE_ENDPOINT</code>, and <code>HUGGING_FACE_HUB_TOKEN</code> cannot bypass a more specific path option written under their canonical name. <code>SOURCE_PROXY_URL</code> is an alias for <code>SOURCE_ENDPOINT</code>.</p>
+          <h2 id="aws-s3">AWS S3</h2>
+          <table><thead><tr><th>Option</th><th>Purpose</th></tr></thead><tbody><tr><td><code>AWS_ACCESS_KEY_ID</code></td><td>static access key ID</td></tr><tr><td><code>AWS_SECRET_ACCESS_KEY</code></td><td>static secret; must accompany the access key ID</td></tr><tr><td><code>AWS_SESSION_TOKEN</code></td><td>optional temporary session token</td></tr><tr><td><code>AWS_PROFILE</code> / <code>AWS_DEFAULT_PROFILE</code></td><td>shared profile name</td></tr><tr><td><code>AWS_SHARED_CREDENTIALS_FILE</code> / <code>CPL_AWS_CREDENTIALS_FILE</code></td><td>credentials file path</td></tr><tr><td><code>AWS_CONFIG_FILE</code></td><td>config file path</td></tr><tr><td><code>AWS_REGION</code> / <code>AWS_DEFAULT_REGION</code></td><td>SigV4 region; default <code>us-east-1</code></td></tr><tr><td><code>AWS_S3_ENDPOINT</code></td><td>service-root host or URL</td></tr><tr><td><code>AWS_ENDPOINT_URL_S3</code> / <code>AWS_ENDPOINT_URL</code></td><td>aliases for <code>AWS_S3_ENDPOINT</code></td></tr><tr><td><code>AWS_HTTPS</code></td><td>add <code>https://</code> to a host-only endpoint; default <code>YES</code></td></tr><tr><td><code>AWS_VIRTUAL_HOSTING</code></td><td>put the bucket before the host; defaults to <code>YES</code> for AWS and <code>NO</code> for a custom endpoint</td></tr><tr><td><code>AWS_REQUEST_PAYER</code></td><td><code>requester</code> for requester-pays buckets</td></tr><tr><td><code>AWS_NO_SIGN_REQUEST</code></td><td>explicit anonymous access</td></tr><tr><td><code>AWS_ROLE_ARN</code></td><td>role used with web identity</td></tr><tr><td><code>AWS_WEB_IDENTITY_TOKEN_FILE</code></td><td>OIDC token file</td></tr><tr><td><code>AWS_ROLE_SESSION_NAME</code></td><td>optional web-identity session name</td></tr><tr><td><code>AWS_STS_ENDPOINT</code></td><td>web-identity STS endpoint</td></tr><tr><td><code>AWS_CONTAINER_CREDENTIALS_RELATIVE_URI</code></td><td>ECS credential endpoint path</td></tr><tr><td><code>AWS_CONTAINER_CREDENTIALS_FULL_URI</code></td><td>HTTPS, loopback, or ECS credential endpoint</td></tr><tr><td><code>AWS_CONTAINER_AUTHORIZATION_TOKEN</code></td><td>ECS credential endpoint authorization</td></tr><tr><td><code>AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE</code></td><td>file containing that authorization value</td></tr><tr><td><code>AWS_EC2_METADATA_DISABLED</code></td><td>disable IMDS discovery</td></tr><tr><td><code>AWS_METADATA_SERVICE_TIMEOUT</code></td><td>IMDS connect timeout in seconds, <code>1</code>–<code>60</code></td></tr></tbody></table>
+          <p>Static profiles, <code>credential_process</code>, and web-identity profiles are handled natively. Chained source-profile AssumeRole and IAM Identity Center should be provided by the application&#x27;s AWS SDK through the callback API.</p>
+          <p><code>AWS_S3_ENDPOINT</code> is a service root. With virtual hosting enabled, an endpoint of <code>https://objects.example.test</code> becomes <code>https://bucket.objects.example.test/key</code>. With virtual hosting disabled it becomes <code>https://objects.example.test/bucket/key</code>.</p>
+          <h2 id="source-cooperative">Source Cooperative</h2>
+          <p><code>source://account/product/key</code> and <code>/vsisource/account/product/key</code> resolve to the <a href="https://docs.source.coop/data-proxy">Source Data Proxy</a>. Public reads need no configuration and remain unsigned. Source credentials use their own namespace and callback kind, so Karu never forwards ambient AWS credentials to the proxy.</p>
+          <table><thead><tr><th>Option</th><th>Purpose</th></tr></thead><tbody><tr><td><code>SOURCE_PROFILE</code></td><td>AWS-format profile; defaults to <code>source-coop</code> when signed access is requested</td></tr><tr><td><code>SOURCE_CONFIG_FILE</code></td><td>AWS-format config file; default <code>~/.aws/config</code></td></tr><tr><td><code>SOURCE_SHARED_CREDENTIALS_FILE</code></td><td>AWS-format credentials file; default <code>~/.aws/credentials</code></td></tr><tr><td><code>SOURCE_ACCESS_KEY_ID</code></td><td>explicit Source access key ID</td></tr><tr><td><code>SOURCE_SECRET_ACCESS_KEY</code></td><td>explicit secret; must accompany the access key ID</td></tr><tr><td><code>SOURCE_SESSION_TOKEN</code></td><td>optional temporary session token</td></tr><tr><td><code>SOURCE_REGION</code></td><td>SigV4 region; defaults to the profile region, then <code>us-east-1</code></td></tr><tr><td><code>SOURCE_ENDPOINT</code> / <code>SOURCE_PROXY_URL</code></td><td>proxy service root; default <code>https://data.source.coop</code></td></tr><tr><td><code>SOURCE_NO_SIGN_REQUEST</code></td><td>force (<code>YES</code>) or disable (<code>NO</code>) anonymous access</td></tr></tbody></table>
+          <p>Installing a Source credential option or a <code>KARU_CREDENTIALS_SOURCE</code> callback enables signed requests automatically. <code>SOURCE_NO_SIGN_REQUEST=YES</code> always wins; <code>SOURCE_NO_SIGN_REQUEST=NO</code> requests credentials explicitly and uses the <code>source-coop</code> profile when no profile is named.</p>
+          <p>The profile created for the <a href="https://github.com/source-cooperative/source-coop-cli">Source CLI</a> uses <code>credential_process</code>:</p>
+          <pre><code class="language-ini">[profile source-coop]
+credential_process = source-coop creds
+endpoint_url = https://data.source.coop</code></pre>
+          <p>Run <code>source-coop login</code>, then set <code>SOURCE_PROFILE=source-coop</code> in Karu. Karu executes the profile&#x27;s credential process and refreshes its temporary result when needed; it does not implement the browser login or read the CLI keyring. The profile&#x27;s <code>endpoint_url</code> is intentionally ignored because <code>SOURCE_ENDPOINT</code> owns endpoint selection for <code>/vsisource/</code> paths.</p>
+          <h2 id="google-cloud-storage">Google Cloud Storage</h2>
+          <table><thead><tr><th>Option</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GS_OAUTH2_ACCESS_TOKEN</code></td><td>static bearer token</td></tr><tr><td><code>GS_ACCESS_KEY_ID</code></td><td>interoperable HMAC access ID</td></tr><tr><td><code>GS_SECRET_ACCESS_KEY</code></td><td>interoperable HMAC secret</td></tr><tr><td><code>GOOGLE_APPLICATION_CREDENTIALS</code></td><td>ADC JSON path</td></tr><tr><td><code>CLOUDSDK_CONFIG</code></td><td>directory containing gcloud&#x27;s ADC JSON</td></tr><tr><td><code>GS_OAUTH2_REFRESH_TOKEN</code></td><td>authorized-user refresh token</td></tr><tr><td><code>GS_OAUTH2_CLIENT_ID</code></td><td>authorized-user client ID</td></tr><tr><td><code>GS_OAUTH2_CLIENT_SECRET</code></td><td>authorized-user client secret</td></tr><tr><td><code>GS_OAUTH2_PRIVATE_KEY</code></td><td>inline PEM key for legacy GDAL-style service-account OAuth</td></tr><tr><td><code>GS_OAUTH2_PRIVATE_KEY_FILE</code></td><td>PEM key file; alternative to the inline key</td></tr><tr><td><code>GS_OAUTH2_CLIENT_EMAIL</code></td><td>service-account email used with a PEM key</td></tr><tr><td><code>GS_OAUTH2_SCOPE</code></td><td>OAuth scope; defaults to read-only object access</td></tr><tr><td><code>CPL_GS_CREDENTIALS_FILE</code></td><td>legacy <code>.boto</code> HMAC or refresh-token file</td></tr><tr><td><code>GS_USER_PROJECT</code></td><td>requester-pays billing project header</td></tr><tr><td><code>CPL_GS_ENDPOINT</code> / <code>GOOGLE_STORAGE_ENDPOINT</code></td><td>XML API service-root URL</td></tr><tr><td><code>CPL_GCE_CREDENTIALS_URL</code></td><td>metadata token endpoint</td></tr><tr><td><code>CPL_MACHINE_IS_GCE</code></td><td>explicitly enable GCE metadata discovery</td></tr><tr><td><code>CPL_GCE_SKIP</code></td><td>disable metadata discovery</td></tr><tr><td><code>GS_NO_SIGN_REQUEST</code></td><td>explicit anonymous access</td></tr></tbody></table>
+          <p>ADC supports <code>service_account</code>, <code>authorized_user</code>, and OIDC <code>external_account</code> sources backed by a file or a simple URL. Service-account impersonation is supported. Environment-specific external-account suppliers can use the callback API.</p>
+          <p><code>CPL_GS_ENDPOINT</code> is a long-standing GDAL implementation/testing spelling, although it is not listed in GDAL&#x27;s public VSI option table. Karu documents it as its GCS custom-endpoint extension instead of adding a new <code>GS_HTTPS</code> name.</p>
+          <h2 id="azure-storage">Azure Storage</h2>
+          <table><thead><tr><th>Option</th><th>Purpose</th></tr></thead><tbody><tr><td><code>AZURE_STORAGE_CONNECTION_STRING</code></td><td>account, endpoint, Shared Key, or SAS connection string</td></tr><tr><td><code>AZURE_STORAGE_ACCOUNT</code></td><td>storage account name</td></tr><tr><td><code>AZURE_STORAGE_ACCESS_KEY</code></td><td>base64 Shared Key</td></tr><tr><td><code>AZURE_STORAGE_SAS_TOKEN</code></td><td>encoded SAS query string</td></tr><tr><td><code>AZURE_STORAGE_ACCESS_TOKEN</code></td><td>static bearer token</td></tr><tr><td><code>AZURE_STORAGE_ENDPOINT</code></td><td>Blob or DFS service-root URL</td></tr><tr><td><code>AZURE_TENANT_ID</code></td><td>Microsoft Entra tenant</td></tr><tr><td><code>AZURE_CLIENT_ID</code></td><td>application or managed-identity client ID</td></tr><tr><td><code>AZURE_CLIENT_SECRET</code></td><td>client-secret credential</td></tr><tr><td><code>AZURE_FEDERATED_TOKEN_FILE</code></td><td>workload-identity assertion</td></tr><tr><td><code>AZURE_AUTHORITY_HOST</code></td><td>authority root for public or sovereign clouds</td></tr><tr><td><code>AZURE_STORAGE_SCOPE</code></td><td>OAuth v2 scope; default <code>https://storage.azure.com/.default</code></td></tr><tr><td><code>AZURE_STORAGE_RESOURCE</code></td><td>managed-identity resource; default <code>https://storage.azure.com/</code></td></tr><tr><td><code>AZURE_IMDS_OBJECT_ID</code></td><td>select a managed identity by object ID</td></tr><tr><td><code>AZURE_IMDS_CLIENT_ID</code></td><td>select a managed identity by client ID</td></tr><tr><td><code>AZURE_IMDS_MSI_RES_ID</code></td><td>select a managed identity by Azure resource ID</td></tr><tr><td><code>IDENTITY_ENDPOINT</code> / <code>IDENTITY_HEADER</code></td><td>App Service managed identity</td></tr><tr><td><code>IMDS_ENDPOINT</code></td><td>managed-identity endpoint override</td></tr><tr><td><code>AZURE_NO_SIGN_REQUEST</code></td><td>explicit anonymous access</td></tr></tbody></table>
+          <p>Connection-string <code>DefaultEndpointsProtocol</code>, <code>EndpointSuffix</code>, <code>BlobEndpoint</code>, and <code>DfsEndpoint</code> values are honored. <code>AZURE_AUTHORITY_HOST</code>, <code>AZURE_STORAGE_SCOPE</code>, and <code>AZURE_STORAGE_RESOURCE</code> keep identity and storage endpoints explicit for sovereign clouds. <code>AZURE_STORAGE_ENDPOINT</code> is a Karu convenience extension; GDAL users can keep using the standard endpoint fields in <code>AZURE_STORAGE_CONNECTION_STRING</code> unchanged.</p>
+          <h2 id="http-and-hugging-face">HTTP and Hugging Face</h2>
+          <p><code>GDAL_HTTP_HEADERS</code> accepts newline-separated <code>Name: value</code> entries. libcurl does not forward authorization to a different redirect origin. <code>HF_ENDPOINT</code> changes the Hugging Face service root.</p>
+          <table><thead><tr><th>Option</th><th>Purpose</th></tr></thead><tbody><tr><td><code>HF_TOKEN</code> / <code>HUGGING_FACE_HUB_TOKEN</code></td><td>bearer token; takes precedence over token files</td></tr><tr><td><code>HF_TOKEN_PATH</code></td><td>path to the token written by Hugging Face tooling</td></tr><tr><td><code>HF_HOME</code></td><td>Hugging Face state directory; the token is read from <code>&lt;HF_HOME&gt;/token</code></td></tr><tr><td><code>HF_ENDPOINT</code></td><td>Hub service-root URL</td></tr></tbody></table>
+          <p>With environment discovery enabled, Karu follows the Hugging Face CLI&#x27;s default token location: <code>$HF_TOKEN_PATH</code>, then <code>$HF_HOME/token</code>, then <code>${XDG_CACHE_HOME:-~/.cache}/huggingface/token</code>. A missing token file means anonymous access. <code>karu_config_create_empty()</code> does not inspect a default cache, but explicitly setting <code>HF_TOKEN_PATH</code> or <code>HF_HOME</code> opts into that one file.</p>
+          <p>The token file is read while each request attempt is materialized. Logging in or rotating the file therefore affects the next operation without putting a credential or cache inside an object. Karu trims surrounding whitespace and reports an existing but unreadable token file as a credential error.</p>
+          <p><code>Range</code> and <code>Host</code> are always owned by Karu. Cloud and Hugging Face requests also reserve authentication and provider-signature headers. Use the dedicated credential options or callback instead of injecting those headers through <code>GDAL_HTTP_HEADERS</code>.</p>
+          <p>Object transfers and their redirects are restricted to HTTP and HTTPS.</p>
+          <h2 id="custom-providers">Custom providers</h2>
+          <p><code>karu_config_set_credentials_provider()</code> installs one callback for AWS, GCS, Azure, or Source Cooperative. The callback receives the canonical VSI path. It returns strings that Karu copies immediately, an optional Unix expiry, and an optional canonical <code>cache_prefix</code>.</p>
+          <p>Use a prefix only when the credential is valid for every object beneath it. For example, <code>/vsis3/team-bucket/</code> shares one renewable value across that bucket. Without a prefix Karu calls the provider for every request, which is appropriate when the provider or vendor SDK owns its own cache.</p>
+          <p>Source uses <code>KARU_CREDENTIALS_SOURCE</code> and the same access-key, secret, and session-token fields as AWS, but its cache namespace is separate. A Source prefix therefore starts with <code>/vsisource/</code>, not <code>/vsis3/</code>.</p>
+          <p>Karu serializes callback refreshes for a client to prevent token stampedes. The callback must therefore not re-enter that same client; it should obtain credentials from the vendor SDK or identity service and return them directly.</p>
+
+          <section class="config-flow" aria-labelledby="config-flow-title">
+            <p class="eyebrow">Inside Karu</p>
+            <h2 id="config-flow-title">How configuration reaches a request</h2>
+            <p>
+              The client freezes configuration once. Each request then resolves its
+              effective options from the canonical path before credentials are loaded
+              and the transfer is prepared.
+            </p>
+
+            <svg viewBox="0 0 720 410" role="img" aria-labelledby="config-diagram-title config-diagram-desc">
+              <title id="config-diagram-title">Karu configuration resolution</title>
+              <desc id="config-diagram-desc">
+                Environment values, global overrides, and path overrides enter a frozen
+                configuration snapshot. A canonical request path selects options by
+                longest-prefix precedence. Provider credentials are cached by that scope
+                and used to prepare the final transport request.
+              </desc>
+              <defs>
+                <marker id="config-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0 0 10 5 0 10Z"/>
+                </marker>
+              </defs>
+
+              <text class="config-lane" x="14" y="28">BUILD CLIENT</text>
+              <g class="config-box">
+                <rect x="104" y="8" width="146" height="52"/>
+                <text x="177" y="31">Environment</text>
+                <text class="sub" x="177" y="47">captured at create()</text>
+              </g>
+              <g class="config-box">
+                <rect x="286" y="8" width="146" height="52"/>
+                <text x="359" y="31">Global options</text>
+                <text class="sub" x="359" y="47">config.set()</text>
+              </g>
+              <g class="config-box accent">
+                <rect x="468" y="8" width="146" height="52"/>
+                <text x="541" y="31">Path options</text>
+                <text class="sub" x="541" y="47">config.set_path()</text>
+              </g>
+
+              <path class="config-edge" d="M177 60V78H310V88"/>
+              <path class="config-edge" d="M359 60V88"/>
+              <path class="config-edge" d="M541 60V78H408V88"/>
+              <g class="config-box wide">
+                <rect x="250" y="88" width="218" height="52"/>
+                <text x="359" y="111">ConfigSnapshot</text>
+                <text class="sub" x="359" y="127">validated · immutable per client</text>
+              </g>
+
+              <text class="config-lane" x="14" y="158">EACH REQUEST</text>
+              <g class="config-box">
+                <rect x="64" y="174" width="166" height="52"/>
+                <text x="147" y="197">Canonical path</text>
+                <text class="sub" x="147" y="213">URI → VSI locator</text>
+              </g>
+              <path class="config-edge" d="M230 200H270"/>
+              <path class="config-edge" d="M359 140V174"/>
+              <g class="config-box accent">
+                <rect x="270" y="174" width="218" height="52"/>
+                <text x="379" y="197">Option lookup</text>
+                <text class="sub" x="379" y="213">longest path → global → env → default</text>
+              </g>
+              <path class="config-edge" d="M488 200H528"/>
+              <g class="config-box">
+                <rect x="528" y="174" width="166" height="52"/>
+                <text x="611" y="197">Provider scope</text>
+                <text class="sub" x="611" y="213">backend + effective options</text>
+              </g>
+
+              <path class="config-edge" d="M611 226V262"/>
+              <g class="config-box">
+                <rect x="528" y="262" width="166" height="52"/>
+                <text x="611" y="285">Credentials</text>
+                <text class="sub" x="611" y="301">callback or native cache</text>
+              </g>
+              <path class="config-edge" d="M528 288H470"/>
+              <g class="config-box accent">
+                <rect x="252" y="262" width="218" height="52"/>
+                <text x="361" y="285">PreparedRequest</text>
+                <text class="sub" x="361" y="301">endpoint · auth headers · byte range</text>
+              </g>
+              <path class="config-edge" d="M252 288H194"/>
+              <g class="config-box">
+                <rect x="28" y="262" width="166" height="52"/>
+                <text x="111" y="285">Transport</text>
+                <text class="sub" x="111" y="301">local read or HTTP transfer</text>
+              </g>
+
+              <path class="config-edge dashed" d="M147 226V244H220V356H611V314"/>
+              <text class="config-note" x="379" y="377">the same canonical path scopes option lookup and credential reuse</text>
+            </svg>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer>
+      <span><em>Karu</em> means far in Quechua.</span>
+      <span>MIT · Asterisk Labs</span>
+    </footer>
+  </article>
+</body>
+</html>
