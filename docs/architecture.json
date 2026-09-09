@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Karu",
+    "subtitle": "Stateless byte-range reads for local files, HTTP and cloud objects.",
+    "animation": "none",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "viewBox": [1120, 560],
+    "legend": {
+      "mode": "hidden"
+    }
+  },
+  "components": [
+    {
+      "id": "request",
+      "type": "external",
+      "label": "rumi.read(…)",
+      "sublabel": "window + header",
+      "pos": [36, 190],
+      "size": [138, 66]
+    },
+    {
+      "id": "planner",
+      "type": "backend",
+      "label": "Rumi planner",
+      "sublabel": "selects frames",
+      "pos": [224, 190],
+      "size": [146, 66]
+    },
+    {
+      "id": "karu",
+      "type": "backend",
+      "label": "Karu",
+      "sublabel": "resolve · batch · fetch",
+      "tag": "stateless C++23",
+      "pos": [440, 180],
+      "size": [176, 86]
+    },
+    {
+      "id": "storage",
+      "type": "cloud",
+      "label": "Object storage",
+      "sublabel": "local · HTTP · cloud",
+      "pos": [714, 180],
+      "size": [176, 86]
+    },
+    {
+      "id": "buffers",
+      "type": "backend",
+      "label": "Karu completions",
+      "sublabel": "bytes tagged to frames",
+      "pos": [714, 344],
+      "size": [176, 66]
+    },
+    {
+      "id": "decoder",
+      "type": "backend",
+      "label": "Rumi decoder",
+      "sublabel": "GeoZL / OpenZL",
+      "pos": [440, 344],
+      "size": [176, 66]
+    },
+    {
+      "id": "array",
+      "type": "external",
+      "label": "Output array",
+      "sublabel": "requested pixels",
+      "pos": [224, 344],
+      "size": [146, 66]
+    }
+  ],
+  "connections": [
+    {
+      "id": "request-plan",
+      "from": "request",
+      "to": "planner",
+      "label": "read window",
+      "labelAt": [199, 174],
+      "variant": "emphasis"
+    },
+    {
+      "id": "plan-fetch",
+      "from": "planner",
+      "to": "karu",
+      "label": "offset + length",
+      "labelAt": [405, 164],
+      "variant": "emphasis"
+    },
+    {
+      "id": "fetch-storage",
+      "from": "karu",
+      "to": "storage",
+      "label": "range requests",
+      "variant": "emphasis"
+    },
+    {
+      "id": "storage-buffers",
+      "from": "storage",
+      "to": "buffers",
+      "label": "bytes",
+      "labelAt": [802, 300],
+      "variant": "emphasis"
+    },
+    {
+      "id": "buffers-decode",
+      "from": "buffers",
+      "to": "decoder",
+      "label": "completed frames",
+      "variant": "emphasis"
+    },
+    {
+      "id": "decode-array",
+      "from": "decoder",
+      "to": "array",
+      "label": "decoded values",
+      "labelAt": [405, 432],
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "Karu",
+      "items": [
+        "Reads exact ranges from local files, HTTP and cloud objects",
+        "Keeps object data and metadata out of persistent caches"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Rumi",
+      "items": [
+        "Turns a pixel window into the exact frame ranges it needs",
+        "Submits one Karu batch and decodes the returned buffers"
+      ]
+    }
+  ]
+}
