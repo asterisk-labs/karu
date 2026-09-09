@@ -305,6 +305,11 @@ void test_cpp_facade() {
     OK(object.has_value());
     if (!client || !object)
         return;
+    auto matches = client->matches(*config);
+    OK(matches.has_value() && *matches);
+    OK(config->set("KARU_CONCURRENCY", "4"));
+    matches = client->matches(*config);
+    OK(matches.has_value() && !*matches);
     EQ(client->concurrency(), 3);
     OK(!object->is_remote());
     auto bytes = client->read(*object, 17, 23);

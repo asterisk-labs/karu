@@ -223,6 +223,15 @@ class Client {
         return Client(raw);
     }
 
+    [[nodiscard]] Result<bool> matches(const Config& config) const {
+        int match = 0;
+        const karu_status status =
+            karu_client_matches_config(handle_.get(), config.native_handle(), &match);
+        if (status != KARU_OK)
+            return std::unexpected(current_error(status));
+        return match != 0;
+    }
+
     [[nodiscard]] Result<std::uint64_t> size(const Object& object) const {
         std::uint64_t value = 0;
         const karu_status status = karu_client_size(handle_.get(), object.native_handle(), &value);

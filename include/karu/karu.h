@@ -122,6 +122,12 @@ KARU_API karu_status karu_config_set_credentials_provider(karu_config* config,
 KARU_API karu_status karu_client_create(const karu_config* config, karu_client** out);
 KARU_API void karu_client_free(karu_client* client);
 
+// Compare a client's immutable snapshot with a builder after freezing it.
+// This performs no I/O and allows callers to reuse transport connections
+// without overlooking configuration changes between operations.
+KARU_API karu_status karu_client_matches_config(const karu_client* client,
+                                                const karu_config* config, int* out_match);
+
 KARU_API int karu_client_concurrency(const karu_client* client);
 KARU_API uint64_t karu_client_coalesce_gap(const karu_client* client);
 KARU_API int karu_client_max_attempts(const karu_client* client);

@@ -35,6 +35,8 @@ struct CredentialCallback {
 struct PathOptions {
     std::string prefix;
     OptionMap values;
+
+    bool operator==(const PathOptions&) const = default;
 };
 
 struct ClientOptions {
@@ -48,6 +50,8 @@ struct ClientOptions {
     long connect_timeout_seconds = 30;
     long low_speed_time_seconds = 60;
     long low_speed_limit = 1024;
+
+    bool operator==(const ClientOptions&) const = default;
 };
 
 class ConfigSnapshot;
@@ -97,6 +101,7 @@ class ConfigSnapshot {
     }
     [[nodiscard]] HttpRequestOptions http_options(std::string_view path) const;
     [[nodiscard]] const ClientOptions& client_options() const noexcept { return client_; }
+    [[nodiscard]] bool operator==(const ConfigSnapshot&) const noexcept = default;
 
   private:
     OptionMap environment_;

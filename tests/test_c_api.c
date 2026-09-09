@@ -18,26 +18,33 @@ int main(void) {
         return 5;
     if (karu_client_concurrency(client) != 4)
         return 6;
+    int match = 0;
+    if (karu_client_matches_config(client, config, &match) != KARU_OK || !match)
+        return 7;
+    if (karu_config_set_option(config, "KARU_CONCURRENCY", "5") != KARU_OK)
+        return 8;
+    if (karu_client_matches_config(client, config, &match) != KARU_OK || match)
+        return 9;
 
     karu_locator* locator = NULL;
     if (karu_resolve("/vsis3_streaming/bucket/key", &locator) != KARU_ERR_UNSUPPORTED)
-        return 7;
+        return 10;
     if (karu_resolve("/vsis3/bucket/key", &locator) != KARU_OK)
-        return 8;
+        return 11;
     if (!karu_locator_is_remote(locator))
-        return 9;
+        return 12;
     karu_locator_free(locator);
     locator = NULL;
     if (karu_resolve("/vsisource/account/product/key", &locator) != KARU_OK)
-        return 10;
+        return 13;
     if (strcmp(karu_locator_uri(locator), "/vsisource/account/product/key") != 0)
-        return 11;
+        return 14;
     karu_locator_free(locator);
     locator = NULL;
     if (karu_resolve("local.bin", &locator) != KARU_OK)
-        return 12;
+        return 15;
     if (karu_locator_is_remote(locator))
-        return 13;
+        return 16;
     karu_locator_free(locator);
     karu_free(NULL);
     karu_client_free(client);

@@ -247,6 +247,27 @@ void karu_client_free(karu_client* client) {
     delete client;
 }
 
+karu_status karu_client_matches_config(const karu_client* client, const karu_config* config,
+                                       int* out_match) {
+    karu::clear_error();
+    if (client == nullptr || config == nullptr || out_match == nullptr) {
+        karu::set_error("karu_client_matches_config: null argument");
+        return KARU_ERR_INVALID;
+    }
+    *out_match = 0;
+    try {
+        auto snapshot = config->builder.freeze();
+        if (!snapshot) {
+            karu::set_error(snapshot.error());
+            return KARU_ERR_CONFIG;
+        }
+        *out_match = client->config == *snapshot;
+        return KARU_OK;
+    } catch (...) {
+        return exception_status("karu_client_matches_config");
+    }
+}
+
 int karu_client_concurrency(const karu_client* client) {
     return client == nullptr ? 0 : client->config.client_options().concurrency;
 }
