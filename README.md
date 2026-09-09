@@ -1,5 +1,7 @@
 # karu
 
+*karu is the Quechua word for far.*
+
 [![CI](https://github.com/asterisk-labs/karu/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/asterisk-labs/karu/actions/workflows/ci.yml)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-4E04EB.svg)
 ![Linux, macOS, and Windows](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-4E04EB.svg)
@@ -9,8 +11,6 @@ Karu is a C++23 library for reading exact byte ranges from local files, HTTP,
 S3, Google Cloud Storage, Azure Storage, Hugging Face, and
 [Source Cooperative](https://source.coop). It accepts URI and GDAL-style VSI
 paths while keeping reads positional and stateless.
-
-*karu is the Quechua word for far.*
 
 ## Quick start
 
