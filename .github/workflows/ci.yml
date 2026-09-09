@@ -52,7 +52,8 @@ jobs:
           if [[ "${{ matrix.name }}" == "Linux Clang" ]]; then
             packages+=(clang-19)
           fi
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+            /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "${packages[@]}"
 
@@ -128,7 +129,8 @@ jobs:
 
       - name: Install native dependencies
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+            /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libcurl4-openssl-dev libssl-dev
