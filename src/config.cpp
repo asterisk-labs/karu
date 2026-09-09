@@ -7,6 +7,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdlib>
+#include <filesystem>
 #include <limits>
 
 namespace karu {
@@ -56,6 +57,25 @@ bool valid_http_version(std::string_view value) {
     const std::string normalized = uppercase(value);
     return normalized == "AUTO" || normalized == "1.1" || normalized == "2" ||
            normalized == "2TLS" || normalized == "2PRIOR_KNOWLEDGE";
+}
+
+std::string system_ca_bundle() {
+#ifdef __linux__
+    static constexpr std::array candidates{
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/ca-bundle.pem",
+        "/etc/pki/tls/cacert.pem",
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        "/etc/ssl/cert.pem",
+    };
+    for (const char* path : candidates) {
+        std::error_code error;
+        if (std::filesystem::is_regular_file(path, error))
+            return path;
+    }
+#endif
+    return {};
 }
 
 std::string append_local_path(std::string base, std::string_view suffix) {
@@ -164,6 +184,7 @@ ConfigBuilder::ConfigBuilder(bool include_environment)
     : discover_default_credentials_(include_environment) {
     if (!include_environment)
         return;
+    system_ca_bundle_ = system_ca_bundle();
     // Later aliases in this table never override an earlier, more specific
     // spelling. Explicit builder values are held in a separate higher layer.
     config_options::for_each_environment([&](const char* name) {
@@ -361,6 +382,9 @@ HttpRequestOptions ConfigSnapshot::http_options(std::string_view path) const {
         result.version = HttpVersion::Http2PriorKnowledge;
     result.ca_bundle = option(path, "GDAL_CURL_CA_BUNDLE");
     result.ca_path = option(path, "GDAL_HTTP_CAPATH");
+    if (!has_option(path, "GDAL_CURL_CA_BUNDLE") && !has_option(path, "GDAL_HTTP_CAPATH")) {
+        result.ca_bundle = system_ca_bundle_;
+    }
     result.proxy = option(path, "GDAL_HTTP_PROXY");
     result.proxy_user_password = option(path, "GDAL_HTTP_PROXYUSERPWD");
     result.user_agent = option(path, "GDAL_HTTP_USERAGENT");
@@ -376,6 +400,7 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
     result.home_directory_ = home_directory_;
     result.cache_directory_ = cache_directory_;
     result.app_data_directory_ = app_data_directory_;
+    result.system_ca_bundle_ = system_ca_bundle_;
     result.discover_default_credentials_ = discover_default_credentials_;
 
     if (auto valid = validate_values(result.environment_); !valid)

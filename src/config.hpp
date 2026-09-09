@@ -78,6 +78,7 @@ class ConfigBuilder {
     std::string home_directory_;
     std::string cache_directory_;
     std::string app_data_directory_;
+    std::string system_ca_bundle_;
     bool discover_default_credentials_ = false;
 
     friend class ConfigSnapshot;
@@ -112,6 +113,7 @@ class ConfigSnapshot {
     std::string home_directory_;
     std::string cache_directory_;
     std::string app_data_directory_;
+    std::string system_ca_bundle_;
     bool discover_default_credentials_ = false;
     ClientOptions client_;
 

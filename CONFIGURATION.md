@@ -200,7 +200,7 @@ never replayed against a different request target.
 |---|---|
 | `GDAL_HTTP_HEADERS` | newline-separated request headers |
 | `GDAL_HTTP_VERSION` | `1.1` (default), `2TLS`/`2`, `2PRIOR_KNOWLEDGE`, or `AUTO` |
-| `GDAL_CURL_CA_BUNDLE` / `CURL_CA_BUNDLE` / `SSL_CERT_FILE` | CA bundle passed to libcurl |
+| `GDAL_CURL_CA_BUNDLE` / `CURL_CA_BUNDLE` / `SSL_CERT_FILE` | explicit CA bundle passed to libcurl |
 | `GDAL_HTTP_CAPATH` | directory containing CA certificates |
 | `GDAL_HTTP_PROXY` | explicit HTTP proxy; libcurl proxy environment variables also work |
 | `GDAL_HTTP_PROXYUSERPWD` | proxy credentials in `user:password` form |
@@ -228,6 +228,9 @@ credential options or callback instead of injecting those headers through
 `GDAL_HTTP_HEADERS`.
 
 Object transfers and their redirects are restricted to HTTP and HTTPS.
+On Linux, Karu uses the system CA bundle available at runtime when none of the
+CA options above is set. This keeps binaries built in one Linux distribution
+from retaining that build machine's certificate path.
 
 ## Custom providers
 

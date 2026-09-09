@@ -2,6 +2,7 @@
 #include "test_support.hpp"
 
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 
 namespace karu::test {
@@ -129,6 +130,24 @@ void test_config_precedence() {
         EQS(http_request->http.proxy, "http://proxy.example.test:8080");
         EQS(http_request->http.user_agent, "karu-test");
     }
+
+#ifdef __linux__
+    {
+        ScopedEnvironment gdal_ca("GDAL_CURL_CA_BUNDLE", nullptr);
+        ScopedEnvironment curl_ca("CURL_CA_BUNDLE", nullptr);
+        ScopedEnvironment ssl_ca("SSL_CERT_FILE", nullptr);
+        ScopedEnvironment ca_path("GDAL_HTTP_CAPATH", nullptr);
+        ConfigBuilder detected(true);
+        const auto options = must_freeze(detected).http_options("https://example.test");
+        OK(!options.ca_bundle.empty());
+        OK(std::filesystem::is_regular_file(options.ca_bundle));
+
+        OK(detected.set("GDAL_HTTP_CAPATH", "/custom/certificates"));
+        const auto overridden = must_freeze(detected).http_options("https://example.test");
+        OK(overridden.ca_bundle.empty());
+        EQS(overridden.ca_path, "/custom/certificates");
+    }
+#endif
 
     // A config is snapshotted by the client, so later builder mutations do
     // not mutate a running transport.
