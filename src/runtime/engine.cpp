@@ -3,6 +3,7 @@
 #include "../error.hpp"
 #include "../platform.hpp"
 #include "../text.hpp"
+#include "http_response.hpp"
 #include "planner.hpp"
 #include "transport.hpp"
 
@@ -98,14 +99,11 @@ Engine::Engine(ConfigSnapshot config)
     }
     require_shared_data(share_.get(), CURL_LOCK_DATA_DNS);
     require_shared_data(share_.get(), CURL_LOCK_DATA_SSL_SESSION);
-#if LIBCURL_VERSION_NUM >= 0x073900
-    require_shared_data(share_.get(), CURL_LOCK_DATA_CONNECT);
-#endif
-
     require_multi_option(multi_.get(), CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
     require_multi_option(multi_.get(), CURLMOPT_MAX_TOTAL_CONNECTIONS, 0L);
     require_multi_option(multi_.get(), CURLMOPT_MAX_HOST_CONNECTIONS, 0L);
-    easy_pool_.reserve(4096);
+    easy_pool_.reserve(static_cast<std::size_t>(options_.concurrency));
+    active_.reserve(static_cast<std::size_t>(options_.concurrency));
 
     try {
         io_thread_ = std::thread([this] { io_loop(); });
@@ -156,7 +154,7 @@ std::unique_ptr<BatchCore> Engine::submit(std::span<const Request> requests, kar
         return batch;
     }
 
-    TransferPlan plan = plan_transfers(*batch, requests, options_.coalesce_gap, status);
+    TransferPlan plan = plan_transfers(*batch, requests, options_, status);
     if (status != KARU_OK)
         return batch;
 
@@ -175,7 +173,7 @@ std::unique_ptr<BatchCore> Engine::submit(std::span<const Request> requests, kar
     {
         std::lock_guard lock(queue_mutex_);
         for (auto& transfer : plan.transfers) {
-            if (transfer->locator.resolved.backend == Backend::File) {
+            if (transfer->locator->resolved.backend == Backend::File) {
                 file_queue_.push_back(std::move(transfer));
             } else {
                 http_queue_.push_back(std::move(transfer));
@@ -203,10 +201,14 @@ void Engine::deliver(Transfer& transfer, karu_status status, const std::string& 
                 completion.got = transfer.received > part.relative_offset
                                      ? transfer.received - part.relative_offset
                                      : 0;
+                const auto& resolved = transfer.locator->resolved;
+                const std::string uri = resolved.backend == Backend::Http
+                                            ? redact_url(resolved.canonical_uri)
+                                            : resolved.canonical_uri;
                 completion.detail =
-                    concat(transfer.locator.resolved.canonical_uri, ": object ended at byte ",
-                           transfer.offset + transfer.received, " while reading [",
-                           transfer.offset + part.relative_offset, ", +", part.length, ")");
+                    concat(uri, ": object ended at byte ", transfer.offset + transfer.received,
+                           " while reading [", transfer.offset + part.relative_offset, ", +",
+                           part.length, ")");
             } else {
                 completion.got = part.length;
             }
@@ -232,48 +234,87 @@ void Engine::finish_transfer(std::unique_ptr<Transfer> transfer, karu_status sta
 }
 
 void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
-    if (!transport::ensure_sink(*transfer)) {
-        finish_transfer(std::move(transfer), KARU_ERR_NOMEM,
-                        "out of memory allocating a coalesced transfer buffer");
-        return;
-    }
+    try {
+        if (!transport::ensure_sink(*transfer)) {
+            finish_transfer(std::move(transfer), KARU_ERR_NOMEM,
+                            "out of memory allocating a coalesced transfer buffer");
+            return;
+        }
 
-    auto request = request_builder_.prepare(transfer->locator, transfer->offset, transfer->length,
-                                            transfer->region_hint, transfer->if_match);
-    if (!request) {
-        finish_transfer(std::move(transfer), request.error().status,
-                        std::move(request.error().message));
-        return;
-    }
-    transfer->request_url = std::move(request->url);
-    transfer->request_headers = std::move(request->headers);
+        if (transfer->region_hint.empty()) {
+            transfer->region_hint =
+                transfer->batch->region_hint(transfer->locator->resolved.canonical_uri);
+        }
+        auto request =
+            request_builder_.prepare(*transfer->locator, transfer->offset, transfer->length,
+                                     transfer->region_hint, transfer->if_match);
+        if (!request) {
+            finish_transfer(std::move(transfer), request.error().status,
+                            std::move(request.error().message));
+            return;
+        }
+        transfer->request_url = std::move(request->url);
+        transfer->request_headers = std::move(request->headers);
+        transfer->http = std::make_unique<HttpRequestOptions>(std::move(request->http));
+        if (!request->routing_region.empty())
+            transfer->region_hint = std::move(request->routing_region);
 
-    if (easy_pool_.empty()) {
-        transfer->easy.reset(curl_easy_init());
-    } else {
-        transfer->easy = std::move(easy_pool_.back());
-        easy_pool_.pop_back();
-    }
-    if (!transfer->easy) {
-        finish_transfer(std::move(transfer), KARU_ERR_NOMEM, "curl_easy_init: out of memory");
-        return;
-    }
+        if (easy_pool_.empty()) {
+            transfer->easy.reset(curl_easy_init());
+        } else {
+            transfer->easy = std::move(easy_pool_.back());
+            easy_pool_.pop_back();
+        }
+        if (!transfer->easy) {
+            finish_transfer(std::move(transfer), KARU_ERR_NOMEM, "curl_easy_init: out of memory");
+            return;
+        }
+        transfer->http_buffers = std::make_unique<HttpBuffers>();
 
-    if (auto configured = transport::configure(*transfer, share_.get(), options_); !configured) {
-        finish_transfer(std::move(transfer), KARU_ERR_NETWORK,
-                        "could not configure HTTP request: " + configured.error());
-        return;
-    }
+        if (auto configured = transport::configure(*transfer, share_.get(), options_);
+            !configured) {
+            finish_transfer(std::move(transfer), KARU_ERR_NETWORK,
+                            "could not configure HTTP request: " + configured.error());
+            return;
+        }
 
-    CURL* easy = transfer->easy.get();
-    const CURLMcode added = curl_multi_add_handle(multi_.get(), easy);
-    if (added != CURLM_OK) {
-        finish_transfer(std::move(transfer), KARU_ERR_NETWORK,
-                        concat("curl_multi_add_handle: ", curl_multi_strerror(added)));
-        return;
+        CURL* easy = transfer->easy.get();
+        const CURLMcode added = curl_multi_add_handle(multi_.get(), easy);
+        if (added != CURLM_OK) {
+            finish_transfer(std::move(transfer), KARU_ERR_NETWORK,
+                            concat("curl_multi_add_handle: ", curl_multi_strerror(added)));
+            return;
+        }
+        Transfer* key = transfer.get();
+        auto [entry, inserted] = active_.try_emplace(key);
+        if (!inserted) {
+            curl_multi_remove_handle(multi_.get(), transfer->easy.get());
+            finish_transfer(std::move(transfer), KARU_ERR_INVALID,
+                            "internal error registering HTTP transfer");
+            return;
+        }
+        entry->second = std::move(transfer);
+    } catch (const std::bad_alloc&) {
+        if (transfer) {
+            if (transfer->easy)
+                curl_multi_remove_handle(multi_.get(), transfer->easy.get());
+            finish_transfer(std::move(transfer), KARU_ERR_NOMEM, "out of memory preparing request");
+        }
+    } catch (const std::exception& error) {
+        if (transfer) {
+            if (transfer->easy)
+                curl_multi_remove_handle(multi_.get(), transfer->easy.get());
+            finish_transfer(std::move(transfer), KARU_ERR_INVALID,
+                            concat("could not prepare request: ", error.what()));
+        }
+    } catch (...) {
+        if (transfer) {
+            if (transfer->easy)
+                curl_multi_remove_handle(multi_.get(), transfer->easy.get());
+            finish_transfer(std::move(transfer), KARU_ERR_INVALID,
+                            "could not prepare request: unknown C++ exception");
+        }
     }
-    Transfer* key = transfer.get();
-    active_.emplace(key, std::move(transfer));
 }
 
 void Engine::discard_transfer(std::unique_ptr<Transfer> transfer) noexcept {
@@ -326,7 +367,8 @@ void Engine::io_loop() {
         }
         for (auto& transfer : incoming)
             pending_.push_back(std::move(transfer));
-        discard_cancelled_http();
+        if (cancellation_pending_.exchange(false, std::memory_order_acq_rel))
+            discard_cancelled_http();
 
         const auto now = SteadyClock::now();
         for (auto iterator = retries_.begin(); iterator != retries_.end();) {
@@ -388,11 +430,28 @@ void Engine::io_loop() {
                 continue;
             }
 
+            if (transfer->response_region.empty() &&
+                transfer->locator->resolved.backend == Backend::S3) {
+                transfer->response_region = transport::detail::s3_region(std::string_view(
+                    transfer->http_buffers->error_body.data(), transfer->error_body_size));
+            }
             if (!transfer->region_retried && !transfer->response_region.empty() &&
                 transfer->response_region != transfer->region_hint &&
-                transfer->locator.resolved.backend == Backend::S3) {
+                transfer->locator->resolved.backend == Backend::S3) {
                 transfer->region_hint = transfer->response_region;
+                transfer->batch->remember_region(transfer->locator->resolved.canonical_uri,
+                                                 transfer->response_region);
                 transfer->region_retried = true;
+                curl_easy_reset(transfer->easy.get());
+                easy_pool_.push_back(std::move(transfer->easy));
+                pending_.push_front(std::move(transfer));
+                continue;
+            }
+
+            if (!transfer->credentials_retried &&
+                transport::detail::credentials_expired(*transfer)) {
+                request_builder_.invalidate_credentials(*transfer->locator);
+                transfer->credentials_retried = true;
                 curl_easy_reset(transfer->easy.get());
                 easy_pool_.push_back(std::move(transfer->easy));
                 pending_.push_front(std::move(transfer));
@@ -465,7 +524,7 @@ void Engine::file_loop() {
             file_queue_.pop_front();
         }
 
-        const std::string& path = transfer->locator.resolved.target;
+        const std::string& path = transfer->locator->resolved.target;
         if (transfer->batch->is_cancelled()) {
             discard_transfer(std::move(transfer));
             continue;
@@ -525,6 +584,7 @@ void Engine::cancel(BatchCore& batch) {
     }
 
     queue_cv_.notify_all();
+    cancellation_pending_.store(true, std::memory_order_release);
     curl_multi_wakeup(multi_.get());
 
     std::unique_lock lock(batch.mutex);

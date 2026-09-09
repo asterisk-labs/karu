@@ -215,10 +215,16 @@ std::expected<void, ResolveError> apply_window(Resolved& resolved, std::uint64_t
     return {};
 }
 
-std::expected<Resolved, ResolveError> resolve(std::string_view uri) {
+namespace {
+
+constexpr std::size_t MAX_SUBFILE_DEPTH = 16;
+
+std::expected<Resolved, ResolveError> resolve_impl(std::string_view uri, std::size_t depth) {
     if (uri.empty())
         return std::unexpected("empty URI");
     if (uri.starts_with(VSI_SUBFILE)) {
+        if (depth == MAX_SUBFILE_DEPTH)
+            return std::unexpected("/vsisubfile/ nesting exceeds 16 levels");
         const std::string_view rest = uri.substr(VSI_SUBFILE.size());
         const std::size_t comma = rest.find(',');
         if (comma == std::string_view::npos)
@@ -247,7 +253,7 @@ std::expected<Resolved, ResolveError> resolve(std::string_view uri) {
                 length = *parsed_length;
             }
         }
-        auto child = resolve(inner);
+        auto child = resolve_impl(inner, depth + 1);
         if (!child)
             return child;
         if (auto applied = apply_window(*child, offset, length); !applied)
@@ -293,6 +299,12 @@ std::expected<Resolved, ResolveError> resolve(std::string_view uri) {
                              "(no *_streaming aliases)"});
     }
     return terminal(std::string(uri));
+}
+
+} // namespace
+
+std::expected<Resolved, ResolveError> resolve(std::string_view uri) {
+    return resolve_impl(uri, 0);
 }
 
 } // namespace karu

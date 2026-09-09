@@ -2,7 +2,9 @@
 #define KARU_CONFIG_HPP
 
 #include "karu/karu.h"
+#include "request.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -36,8 +38,12 @@ struct PathOptions {
 };
 
 struct ClientOptions {
-    int concurrency = 256;
+    int concurrency = 64;
     std::uint64_t coalesce_gap = 1u << 20;
+    std::uint64_t coalesce_limit = 64u << 20;
+    std::size_t coalesce_parts = 1024;
+    std::uint64_t coalesce_amplification = 16;
+    std::uint64_t range_fallback_limit = 8u << 20;
     int max_attempts = 3;
     long connect_timeout_seconds = 30;
     long low_speed_time_seconds = 60;
@@ -89,6 +95,7 @@ class ConfigSnapshot {
     [[nodiscard]] bool discover_default_credentials() const noexcept {
         return discover_default_credentials_;
     }
+    [[nodiscard]] HttpRequestOptions http_options(std::string_view path) const;
     [[nodiscard]] const ClientOptions& client_options() const noexcept { return client_; }
 
   private:

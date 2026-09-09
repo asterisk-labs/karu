@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <span>
 #include <string>
 
@@ -47,6 +48,23 @@ void check_bytes(std::span<const unsigned char> bytes, std::size_t offset, const
     }
 }
 
+struct RefreshState {
+    int calls = 0;
+};
+
+karu_status refresh_credentials(void* data, karu_credentials_kind kind, const char*,
+                                karu_credentials* out) {
+    auto& state = *static_cast<RefreshState*>(data);
+    ++state.calls;
+    if (kind != KARU_CREDENTIALS_GCS)
+        return KARU_ERR_CREDENTIALS;
+    *out = karu_credentials{};
+    out->bearer_token = state.calls == 1 ? "stale" : "fresh";
+    out->cache_prefix = "/vsigs/bucket/";
+    out->expires_at = static_cast<std::int64_t>(std::time(nullptr)) + 3600;
+    return KARU_OK;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -72,9 +90,41 @@ int main(int argc, char** argv) {
     check(karu_client_size(client, object, &size) == KARU_OK && size == 4096,
           "size from Content-Range");
 
+    karu_locator* unknown_size = nullptr;
+    check(karu_resolve((base + "/unknown-size").c_str(), &unknown_size) == KARU_OK,
+          "resolve unknown size");
+    check(karu_client_size(client, unknown_size, &size) == KARU_ERR_HTTP,
+          "unknown Content-Range total rejected");
+    karu_locator_free(unknown_size);
+
+    karu_locator* invalid_empty_size = nullptr;
+    check(karu_resolve((base + "/invalid-empty-size").c_str(), &invalid_empty_size) == KARU_OK,
+          "resolve invalid empty size");
+    check(karu_client_size(client, invalid_empty_size, &size) == KARU_ERR_HTTP,
+          "malformed 416 Content-Range rejected");
+    karu_locator_free(invalid_empty_size);
+
+    karu_locator* empty = nullptr;
+    check(karu_resolve((base + "/empty").c_str(), &empty) == KARU_OK, "resolve empty object");
+    check(karu_client_size(client, empty, &size) == KARU_OK && size == 0,
+          "empty object size from Content-Range");
+    karu_locator_free(empty);
+
+    karu_locator* no_content = nullptr;
+    check(karu_resolve((base + "/no-content").c_str(), &no_content) == KARU_OK,
+          "resolve no-content response");
+    check(karu_client_size(client, no_content, &size) == KARU_ERR_HTTP,
+          "unexpected size response rejected");
+    karu_locator_free(no_content);
+
     std::array<unsigned char, 100> ignored{};
     check(fetch(client, base + "/ignore-range", 100, ignored) == KARU_OK, "server ignoring Range");
     check_bytes(ignored, 100, "ignored Range contents");
+
+    std::array<unsigned char, 16> clipped{};
+    check(fetch(client, base + "/object", 4090, clipped) == KARU_ERR_RANGE,
+          "range clipped at object end");
+    check_bytes(std::span(clipped).first(6), 4090, "clipped range contents");
 
     std::array<unsigned char, 16> small{};
     check(fetch(client, base + "/redirect", 21, small) == KARU_OK, "same-origin redirect");
@@ -95,6 +145,60 @@ int main(int argc, char** argv) {
           "412 mapping");
     check(fetch(client, base + "/precondition", 0, small, "\"v1\"") == KARU_OK, "matching ETag");
     check(fetch(client, base + "/bad-range", 10, small) == KARU_ERR_HTTP, "invalid Content-Range");
+    check(fetch(client, base + "/bad-range-end", 10, small) == KARU_ERR_HTTP,
+          "oversized Content-Range rejected");
+
+    check(fetch(client, base + "/missing?token=do-not-log", 0, small) == KARU_ERR_NOT_FOUND,
+          "query-bearing 404 mapping");
+    check(std::strstr(karu_last_error(), "do-not-log") == nullptr, "secret query redacted");
+    check(std::strstr(karu_last_error(), "<redacted>") != nullptr, "redaction marker present");
+
+    karu_config* strict_config = nullptr;
+    karu_client* strict_client = nullptr;
+    check(karu_config_create_empty(&strict_config) == KARU_OK, "create strict config");
+    check(karu_config_set_option(strict_config, "KARU_RANGE_FALLBACK_LIMIT", "32") == KARU_OK,
+          "set fallback limit");
+    check(karu_client_create(strict_config, &strict_client) == KARU_OK, "create strict client");
+    check(fetch(strict_client, base + "/ignore-range", 100, small) == KARU_ERR_HTTP,
+          "large ignored Range rejected");
+    karu_client_free(strict_client);
+    karu_config_free(strict_config);
+
+    karu_config* signed_config = nullptr;
+    karu_client* signed_client = nullptr;
+    check(karu_config_create_empty(&signed_config) == KARU_OK, "create signed config");
+    check(karu_config_set_option(signed_config, "AWS_ACCESS_KEY_ID", "access") == KARU_OK,
+          "set signed access key");
+    check(karu_config_set_option(signed_config, "AWS_SECRET_ACCESS_KEY", "secret") == KARU_OK,
+          "set signed secret");
+    check(karu_config_set_option(signed_config, "AWS_S3_ENDPOINT", base.c_str()) == KARU_OK,
+          "set signed endpoint");
+    check(karu_client_create(signed_config, &signed_client) == KARU_OK, "create signed client");
+    check(fetch(signed_client, "s3://bucket/signed-redirect", 0, small) == KARU_ERR_HTTP,
+          "signed redirect not followed");
+    check(fetch(signed_client, "s3://bucket/region", 0, small) == KARU_OK,
+          "S3 region recovered from XML body");
+    check(fetch(signed_client, "s3://bucket/same-region", 0, small) == KARU_ERR_AUTH,
+          "matching S3 region not retried");
+    karu_client_free(signed_client);
+    karu_config_free(signed_config);
+
+    karu_config* refresh_config = nullptr;
+    karu_client* refresh_client = nullptr;
+    RefreshState refresh_state;
+    check(karu_config_create_empty(&refresh_config) == KARU_OK, "create refresh config");
+    check(karu_config_set_option(refresh_config, "CPL_GS_ENDPOINT", base.c_str()) == KARU_OK,
+          "set refresh endpoint");
+    check(karu_config_set_credentials_provider(refresh_config, KARU_CREDENTIALS_GCS,
+                                               refresh_credentials, &refresh_state,
+                                               nullptr) == KARU_OK,
+          "set refresh provider");
+    check(karu_client_create(refresh_config, &refresh_client) == KARU_OK, "create refresh client");
+    check(fetch(refresh_client, "gs://bucket/credential-refresh", 0, small) == KARU_OK,
+          "expired credentials refreshed once");
+    check(refresh_state.calls == 2, "credential provider called twice");
+    karu_client_free(refresh_client);
+    karu_config_free(refresh_config);
 
     std::array<unsigned char, 24> first{};
     std::array<unsigned char, 24> second{};

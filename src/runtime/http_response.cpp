@@ -58,47 +58,89 @@ bool transient(CURLcode code, long status) noexcept {
     }
 }
 
+std::string s3_region(std::string_view body) {
+    constexpr std::string_view open = "<Region>";
+    constexpr std::string_view close = "</Region>";
+    const std::size_t first = body.find(open);
+    if (first == std::string_view::npos)
+        return {};
+    const std::size_t begin = first + open.size();
+    const std::size_t end = body.find(close, begin);
+    return end == std::string_view::npos ? std::string{}
+                                         : std::string(body.substr(begin, end - begin));
+}
+
+bool credentials_expired(Backend backend, long status, std::string_view body) noexcept {
+    if (status == 401 &&
+        (backend == Backend::Gcs || backend == Backend::Azure || backend == Backend::Source)) {
+        return true;
+    }
+    if (status != 403 || (backend != Backend::S3 && backend != Backend::Source))
+        return false;
+    return body.find("<Code>ExpiredToken</Code>") != std::string_view::npos ||
+           body.find("<Code>InvalidToken</Code>") != std::string_view::npos ||
+           body.find("<Code>RequestExpired</Code>") != std::string_view::npos;
+}
+
+bool credentials_expired(const Transfer& transfer) noexcept {
+    return credentials_expired(
+        transfer.locator->resolved.backend, transfer.http_status,
+        std::string_view(transfer.http_buffers->error_body.data(), transfer.error_body_size));
+}
+
 } // namespace detail
 
 bool succeeded(const Transfer& transfer, CURLcode code) noexcept {
     const bool transport_ok = code == CURLE_OK || transfer.satisfied;
     if (!transport_ok || transfer.http_status < 200 || transfer.http_status >= 300)
         return false;
-    return transfer.http_status != 206 ||
-           (transfer.content_range_seen && transfer.content_range_valid &&
-            transfer.content_range_start == transfer.offset);
+    if (transfer.http_status != 206)
+        return true;
+    if (!transfer.content_range_seen || !transfer.content_range_valid ||
+        transfer.content_range_start != transfer.offset) {
+        return false;
+    }
+    return transfer.received == transfer.content_range_end - transfer.content_range_start + 1;
 }
 
 bool retryable(const Transfer& transfer, CURLcode code) noexcept {
     if (detail::transient(code, transfer.http_status))
         return true;
-    const std::string_view body(transfer.error_body.data(), transfer.error_body_size);
+    const std::string_view body(transfer.http_buffers->error_body.data(), transfer.error_body_size);
     return transfer.http_status == 400 && body.find("RequestTimeout") != std::string_view::npos;
 }
 
 Failure failure(const Transfer& transfer, CURLcode code) {
+    const std::string url = redact_url(transfer.url());
+    if (transfer.range_fallback_rejected) {
+        return {KARU_ERR_HTTP,
+                concat(url, ": server ignored Range; refusing to discard ", transfer.offset,
+                       " bytes (limit ", transfer.range_fallback_limit, ")")};
+    }
     if (transfer.http_status == 206 &&
         (!transfer.content_range_seen || !transfer.content_range_valid ||
          transfer.content_range_start != transfer.offset)) {
-        return {KARU_ERR_HTTP,
-                concat(transfer.url(), ": invalid Content-Range for byte ", transfer.offset)};
+        return {KARU_ERR_HTTP, concat(url, ": invalid Content-Range for byte ", transfer.offset)};
     }
-    if (code != CURLE_OK && transfer.http_status >= 300 && transfer.http_status < 400) {
-        const char* message = transfer.error_buffer[0] != '\0' ? transfer.error_buffer.data()
-                                                               : curl_easy_strerror(code);
-        return {KARU_ERR_NETWORK, concat(transfer.url(), ": ", message)};
+    if (code != CURLE_OK && transfer.http_status >= 300 && transfer.http_status < 400 &&
+        transfer.http->follow_redirects) {
+        const char* message = transfer.http_buffers->error[0] != '\0'
+                                  ? transfer.http_buffers->error.data()
+                                  : curl_easy_strerror(code);
+        return {KARU_ERR_NETWORK, concat(url, ": ", message)};
     }
     if (transfer.http_status >= 300) {
-        std::string message = concat(transfer.url(), ": HTTP ", transfer.http_status);
+        std::string message = concat(url, ": HTTP ", transfer.http_status);
         const std::string body = detail::summarize(
-            std::string_view(transfer.error_body.data(), transfer.error_body_size));
+            std::string_view(transfer.http_buffers->error_body.data(), transfer.error_body_size));
         if (!body.empty())
             message += ": " + body;
         return {detail::status_for_http(transfer.http_status), std::move(message)};
     }
-    const char* message =
-        transfer.error_buffer[0] != '\0' ? transfer.error_buffer.data() : curl_easy_strerror(code);
-    return {KARU_ERR_NETWORK, concat(transfer.url(), ": ", message)};
+    const char* message = transfer.http_buffers->error[0] != '\0'
+                              ? transfer.http_buffers->error.data()
+                              : curl_easy_strerror(code);
+    return {KARU_ERR_NETWORK, concat(url, ": ", message)};
 }
 
 } // namespace karu::transport

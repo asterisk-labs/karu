@@ -20,6 +20,24 @@ Aliases are canonicalized before precedence is evaluated. In particular,
 under their canonical name. `SOURCE_PROXY_URL` is an alias for
 `SOURCE_ENDPOINT`.
 
+## Runtime
+
+| Option | Default | Purpose |
+|---|---:|---|
+| `KARU_CONCURRENCY` | `64` | maximum simultaneous transfers |
+| `KARU_COALESCE_GAP` | `1048576` | largest gap, in bytes, considered for merging ranges; `0` disables merging |
+| `KARU_COALESCE_LIMIT` | `67108864` | largest merged transfer span |
+| `KARU_COALESCE_PARTS` | `1024` | largest number of requests in one merged transfer |
+| `KARU_COALESCE_AMPLIFICATION` | `16` | largest ratio of transferred bytes to requested bytes in a merge |
+| `KARU_RANGE_FALLBACK_LIMIT` | `8388608` | largest prefix Karu may discard when a server ignores `Range`; `0` disables nonzero-offset fallback |
+| `KARU_MAX_ATTEMPTS` / `KARU_MAX_RETRIES` | `3` | total attempts for transient failures |
+| `KARU_CONNECT_TIMEOUT` | `30` | connection timeout in seconds |
+| `KARU_LOW_SPEED_TIME` | `60` | seconds below the low-speed threshold before aborting |
+| `KARU_LOW_SPEED_LIMIT` | `1024` | low-speed threshold in bytes per second |
+
+The coalescing ceilings split a sparse batch into bounded transfers. They do
+not persist object data or metadata beyond that batch.
+
 ## AWS S3
 
 | Option | Purpose |
@@ -55,7 +73,9 @@ provided by the application's AWS SDK through the callback API.
 `AWS_S3_ENDPOINT` is a service root. With virtual hosting enabled, an endpoint
 of `https://objects.example.test` becomes
 `https://bucket.objects.example.test/key`. With virtual hosting disabled it
-becomes `https://objects.example.test/bucket/key`.
+becomes `https://objects.example.test/bucket/key`. Buckets containing a dot
+use path-style addressing by default so that AWS's wildcard TLS certificate
+still matches. An explicit `AWS_VIRTUAL_HOSTING=YES` overrides that choice.
 
 ## Source Cooperative
 
@@ -76,6 +96,10 @@ the proxy.
 | `SOURCE_REGION` | SigV4 region; defaults to the profile region, then `us-east-1` |
 | `SOURCE_ENDPOINT` / `SOURCE_PROXY_URL` | proxy service root; default `https://data.source.coop` |
 | `SOURCE_NO_SIGN_REQUEST` | force (`YES`) or disable (`NO`) anonymous access |
+
+`SOURCE_PROXY_URL` is a compatibility spelling for the Source data-service
+endpoint. It is not an HTTP forward-proxy setting; use `GDAL_HTTP_PROXY` for
+that.
 
 Installing a Source credential option or a
 `KARU_CREDENTIALS_SOURCE` callback enables signed requests automatically.
@@ -166,12 +190,20 @@ GDAL users can keep using the standard endpoint fields in
 
 ## HTTP and Hugging Face
 
-`GDAL_HTTP_HEADERS` accepts newline-separated `Name: value` entries. libcurl
-does not forward authorization to a different redirect origin. `HF_ENDPOINT`
-changes the Hugging Face service root.
+`GDAL_HTTP_HEADERS` accepts newline-separated `Name: value` entries. HTTP and
+Hugging Face requests may follow HTTP(S) redirects; authenticated cloud
+requests return a redirect as an error so that credentials and signatures are
+never replayed against a different request target.
 
 | Option | Purpose |
 |---|---|
+| `GDAL_HTTP_HEADERS` | newline-separated request headers |
+| `GDAL_HTTP_VERSION` | `1.1` (default), `2TLS`/`2`, `2PRIOR_KNOWLEDGE`, or `AUTO` |
+| `GDAL_CURL_CA_BUNDLE` / `CURL_CA_BUNDLE` / `SSL_CERT_FILE` | CA bundle passed to libcurl |
+| `GDAL_HTTP_CAPATH` | directory containing CA certificates |
+| `GDAL_HTTP_PROXY` | explicit HTTP proxy; libcurl proxy environment variables also work |
+| `GDAL_HTTP_PROXYUSERPWD` | proxy credentials in `user:password` form |
+| `GDAL_HTTP_USERAGENT` | explicit User-Agent value |
 | `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | bearer token; takes precedence over token files |
 | `HF_TOKEN_PATH` | path to the token written by Hugging Face tooling |
 | `HF_HOME` | Hugging Face state directory; the token is read from `<HF_HOME>/token` |
@@ -213,5 +245,11 @@ session-token fields as AWS, but its cache namespace is separate. A Source
 prefix therefore starts with `/vsisource/`, not `/vsis3/`.
 
 Karu serializes callback refreshes for a client to prevent token stampedes.
-The callback must therefore not re-enter that same client; it should obtain
-credentials from the vendor SDK or identity service and return them directly.
+Expiring credentials refresh near the end of their lifetime rather than at a
+fixed 60-second boundary. Native static credentials are rechecked after one
+minute so profile rotation remains visible; callback values with
+`expires_at == 0` remain valid until the callback's documented lifetime.
+These operational values do not cache object contents or metadata.
+
+The callback must not re-enter that same client; it should obtain credentials
+from the vendor SDK or identity service and return them directly.

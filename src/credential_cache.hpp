@@ -4,6 +4,7 @@
 #include "config.hpp"
 #include "request.hpp"
 
+#include <cstdint>
 #include <expected>
 #include <shared_mutex>
 #include <string>
@@ -25,9 +26,21 @@ class CredentialCache {
     native(const ConfigSnapshot& config, const backends::CloudProvider& provider,
            std::string_view path);
 
+    void invalidate(const ConfigSnapshot& config, const backends::CloudProvider& provider,
+                    std::string_view path, bool custom);
+
   private:
+    struct Entry {
+        ProviderCredentials credentials;
+        std::int64_t refresh_at = 0;
+    };
+
+    [[nodiscard]] static std::int64_t refresh_time(const ProviderCredentials& credentials,
+                                                   std::int64_t now, bool refresh_static) noexcept;
+    [[nodiscard]] static bool reusable(const Entry& entry, std::int64_t now) noexcept;
+
     mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, ProviderCredentials> entries_;
+    std::unordered_map<std::string, Entry> entries_;
 };
 
 } // namespace karu

@@ -151,6 +151,7 @@ prepare_azure(const ConfigSnapshot& config, const Resolved& object,
             sas.erase(sas.begin());
         url += (url.find('?') == std::string::npos ? "?" : "&") + sas;
         PreparedRequest request{std::move(url), {}};
+        request.http.follow_redirects = false;
         if (!if_match.empty())
             request.headers.emplace_back("If-Match", if_match);
         return request;
@@ -161,7 +162,9 @@ prepare_azure(const ConfigSnapshot& config, const Resolved& object,
     if (!credentials.bearer_token.empty()) {
         headers.emplace_back("Authorization", "Bearer " + credentials.bearer_token);
         headers.emplace_back("x-ms-version", "2023-11-03");
-        return PreparedRequest{std::move(url), std::move(headers)};
+        PreparedRequest request{std::move(url), std::move(headers)};
+        request.http.follow_redirects = false;
+        return request;
     }
     if (credentials.account_name.empty() || credentials.secret_access_key.empty()) {
         return std::unexpected(RequestError{
@@ -192,7 +195,9 @@ prepare_azure(const ConfigSnapshot& config, const Resolved& object,
     headers.emplace_back("x-ms-version", "2023-11-03");
     headers.emplace_back("Authorization", "SharedKey " + credentials.account_name + ":" +
                                               base64(hmac_sha256(*decoded_key, string_to_sign)));
-    return PreparedRequest{std::move(url), std::move(headers)};
+    PreparedRequest request{std::move(url), std::move(headers)};
+    request.http.follow_redirects = false;
+    return request;
 }
 
 } // namespace

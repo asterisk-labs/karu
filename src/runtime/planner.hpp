@@ -1,6 +1,7 @@
 #ifndef KARU_PLANNER_HPP
 #define KARU_PLANNER_HPP
 
+#include "../config.hpp"
 #include "batch.hpp"
 #include "transfer.hpp"
 
@@ -17,7 +18,7 @@ struct TransferPlan {
 };
 
 [[nodiscard]] TransferPlan plan_transfers(BatchCore& batch, std::span<const Request> requests,
-                                          std::uint64_t coalesce_gap, karu_status& status);
+                                          const ClientOptions& options, karu_status& status);
 
 } // namespace karu
 

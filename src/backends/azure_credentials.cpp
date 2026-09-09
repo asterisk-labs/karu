@@ -52,7 +52,8 @@ load_azure_credentials(const ConfigSnapshot& config, std::string_view path) {
             config.option(path, "AZURE_STORAGE_SCOPE", "https://storage.azure.com/.default");
         return oauth_token(authority + "/" + form_encode(tenant) + "/oauth2/v2.0/token",
                            "client_id=" + form_encode(client) + grant +
-                               "&scope=" + form_encode(scope) + "&grant_type=client_credentials");
+                               "&scope=" + form_encode(scope) + "&grant_type=client_credentials",
+                           {}, config.http_options(path));
     }
 
     const std::string storage_resource =
@@ -86,7 +87,7 @@ load_azure_credentials(const ConfigSnapshot& config, std::string_view path) {
         const std::string identity_header = config.option(path, "IDENTITY_HEADER");
         if (!identity_header.empty())
             headers.emplace_back("X-IDENTITY-HEADER", identity_header);
-        auto response = credential_request("GET", url, {}, headers, 2);
+        auto response = credential_request("GET", url, {}, headers, 2, config.http_options(path));
         if (!response)
             return std::unexpected(response.error());
         if (response->status < 200 || response->status >= 300) {
@@ -112,7 +113,8 @@ load_azure_credentials(const ConfigSnapshot& config, std::string_view path) {
     imds += (imds.find('?') == std::string::npos ? "?" : "&");
     imds += "api-version=2018-02-01&resource=" + form_encode(storage_resource);
     add_identity_selector(imds);
-    auto response = credential_request("GET", imds, {}, {{"Metadata", "true"}}, 1);
+    auto response =
+        credential_request("GET", imds, {}, {{"Metadata", "true"}}, 1, config.http_options(path));
     if (!response && config.has_option(path, "IMDS_ENDPOINT"))
         return std::unexpected(response.error());
     if (response && (response->status < 200 || response->status >= 300) &&

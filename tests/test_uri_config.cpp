@@ -58,6 +58,13 @@ void test_windows() {
     EQ(source.window_offset, 1048576u);
     EQ(source.window_length, 8388608u);
     EQS(source.canonical_uri, "/vsisource/account/product/archive.cozip");
+
+    std::string nested = "/tmp/a";
+    for (int depth = 0; depth < 16; ++depth)
+        nested = "/vsisubfile/0_1," + nested;
+    OK(karu::resolve(nested));
+    nested = "/vsisubfile/0_1," + nested;
+    OK(!karu::resolve(nested));
 }
 
 void test_config_precedence() {
@@ -104,7 +111,22 @@ void test_config_precedence() {
     OK(vocabulary.set("CPL_MACHINE_IS_GCE", "NO"));
     OK(vocabulary.set("AZURE_IMDS_OBJECT_ID", "identity"));
     OK(vocabulary.set("SOURCE_PROFILE", "source-coop"));
+    OK(vocabulary.set("GDAL_HTTP_VERSION", "2TLS"));
+    OK(vocabulary.set("CURL_CA_BUNDLE", "/certificates.pem"));
+    OK(vocabulary.set("GDAL_HTTP_PROXY", "http://proxy.example.test:8080"));
+    OK(vocabulary.set("GDAL_HTTP_USERAGENT", "karu-test"));
     OK(vocabulary.freeze());
+
+    RequestBuilder http_builder(must_freeze(vocabulary));
+    auto http_request =
+        http_builder.prepare(Locator{must_resolve("https://example.test/object")}, 0, 1);
+    OK(http_request.has_value());
+    if (http_request) {
+        EQ(http_request->http.version, HttpVersion::Http2Tls);
+        EQS(http_request->http.ca_bundle, "/certificates.pem");
+        EQS(http_request->http.proxy, "http://proxy.example.test:8080");
+        EQS(http_request->http.user_agent, "karu-test");
+    }
 
     // A config is snapshotted by the client, so later builder mutations do
     // not mutate a running transport.
@@ -124,6 +146,10 @@ void test_config_precedence() {
     OK(invalid.set("AWS_NO_SIGN_REQUEST", "perhaps"));
     OK(!invalid.freeze());
     OK(!invalid.set_path("/vsis3/", "KARU_CONCURRENCY", "2"));
+
+    karu::ConfigBuilder invalid_http(false);
+    OK(invalid_http.set("GDAL_HTTP_VERSION", "3"));
+    OK(!invalid_http.freeze());
 
 #ifdef _WIN32
     constexpr const char* home_name = "USERPROFILE";

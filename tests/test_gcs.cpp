@@ -1,6 +1,9 @@
+#include "backends/contract.hpp"
+#include "credential_cache.hpp"
 #include "locator.hpp"
 #include "test_support.hpp"
 
+#include <array>
 #include <ctime>
 
 namespace karu::test {
@@ -34,6 +37,7 @@ void test_gcs_request() {
 struct CallbackState {
     int calls = 0;
     const char* prefix = "/vsigs/bucket/";
+    int lifetime = 3600;
 };
 
 karu_status callback_credentials(void* data, karu_credentials_kind kind, const char*,
@@ -45,7 +49,7 @@ karu_status callback_credentials(void* data, karu_credentials_kind kind, const c
     *out = karu_credentials{};
     out->bearer_token = "token";
     out->cache_prefix = state.prefix;
-    out->expires_at = static_cast<std::int64_t>(std::time(nullptr)) + 3600;
+    out->expires_at = static_cast<std::int64_t>(std::time(nullptr)) + state.lifetime;
     return KARU_OK;
 }
 
@@ -64,6 +68,15 @@ void test_renewable_callback_cache() {
     if (second)
         EQS(header(*second, "Authorization"), "Bearer token");
 
+    CallbackState short_lived{.lifetime = 30};
+    karu::ConfigBuilder short_builder(false);
+    OK(short_builder.set_provider(KARU_CREDENTIALS_GCS, callback_credentials, &short_lived,
+                                  nullptr));
+    karu::RequestBuilder short_cache(must_freeze(short_builder));
+    OK(short_cache.prepare(object, 0, 1));
+    OK(short_cache.prepare(object, 1, 1));
+    EQ(short_lived.calls, 1);
+
     CallbackState uncached_state{.prefix = nullptr};
     karu::ConfigBuilder uncached_builder(false);
     OK(uncached_builder.set_provider(KARU_CREDENTIALS_GCS, callback_credentials, &uncached_state,
@@ -79,6 +92,35 @@ void test_renewable_callback_cache() {
                                     nullptr));
     karu::RequestBuilder invalid(must_freeze(invalid_builder));
     OK(!invalid.prepare(object, 0, 1));
+
+    static int native_calls = 0;
+    constexpr std::array<std::string_view, 0> no_options{};
+    const karu::backends::CloudProvider provider{
+        karu::Backend::Gcs,
+        KARU_CREDENTIALS_GCS,
+        "GS_NO_SIGN_REQUEST",
+        false,
+        no_options,
+        [](const karu::ConfigSnapshot&, std::string_view) {
+            ++native_calls;
+            karu::ProviderCredentials credentials;
+            credentials.bearer_token = "static";
+            return std::expected<karu::ProviderCredentials, karu::RequestError>{
+                std::move(credentials)};
+        },
+        [](const karu::backends::RequestContext&) {
+            return std::expected<karu::PreparedRequest, karu::RequestError>{
+                karu::PreparedRequest{"https://example.test", {}}};
+        }};
+    native_calls = 0;
+    karu::CredentialCache native_cache;
+    const auto snapshot = must_freeze(karu::ConfigBuilder(false));
+    OK(native_cache.native(snapshot, provider, "/vsigs/bucket/key"));
+    OK(native_cache.native(snapshot, provider, "/vsigs/bucket/key"));
+    EQ(native_calls, 1);
+    native_cache.invalidate(snapshot, provider, "/vsigs/bucket/key", false);
+    OK(native_cache.native(snapshot, provider, "/vsigs/bucket/key"));
+    EQ(native_calls, 2);
 }
 
 } // namespace karu::test

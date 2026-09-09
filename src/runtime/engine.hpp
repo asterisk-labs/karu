@@ -57,6 +57,7 @@ class Engine {
     void stop_workers() noexcept;
 
     std::atomic<bool> stop_{false};
+    std::atomic<bool> cancellation_pending_{false};
     std::thread io_thread_;
     std::vector<std::thread> file_workers_;
 

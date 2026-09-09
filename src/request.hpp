@@ -10,9 +10,32 @@
 
 namespace karu {
 
+enum class HttpVersion {
+    Automatic,
+    Http1_1,
+    Http2Tls,
+    Http2PriorKnowledge,
+};
+
+struct HttpRequestOptions {
+    HttpVersion version = HttpVersion::Http1_1;
+    bool follow_redirects = true;
+    std::string ca_bundle;
+    std::string ca_path;
+    std::string proxy;
+    std::string proxy_user_password;
+    std::string user_agent;
+};
+
 struct PreparedRequest {
+    PreparedRequest(std::string request_url,
+                    std::vector<std::pair<std::string, std::string>> request_headers)
+        : url(std::move(request_url)), headers(std::move(request_headers)) {}
+
     std::string url;
     std::vector<std::pair<std::string, std::string>> headers;
+    HttpRequestOptions http;
+    std::string routing_region;
 };
 
 struct RequestError {

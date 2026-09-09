@@ -3,6 +3,7 @@
 
 #include "../buffer.hpp"
 #include "../locator.hpp"
+#include "../request.hpp"
 #include "batch.hpp"
 #include "curl_types.hpp"
 
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <curl/curl.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -32,9 +34,14 @@ struct Part {
     OwnedBuffer owned_buffer;
 };
 
+struct HttpBuffers {
+    std::array<char, 512> error_body{};
+    std::array<char, CURL_ERROR_SIZE> error{};
+};
+
 struct Transfer {
     BatchCore* batch = nullptr;
-    Locator locator;
+    std::shared_ptr<const Locator> locator;
     std::uint64_t offset = 0;
     std::uint64_t length = 0;
     std::vector<Part> parts;
@@ -48,6 +55,7 @@ struct Transfer {
     // renewable credentials and signatures out of the locator.
     std::string request_url;
     std::vector<std::pair<std::string, std::string>> request_headers;
+    std::unique_ptr<HttpRequestOptions> http;
     std::string region_hint;
 
     std::uint64_t received = 0;
@@ -60,17 +68,22 @@ struct Transfer {
     bool content_range_seen = false;
     bool content_range_valid = false;
     std::uint64_t content_range_start = 0;
+    std::uint64_t content_range_end = 0;
+    std::uint64_t content_range_total = 0;
+    bool content_range_has_total = false;
+    std::uint64_t range_fallback_limit = 0;
+    bool range_fallback_rejected = false;
     std::string response_region;
     bool region_retried = false;
+    bool credentials_retried = false;
     int attempt = 0;
 
     int retry_after = 0;
-    std::array<char, 512> error_body{};
     std::size_t error_body_size = 0;
+    std::unique_ptr<HttpBuffers> http_buffers;
 
     Easy easy;
     Slist headers;
-    std::array<char, CURL_ERROR_SIZE> error_buffer{};
 
     [[nodiscard]] const std::string& url() const noexcept { return request_url; }
 };

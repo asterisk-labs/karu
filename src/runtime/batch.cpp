@@ -44,3 +44,14 @@ void karu_batch::transfer_finished() {
 bool karu_batch::is_cancelled() const {
     return cancelled.load(std::memory_order_acquire);
 }
+
+std::string karu_batch::region_hint(std::string_view resource) const {
+    std::lock_guard lock(mutex);
+    const auto found = regions.find(std::string(resource));
+    return found == regions.end() ? std::string{} : found->second;
+}
+
+void karu_batch::remember_region(std::string resource, std::string region) {
+    std::lock_guard lock(mutex);
+    regions.insert_or_assign(std::move(resource), std::move(region));
+}

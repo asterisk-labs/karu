@@ -11,6 +11,7 @@
 #include <chrono>
 #include <ctime>
 #include <curl/curl.h>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -21,6 +22,17 @@
 #include <unordered_map>
 
 namespace karu::backends {
+
+std::expected<bool, RequestError> path_exists(const std::string& path, std::string_view purpose) {
+    std::error_code error;
+    const bool exists = std::filesystem::exists(os::path_from_utf8(path), error);
+    if (error) {
+        return std::unexpected(RequestError{KARU_ERR_CREDENTIALS, std::string(purpose) +
+                                                                      ": cannot inspect '" + path +
+                                                                      "': " + error.message()});
+    }
+    return exists;
+}
 
 std::expected<std::string, RequestError> read_text_file(const std::string& path,
                                                         std::string_view purpose) {
@@ -148,6 +160,20 @@ std::size_t collect_body(char* data, std::size_t size, std::size_t count,
     return length;
 }
 
+long curl_http_version(HttpVersion version) noexcept {
+    switch (version) {
+    case HttpVersion::Automatic:
+        return CURL_HTTP_VERSION_NONE;
+    case HttpVersion::Http2Tls:
+        return CURL_HTTP_VERSION_2TLS;
+    case HttpVersion::Http2PriorKnowledge:
+        return CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE;
+    case HttpVersion::Http1_1:
+        return CURL_HTTP_VERSION_1_1;
+    }
+    return CURL_HTTP_VERSION_1_1;
+}
+
 template <typename Value>
 std::expected<void, RequestError> set_credential_option(CURL* easy, CURLoption option,
                                                         Value value) {
@@ -174,7 +200,8 @@ std::expected<void, RequestError> set_credential_options(CURL* easy, CURLoption 
 
 std::expected<HttpResponse, RequestError>
 credential_request(std::string_view method, const std::string& url, std::string_view body,
-                   const std::vector<Header>& headers, long timeout_seconds) {
+                   const std::vector<Header>& headers, long timeout_seconds,
+                   const HttpRequestOptions& options) {
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> easy(curl_easy_init(), curl_easy_cleanup);
     if (!easy)
         return std::unexpected(RequestError{KARU_ERR_NOMEM, "curl_easy_init failed"});
@@ -197,9 +224,37 @@ credential_request(std::string_view method, const std::string& url, std::string_
     auto configured = set_credential_options(
         easy.get(), CURLOPT_URL, url.c_str(), CURLOPT_NOSIGNAL, 1L, CURLOPT_CONNECTTIMEOUT,
         timeout_seconds, CURLOPT_TIMEOUT, timeout_seconds * 2, CURLOPT_WRITEFUNCTION, collect_body,
-        CURLOPT_WRITEDATA, &response.body, CURLOPT_ERRORBUFFER, error.data());
+        CURLOPT_WRITEDATA, &response.body, CURLOPT_ERRORBUFFER, error.data(), CURLOPT_HTTP_VERSION,
+        curl_http_version(options.version));
     if (!configured)
         return std::unexpected(configured.error());
+    if (!options.ca_bundle.empty()) {
+        configured = set_credential_option(easy.get(), CURLOPT_CAINFO, options.ca_bundle.c_str());
+        if (!configured)
+            return std::unexpected(configured.error());
+    }
+    if (!options.ca_path.empty()) {
+        configured = set_credential_option(easy.get(), CURLOPT_CAPATH, options.ca_path.c_str());
+        if (!configured)
+            return std::unexpected(configured.error());
+    }
+    if (!options.proxy.empty()) {
+        configured = set_credential_option(easy.get(), CURLOPT_PROXY, options.proxy.c_str());
+        if (!configured)
+            return std::unexpected(configured.error());
+    }
+    if (!options.proxy_user_password.empty()) {
+        configured = set_credential_option(easy.get(), CURLOPT_PROXYUSERPWD,
+                                           options.proxy_user_password.c_str());
+        if (!configured)
+            return std::unexpected(configured.error());
+    }
+    if (!options.user_agent.empty()) {
+        configured =
+            set_credential_option(easy.get(), CURLOPT_USERAGENT, options.user_agent.c_str());
+        if (!configured)
+            return std::unexpected(configured.error());
+    }
 #if LIBCURL_VERSION_NUM >= 0x075500
     configured = set_credential_option(easy.get(), CURLOPT_PROTOCOLS_STR, "http,https");
 #else
@@ -249,10 +304,10 @@ credential_request(std::string_view method, const std::string& url, std::string_
 
 std::expected<ProviderCredentials, RequestError>
 oauth_token(const std::string& url, const std::string& form,
-            const std::vector<Header>& extra_headers) {
+            const std::vector<Header>& extra_headers, const HttpRequestOptions& options) {
     std::vector<Header> headers = extra_headers;
     headers.emplace_back("Content-Type", "application/x-www-form-urlencoded");
-    auto response = credential_request("POST", url, form, headers);
+    auto response = credential_request("POST", url, form, headers, 5, options);
     if (!response)
         return std::unexpected(response.error());
     if (response->status < 200 || response->status >= 300) {

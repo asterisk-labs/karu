@@ -9,8 +9,17 @@ namespace karu::config_options {
 // spelling wins. Explicit API values and path-scoped values are separate,
 // higher-precedence layers.
 inline constexpr std::array CORE{
-    "KARU_CONCURRENCY",     "KARU_COALESCE_GAP",   "KARU_MAX_ATTEMPTS",    "KARU_MAX_RETRIES",
-    "KARU_CONNECT_TIMEOUT", "KARU_LOW_SPEED_TIME", "KARU_LOW_SPEED_LIMIT",
+    "KARU_CONCURRENCY",
+    "KARU_COALESCE_GAP",
+    "KARU_COALESCE_LIMIT",
+    "KARU_COALESCE_PARTS",
+    "KARU_COALESCE_AMPLIFICATION",
+    "KARU_RANGE_FALLBACK_LIMIT",
+    "KARU_MAX_ATTEMPTS",
+    "KARU_MAX_RETRIES",
+    "KARU_CONNECT_TIMEOUT",
+    "KARU_LOW_SPEED_TIME",
+    "KARU_LOW_SPEED_LIMIT",
 };
 
 inline constexpr std::array S3{
@@ -101,7 +110,9 @@ inline constexpr std::array SOURCE{
 };
 
 inline constexpr std::array HTTP{
-    "GDAL_HTTP_HEADERS",
+    "GDAL_HTTP_HEADERS", "GDAL_HTTP_VERSION",      "GDAL_CURL_CA_BUNDLE",
+    "CURL_CA_BUNDLE",    "SSL_CERT_FILE",          "GDAL_HTTP_CAPATH",
+    "GDAL_HTTP_PROXY",   "GDAL_HTTP_PROXYUSERPWD", "GDAL_HTTP_USERAGENT",
 };
 
 template <typename Visitor> void for_each_environment(Visitor&& visitor) {

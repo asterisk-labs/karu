@@ -71,8 +71,10 @@ std::expected<PreparedRequest, RequestError> prepare_aws(const RequestContext& r
         credentials = &configured;
     }
 
+    const bool virtual_hosting_default =
+        default_endpoint && request.object.container.find('.') == std::string::npos;
     const bool virtual_hosting = option_is_true(
-        request.config.option(path, "AWS_VIRTUAL_HOSTING", default_endpoint ? "YES" : "NO"));
+        request.config.option(path, "AWS_VIRTUAL_HOSTING", virtual_hosting_default ? "YES" : "NO"));
     const std::string request_payer = request.config.option(path, "AWS_REQUEST_PAYER");
     const S3GetRequest target{.endpoint = std::move(endpoint),
                               .endpoint_option = "AWS_S3_ENDPOINT",
@@ -83,6 +85,8 @@ std::expected<PreparedRequest, RequestError> prepare_aws(const RequestContext& r
                               .request_payer = request_payer};
     auto prepared =
         prepare_s3_get(target, credentials, request.first, request.length, request.if_match);
+    if (prepared)
+        prepared->routing_region = region;
     return prepared;
 }
 

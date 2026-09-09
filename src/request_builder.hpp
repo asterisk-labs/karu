@@ -26,6 +26,8 @@ class RequestBuilder {
     prepare(const Locator& locator, std::uint64_t first, std::uint64_t length,
             std::string_view region_hint = {}, std::string_view if_match = {});
 
+    void invalidate_credentials(const Locator& locator);
+
     [[nodiscard]] const ConfigSnapshot& config() const noexcept { return config_; }
 
   private:

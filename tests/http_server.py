@@ -6,6 +6,7 @@ import http.server
 import subprocess
 import sys
 import threading
+import urllib.parse
 
 
 DATA = bytes((index * 31 + 7) & 0xFF for index in range(4096))
@@ -14,6 +15,8 @@ DATA = bytes((index * 31 + 7) & 0xFF for index in range(4096))
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     retries = 0
+    region_retries = 0
+    same_region_requests = 0
 
     def reply(self, status: int, body: bytes = b"", **headers: str) -> None:
         self.send_response(status)
@@ -21,30 +24,65 @@ class Handler(http.server.BaseHTTPRequestHandler):
         for name, value in headers.items():
             self.send_header(name.replace("_", "-"), value)
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
-        if self.path == "/missing":
+        path = urllib.parse.urlsplit(self.path).path
+        if path == "/missing":
             self.reply(404, b"missing")
             return
-        if self.path == "/unauthorized":
+        if path == "/unauthorized":
             self.reply(401, b"unauthorized")
             return
-        if self.path == "/retry" and Handler.retries == 0:
+        if path == "/retry" and Handler.retries == 0:
             Handler.retries += 1
             self.reply(503, b"try again", Retry_After="0")
             return
-        if self.path == "/redirect":
+        if path == "/redirect":
             self.reply(302, Location="/object")
             return
-        if self.path == "/redirect-ftp":
+        if path == "/redirect-ftp":
             self.reply(302, Location="ftp://127.0.0.1:1/object")
             return
-        if self.path == "/precondition" and self.headers.get("If-Match") != '"v1"':
+        if path == "/signed-redirect" or path == "/bucket/signed-redirect":
+            self.reply(302, b"x" * 1024, Location="/object")
+            return
+        if path == "/bucket/region" and Handler.region_retries == 0:
+            Handler.region_retries += 1
+            self.reply(
+                400,
+                b"<Error><Code>AuthorizationHeaderMalformed</Code>"
+                b"<Region>us-west-2</Region></Error>",
+            )
+            return
+        if path == "/bucket/same-region" and Handler.same_region_requests == 0:
+            Handler.same_region_requests += 1
+            self.reply(403, b"forbidden", X_Amz_Bucket_Region="us-east-1")
+            return
+        if path == "/bucket/credential-refresh":
+            if self.headers.get("Authorization") != "Bearer fresh":
+                self.reply(401, b"expired")
+                return
+        if path == "/precondition" and self.headers.get("If-Match") != '"v1"':
             self.reply(412, b"changed")
             return
-        if self.path == "/ignore-range":
+        if path == "/ignore-range":
             self.reply(200, DATA)
+            return
+        if path == "/no-content":
+            self.reply(204)
+            return
+        if path == "/unknown-size":
+            self.reply(206, DATA[:1], Content_Range="bytes 0-0/*")
+            return
+        if path == "/invalid-empty-size":
+            self.reply(416, Content_Range="garbage/0")
+            return
+        if path == "/empty":
+            self.reply(416, Content_Range="bytes */0")
             return
 
         range_header = self.headers.get("Range", "")
@@ -58,8 +96,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply(416, Content_Range=f"bytes */{len(DATA)}")
             return
         body = DATA[first : last + 1]
-        reported_first = 0 if self.path == "/bad-range" else first
+        reported_first = 0 if path == "/bad-range" else first
         reported_last = reported_first + len(body) - 1
+        if path == "/bad-range-end":
+            reported_last += 1
         self.reply(
             206,
             body,

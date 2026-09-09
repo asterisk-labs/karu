@@ -50,10 +50,9 @@ std::optional<std::string> xml_value(std::string_view xml, std::string_view name
                : std::optional(std::string(xml.substr(start, end - start)));
 }
 
-std::expected<ProviderCredentials, RequestError> aws_web_identity(const std::string& role,
-                                                                  const std::string& token_file,
-                                                                  std::string session_name,
-                                                                  const std::string& endpoint) {
+std::expected<ProviderCredentials, RequestError>
+aws_web_identity(const std::string& role, const std::string& token_file, std::string session_name,
+                 const std::string& endpoint, const HttpRequestOptions& http) {
     auto token = read_text_file(token_file, "AWS web identity token");
     if (!token)
         return std::unexpected(token.error());
@@ -63,8 +62,8 @@ std::expected<ProviderCredentials, RequestError> aws_web_identity(const std::str
         "Action=AssumeRoleWithWebIdentity&Version=2011-06-15&RoleArn=" + form_encode(role) +
         "&RoleSessionName=" + form_encode(session_name) +
         "&WebIdentityToken=" + form_encode(trim(*token));
-    auto response = credential_request("POST", endpoint, form,
-                                       {{"Content-Type", "application/x-www-form-urlencoded"}});
+    auto response = credential_request(
+        "POST", endpoint, form, {{"Content-Type", "application/x-www-form-urlencoded"}}, 5, http);
     if (!response)
         return std::unexpected(response.error());
     if (response->status < 200 || response->status >= 300) {
@@ -121,7 +120,8 @@ std::expected<ProviderCredentials, RequestError> load_aws_credentials(const Conf
             aws_web_identity(role, web_token,
                              config.option(path, "AWS_ROLE_SESSION_NAME",
                                            loaded_profile->value("role_session_name")),
-                             config.option(path, "AWS_STS_ENDPOINT", "https://sts.amazonaws.com/"));
+                             config.option(path, "AWS_STS_ENDPOINT", "https://sts.amazonaws.com/"),
+                             config.http_options(path));
         if (credentials)
             credentials->region = loaded_profile->value("region");
         return credentials;
@@ -162,7 +162,8 @@ std::expected<ProviderCredentials, RequestError> load_aws_credentials(const Conf
         std::vector<Header> headers;
         if (!authorization.empty())
             headers.emplace_back("Authorization", authorization);
-        auto response = credential_request("GET", container_url, {}, headers, 2);
+        auto response =
+            credential_request("GET", container_url, {}, headers, 2, config.http_options(path));
         if (!response)
             return std::unexpected(response.error());
         if (response->status < 200 || response->status >= 300)
@@ -196,17 +197,18 @@ std::expected<ProviderCredentials, RequestError> load_aws_credentials(const Conf
     if (try_imds) {
         auto token = credential_request("PUT", "http://169.254.169.254/latest/api/token", {},
                                         {{"X-aws-ec2-metadata-token-ttl-seconds", "21600"}},
-                                        metadata_timeout);
+                                        metadata_timeout, config.http_options(path));
         if (token && token->status >= 200 && token->status < 300) {
             const std::vector<Header> headers{{"X-aws-ec2-metadata-token", trim(token->body)}};
             auto role_name = credential_request(
                 "GET", "http://169.254.169.254/latest/meta-data/iam/security-credentials/", {},
-                headers, metadata_timeout);
+                headers, metadata_timeout, config.http_options(path));
             if (role_name && role_name->status >= 200 && role_name->status < 300) {
                 const std::string role_url =
                     "http://169.254.169.254/latest/meta-data/iam/security-credentials/" +
                     form_encode(trim(role_name->body));
-                auto response = credential_request("GET", role_url, {}, headers, metadata_timeout);
+                auto response = credential_request("GET", role_url, {}, headers, metadata_timeout,
+                                                   config.http_options(path));
                 if (response && response->status >= 200 && response->status < 300) {
                     ProviderCredentials result = aws_json_credentials(response->body);
                     if (!result.access_key_id.empty() && !result.secret_access_key.empty() &&

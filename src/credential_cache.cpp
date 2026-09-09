@@ -4,10 +4,35 @@
 #include "backends/credentials.hpp"
 #include "uri.hpp"
 
+#include <algorithm>
 #include <ctime>
+#include <limits>
 #include <mutex>
 
 namespace karu {
+namespace {
+
+constexpr std::int64_t kStaticCredentialTtlSeconds = 60;
+
+} // namespace
+
+std::int64_t CredentialCache::refresh_time(const ProviderCredentials& credentials, std::int64_t now,
+                                           bool refresh_static) noexcept {
+    if (credentials.expires_at == 0) {
+        return refresh_static ? now + kStaticCredentialTtlSeconds
+                              : std::numeric_limits<std::int64_t>::max();
+    }
+    if (credentials.expires_at <= now)
+        return now;
+    const std::int64_t lifetime = credentials.expires_at - now;
+    const std::int64_t margin = std::clamp<std::int64_t>(lifetime / 10, 1, 60);
+    return std::max<std::int64_t>(now + 1, credentials.expires_at - margin);
+}
+
+bool CredentialCache::reusable(const Entry& entry, std::int64_t now) noexcept {
+    return now < entry.refresh_at &&
+           (entry.credentials.expires_at == 0 || now < entry.credentials.expires_at);
+}
 
 std::expected<ProviderCredentials, RequestError>
 CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind,
@@ -21,11 +46,13 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
     const auto find_reusable = [&] {
         auto best = entries_.end();
         for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
-            const auto& [key, value] = *iterator;
+            const auto& [key, entry] = *iterator;
+            const auto& value = entry.credentials;
             const bool current = key.starts_with(family) && path.starts_with(value.cache_prefix) &&
-                                 (value.expires_at == 0 || value.expires_at > now + 60);
-            if (current && (best == entries_.end() ||
-                            value.cache_prefix.size() > best->second.cache_prefix.size())) {
+                                 reusable(entry, now);
+            if (current &&
+                (best == entries_.end() ||
+                 value.cache_prefix.size() > best->second.credentials.cache_prefix.size())) {
                 best = iterator;
             }
         }
@@ -36,12 +63,12 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
         std::shared_lock lock(mutex_);
         const auto found = find_reusable();
         if (found != entries_.end())
-            return found->second;
+            return found->second.credentials;
     }
     std::unique_lock lock(mutex_);
     const auto found = find_reusable();
     if (found != entries_.end())
-        return found->second;
+        return found->second.credentials;
 
     auto refreshed = backends::copy_callback_credentials(callback, kind, path);
     if (!refreshed)
@@ -53,7 +80,8 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
                 RequestError{KARU_ERR_CREDENTIALS,
                              "custom credential cache_prefix does not contain the requested path"});
         }
-        entries_[family + refreshed->cache_prefix] = *refreshed;
+        entries_[family + refreshed->cache_prefix] =
+            Entry{*refreshed, refresh_time(*refreshed, now, false)};
     }
     return *refreshed;
 }
@@ -68,17 +96,15 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
     {
         std::shared_lock lock(mutex_);
         const auto found = entries_.find(key);
-        if (found != entries_.end() &&
-            (found->second.expires_at == 0 || found->second.expires_at > now + 60)) {
-            return found->second;
+        if (found != entries_.end() && reusable(found->second, now)) {
+            return found->second.credentials;
         }
     }
 
     std::unique_lock lock(mutex_);
     const auto found = entries_.find(key);
-    if (found != entries_.end() &&
-        (found->second.expires_at == 0 || found->second.expires_at > now + 60)) {
-        return found->second;
+    if (found != entries_.end() && reusable(found->second, now)) {
+        return found->second.credentials;
     }
 
     auto loaded = provider.load_credentials(config, path);
@@ -89,9 +115,33 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
                          !loaded->sas_token.empty();
     // Never negative-cache credential discovery. One anonymous/missing lookup
     // must not poison later signed requests (the failure reported in GDAL #11964).
-    if (present && loaded->expires_at != 0)
-        entries_[key] = *loaded;
+    if (present && (loaded->expires_at == 0 || loaded->expires_at > now))
+        entries_[key] = Entry{*loaded, refresh_time(*loaded, now, true)};
     return *loaded;
+}
+
+void CredentialCache::invalidate(const ConfigSnapshot& config,
+                                 const backends::CloudProvider& provider, std::string_view path,
+                                 bool custom) {
+    std::unique_lock lock(mutex_);
+    if (!custom) {
+        const std::string key = "native\n" +
+                                std::to_string(static_cast<int>(provider.credentials_kind)) + "\n" +
+                                config.scope_key(path, provider.credential_options);
+        entries_.erase(key);
+        return;
+    }
+
+    const std::string family =
+        "custom\n" + std::to_string(static_cast<int>(provider.credentials_kind)) + "\n";
+    for (auto iterator = entries_.begin(); iterator != entries_.end();) {
+        if (iterator->first.starts_with(family) &&
+            path.starts_with(iterator->second.credentials.cache_prefix)) {
+            iterator = entries_.erase(iterator);
+        } else {
+            ++iterator;
+        }
+    }
 }
 
 } // namespace karu

@@ -23,6 +23,13 @@ std::string virtual_host_url(const UrlParts& endpoint, std::string_view bucket,
            encode_path(key);
 }
 
+std::string signed_host(const UrlParts& url) {
+    const std::string_view default_port = url.scheme == "https" ? ":443" : ":80";
+    if (url.authority.ends_with(default_port))
+        return url.authority.substr(0, url.authority.size() - default_port.size());
+    return url.authority;
+}
+
 std::string hex(std::span<const unsigned char> bytes) {
     static constexpr char DIGITS[] = "0123456789abcdef";
     std::string result(bytes.size() * 2, '\0');
@@ -76,7 +83,7 @@ prepare_s3_get(const S3GetRequest& target, const ProviderCredentials* credential
     const std::string range = range_header(first, length);
     const std::string payload = "UNSIGNED-PAYLOAD";
 
-    std::vector<Header> signed_headers{{"host", url_parts->authority},
+    std::vector<Header> signed_headers{{"host", signed_host(*url_parts)},
                                        {"range", range},
                                        {"x-amz-content-sha256", payload},
                                        {"x-amz-date", timestamp}};
@@ -120,7 +127,9 @@ prepare_s3_get(const S3GetRequest& target, const ProviderCredentials* credential
     headers.emplace_back("Authorization",
                          "AWS4-HMAC-SHA256 Credential=" + credentials->access_key_id + "/" + scope +
                              ", SignedHeaders=" + signed_names + ", Signature=" + signature);
-    return PreparedRequest{std::move(url), std::move(headers)};
+    PreparedRequest request{std::move(url), std::move(headers)};
+    request.http.follow_redirects = false;
+    return request;
 }
 
 } // namespace karu::backends

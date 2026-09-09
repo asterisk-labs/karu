@@ -21,11 +21,22 @@ namespace {
 
 constexpr std::uint64_t kDrainLimit = 256u << 10;
 
-long preferred_http_version() noexcept {
-    const curl_version_info_data* version = curl_version_info(CURLVERSION_NOW);
-    if (version != nullptr && (version->features & CURL_VERSION_HTTP2) != 0)
+long curl_http_version(HttpVersion version) noexcept {
+    switch (version) {
+    case HttpVersion::Automatic:
+        return CURL_HTTP_VERSION_NONE;
+    case HttpVersion::Http2Tls:
         return CURL_HTTP_VERSION_2TLS;
+    case HttpVersion::Http2PriorKnowledge:
+        return CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE;
+    case HttpVersion::Http1_1:
+        return CURL_HTTP_VERSION_1_1;
+    }
     return CURL_HTTP_VERSION_1_1;
+}
+
+bool uses_http2(HttpVersion version) noexcept {
+    return version == HttpVersion::Http2Tls || version == HttpVersion::Http2PriorKnowledge;
 }
 
 std::optional<std::size_t> callback_size(std::size_t size, std::size_t count) noexcept {
@@ -72,7 +83,8 @@ bool parse_u64(std::string_view text, std::uint64_t& value) noexcept {
     return result.ec == std::errc{} && result.ptr == text.data() + text.size();
 }
 
-bool parse_content_range(std::string_view value, std::uint64_t& first) noexcept {
+bool parse_content_range(std::string_view value, std::uint64_t& first, std::uint64_t& last,
+                         std::uint64_t& total, bool& have_total) noexcept {
     constexpr std::string_view prefix = "bytes ";
     if (!value.starts_with(prefix))
         return false;
@@ -83,9 +95,33 @@ bool parse_content_range(std::string_view value, std::uint64_t& first) noexcept 
         dash > slash) {
         return false;
     }
-    std::uint64_t last = 0;
-    return parse_u64(value.substr(0, dash), first) &&
-           parse_u64(value.substr(dash + 1, slash - dash - 1), last) && last >= first;
+    if (!parse_u64(value.substr(0, dash), first) ||
+        !parse_u64(value.substr(dash + 1, slash - dash - 1), last) || last < first) {
+        return false;
+    }
+    const std::string_view total_text = value.substr(slash + 1);
+    have_total = total_text != "*";
+    if (have_total && (!parse_u64(total_text, total) || total == 0 || last >= total))
+        return false;
+    return !total_text.empty();
+}
+
+bool parse_unsatisfied_content_range(std::string_view value, std::uint64_t& total) noexcept {
+    constexpr std::string_view prefix = "bytes */";
+    return value.starts_with(prefix) && parse_u64(value.substr(prefix.size()), total);
+}
+
+bool valid_content_range(const Transfer& transfer) noexcept {
+    if (!transfer.content_range_seen || !transfer.content_range_valid ||
+        transfer.content_range_start != transfer.offset) {
+        return false;
+    }
+    const std::uint64_t requested_end = transfer.offset + transfer.length - 1;
+    if (transfer.content_range_end > requested_end)
+        return false;
+    return transfer.content_range_end == requested_end ||
+           (transfer.content_range_has_total &&
+            transfer.content_range_end + 1 == transfer.content_range_total);
 }
 
 std::size_t write_callback(char* data, std::size_t size, std::size_t count,
@@ -102,12 +138,14 @@ std::size_t write_callback(char* data, std::size_t size, std::size_t count,
     if (!transfer.checked_status) {
         transfer.checked_status = true;
         curl_easy_getinfo(transfer.easy.get(), CURLINFO_RESPONSE_CODE, &transfer.http_status);
-        if (transfer.http_status == 206 &&
-            (!transfer.content_range_seen || !transfer.content_range_valid ||
-             transfer.content_range_start != transfer.offset)) {
+        if (transfer.http_status == 206 && !valid_content_range(transfer)) {
             return 0;
         }
         if (transfer.http_status == 200 && transfer.offset > 0) {
+            if (transfer.offset > transfer.range_fallback_limit) {
+                transfer.range_fallback_rejected = true;
+                return 0;
+            }
             transfer.skip = transfer.offset;
         }
         curl_off_t body_length = -1;
@@ -119,16 +157,19 @@ std::size_t write_callback(char* data, std::size_t size, std::size_t count,
                 : transfer.skip + transfer.length;
     }
 
-    if (transfer.http_status >= 300 && transfer.http_status < 400) {
+    if (transfer.http_status >= 300 && transfer.http_status < 400 &&
+        transfer.http->follow_redirects) {
         return *incoming;
     }
 
-    if (transfer.http_status >= 400) {
-        const std::size_t room = transfer.error_body.size() - transfer.error_body_size;
+    if (transfer.http_status >= 300) {
+        const std::size_t room =
+            transfer.http_buffers->error_body.size() - transfer.error_body_size;
         const std::size_t take = std::min(room, *incoming);
-        std::memcpy(transfer.error_body.data() + transfer.error_body_size, data, take);
+        std::memcpy(transfer.http_buffers->error_body.data() + transfer.error_body_size, data,
+                    take);
         transfer.error_body_size += take;
-        return *incoming;
+        return take == *incoming ? *incoming : 0;
     }
 
     if (transfer.skip > 0) {
@@ -181,11 +222,19 @@ std::size_t header_callback(char* data, std::size_t size, std::size_t count,
         transfer.http_status = 0;
         transfer.content_range_seen = false;
         transfer.content_range_valid = false;
+        transfer.content_range_has_total = false;
+        transfer.range_fallback_rejected = false;
+        transfer.response_region.clear();
+        transfer.retry_after = 0;
         transfer.error_body_size = 0;
     } else if (header_name_is(line, "content-range:")) {
         transfer.content_range_seen = true;
         transfer.content_range_valid =
-            parse_content_range(header_value(line, "content-range:"), transfer.content_range_start);
+            parse_content_range(header_value(line, "content-range:"), transfer.content_range_start,
+                                transfer.content_range_end, transfer.content_range_total,
+                                transfer.content_range_has_total);
+        if (transfer.content_range_valid)
+            transfer.content_range_valid = valid_content_range(transfer);
     } else if (header_name_is(line, "x-amz-bucket-region:")) {
         transfer.response_region = std::string(header_value(line, "x-amz-bucket-region:"));
     } else if (header_name_is(line, "retry-after:")) {
@@ -271,11 +320,36 @@ std::expected<void, std::string> restrict_to_http(CURL* easy) {
 #endif
 }
 
+std::expected<void, std::string> apply_http_options(CURL* easy, const HttpRequestOptions& options) {
+    if (auto result = set_options(easy, CURLOPT_FOLLOWLOCATION, options.follow_redirects ? 1L : 0L,
+                                  CURLOPT_HTTP_VERSION, curl_http_version(options.version),
+                                  CURLOPT_PIPEWAIT, uses_http2(options.version) ? 1L : 0L);
+        !result) {
+        return result;
+    }
+    const auto apply_string = [&](CURLoption option, const std::string& value) {
+        return value.empty() ? std::expected<void, std::string>{}
+                             : set_option(easy, option, value.c_str());
+    };
+    if (auto result = apply_string(CURLOPT_CAINFO, options.ca_bundle); !result)
+        return result;
+    if (auto result = apply_string(CURLOPT_CAPATH, options.ca_path); !result)
+        return result;
+    if (auto result = apply_string(CURLOPT_PROXY, options.proxy); !result)
+        return result;
+    if (auto result = apply_string(CURLOPT_PROXYUSERPWD, options.proxy_user_password); !result)
+        return result;
+    return apply_string(CURLOPT_USERAGENT, options.user_agent);
+}
+
 struct SizeState {
     CURL* easy = nullptr;
     std::uint64_t total = 0;
     bool have_total = false;
     bool cut_short = false;
+    bool content_range_valid = false;
+    bool unsatisfied_content_range_valid = false;
+    bool follow_redirects = true;
     int retry_after = 0;
     std::string response_region;
     std::array<char, 512> error_body{};
@@ -290,18 +364,17 @@ std::size_t size_body_callback(char* data, std::size_t size, std::size_t count,
     auto& state = *static_cast<SizeState*>(userdata);
     long status = 0;
     curl_easy_getinfo(state.easy, CURLINFO_RESPONSE_CODE, &status);
-    if (status >= 400) {
+    if (status >= 300 && status < 400 && state.follow_redirects)
+        return *bytes;
+    if (status >= 300) {
         const std::size_t room = state.error_body.size() - state.error_body_size;
         const std::size_t take = std::min(room, *bytes);
         std::memcpy(state.error_body.data() + state.error_body_size, data, take);
         state.error_body_size += take;
-        return *bytes;
+        return take == *bytes ? *bytes : 0;
     }
-    if (status == 200) {
-        state.cut_short = true;
-        return 0;
-    }
-    return *bytes;
+    state.cut_short = true;
+    return 0;
 }
 
 std::size_t size_header_callback(char* data, std::size_t size, std::size_t count,
@@ -316,13 +389,31 @@ std::size_t size_header_callback(char* data, std::size_t size, std::size_t count
         state.total = 0;
         state.have_total = false;
         state.cut_short = false;
+        state.content_range_valid = false;
+        state.unsatisfied_content_range_valid = false;
+        state.retry_after = 0;
+        state.response_region.clear();
         state.error_body_size = 0;
     } else if (header_name_is(line, "content-range:")) {
         const std::string_view value = header_value(line, "content-range:");
-        const auto slash = value.rfind('/');
-        if (slash != std::string_view::npos) {
-            const std::string_view total = value.substr(slash + 1);
-            state.have_total = total != "*" && parse_u64(total, state.total);
+        std::uint64_t first = 0;
+        std::uint64_t last = 0;
+        std::uint64_t parsed_total = 0;
+        bool parsed_have_total = false;
+        state.content_range_valid =
+            parse_content_range(value, first, last, parsed_total, parsed_have_total) &&
+            first == 0 && last == 0;
+        if (state.content_range_valid && parsed_have_total) {
+            state.total = parsed_total;
+            state.have_total = true;
+            return *bytes;
+        }
+        std::uint64_t unsatisfied_total = 0;
+        state.unsatisfied_content_range_valid =
+            parse_unsatisfied_content_range(value, unsatisfied_total);
+        if (state.unsatisfied_content_range_valid) {
+            state.total = unsatisfied_total;
+            state.have_total = true;
         }
     } else if (header_name_is(line, "x-amz-bucket-region:")) {
         state.response_region = std::string(header_value(line, "x-amz-bucket-region:"));
@@ -359,6 +450,8 @@ bool ensure_sink(Transfer& transfer) noexcept {
 
 std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
                                            const ClientOptions& options) {
+    if (!transfer.http || !transfer.http_buffers)
+        return std::unexpected("HTTP transfer state is not initialized");
     transfer.received = 0;
     transfer.skip = 0;
     transfer.body_length = -1;
@@ -369,10 +462,15 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
     transfer.content_range_seen = false;
     transfer.content_range_valid = false;
     transfer.content_range_start = 0;
+    transfer.content_range_end = 0;
+    transfer.content_range_total = 0;
+    transfer.content_range_has_total = false;
+    transfer.range_fallback_limit = options.range_fallback_limit;
+    transfer.range_fallback_rejected = false;
     transfer.response_region.clear();
     transfer.retry_after = 0;
     transfer.error_body_size = 0;
-    transfer.error_buffer[0] = '\0';
+    transfer.http_buffers->error[0] = '\0';
 
     const std::string range =
         concat("bytes=", transfer.offset, "-", transfer.offset + transfer.length - 1);
@@ -385,17 +483,17 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
         transfer.easy.get(), CURLOPT_URL, transfer.url().c_str(), CURLOPT_WRITEFUNCTION,
         write_callback, CURLOPT_WRITEDATA, &transfer, CURLOPT_HEADERFUNCTION, header_callback,
         CURLOPT_HEADERDATA, &transfer, CURLOPT_PRIVATE, &transfer, CURLOPT_SHARE, share,
-        CURLOPT_ERRORBUFFER, transfer.error_buffer.data(), CURLOPT_NOSIGNAL, 1L, CURLOPT_PATH_AS_IS,
-        1L, CURLOPT_FOLLOWLOCATION, 1L, CURLOPT_UNRESTRICTED_AUTH, 0L, CURLOPT_MAXREDIRS, 10L,
-        CURLOPT_TCP_KEEPALIVE, 1L, CURLOPT_PIPEWAIT,
-        transfer.url().starts_with("https://") ? 1L : 0L, CURLOPT_HTTP_VERSION,
-        preferred_http_version(), CURLOPT_CONNECTTIMEOUT, options.connect_timeout_seconds,
+        CURLOPT_ERRORBUFFER, transfer.http_buffers->error.data(), CURLOPT_NOSIGNAL, 1L,
+        CURLOPT_PATH_AS_IS, 1L, CURLOPT_UNRESTRICTED_AUTH, 0L, CURLOPT_MAXREDIRS, 10L,
+        CURLOPT_TCP_KEEPALIVE, 1L, CURLOPT_CONNECTTIMEOUT, options.connect_timeout_seconds,
         CURLOPT_LOW_SPEED_LIMIT, options.low_speed_limit, CURLOPT_LOW_SPEED_TIME,
-        options.low_speed_time_seconds);
+        options.low_speed_time_seconds, CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
     if (!configured)
         return configured;
     if (auto protocols = restrict_to_http(transfer.easy.get()); !protocols)
         return protocols;
+    if (auto http = apply_http_options(transfer.easy.get(), *transfer.http); !http)
+        return http;
     if (transfer.headers) {
         return set_option(transfer.easy.get(), CURLOPT_HTTPHEADER, transfer.headers.get());
     }
@@ -413,14 +511,14 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
     std::array<char, CURL_ERROR_SIZE> error_buffer{};
     SizeState state;
     state.easy = easy.get();
-    auto configured = set_options(
-        easy.get(), CURLOPT_HEADERFUNCTION, size_header_callback, CURLOPT_HEADERDATA, &state,
-        CURLOPT_WRITEFUNCTION, size_body_callback, CURLOPT_WRITEDATA, &state, CURLOPT_SHARE, share,
-        CURLOPT_ERRORBUFFER, error_buffer.data(), CURLOPT_NOSIGNAL, 1L, CURLOPT_PATH_AS_IS, 1L,
-        CURLOPT_FOLLOWLOCATION, 1L, CURLOPT_UNRESTRICTED_AUTH, 0L, CURLOPT_MAXREDIRS, 10L,
-        CURLOPT_CONNECTTIMEOUT, options.connect_timeout_seconds, CURLOPT_LOW_SPEED_LIMIT,
-        options.low_speed_limit, CURLOPT_LOW_SPEED_TIME, options.low_speed_time_seconds,
-        CURLOPT_HTTP_VERSION, preferred_http_version());
+    auto configured =
+        set_options(easy.get(), CURLOPT_HEADERFUNCTION, size_header_callback, CURLOPT_HEADERDATA,
+                    &state, CURLOPT_WRITEFUNCTION, size_body_callback, CURLOPT_WRITEDATA, &state,
+                    CURLOPT_SHARE, share, CURLOPT_ERRORBUFFER, error_buffer.data(),
+                    CURLOPT_NOSIGNAL, 1L, CURLOPT_PATH_AS_IS, 1L, CURLOPT_UNRESTRICTED_AUTH, 0L,
+                    CURLOPT_MAXREDIRS, 10L, CURLOPT_CONNECTTIMEOUT, options.connect_timeout_seconds,
+                    CURLOPT_LOW_SPEED_LIMIT, options.low_speed_limit, CURLOPT_LOW_SPEED_TIME,
+                    options.low_speed_time_seconds, CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
     if (!configured) {
         return std::unexpected(Failure{KARU_ERR_NETWORK, configured.error()});
     }
@@ -432,6 +530,7 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
     std::mt19937 random{static_cast<std::mt19937::result_type>(seed)};
     std::string region_hint;
     bool region_retried = false;
+    bool credentials_retried = false;
     for (int attempt = 0; attempt < options.max_attempts;) {
         auto request = request_builder.prepare(locator, 0, 1, region_hint);
         if (!request) {
@@ -447,14 +546,23 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
         if (auto result = set_option(easy.get(), CURLOPT_URL, request->url.c_str()); !result) {
             return std::unexpected(Failure{KARU_ERR_NETWORK, result.error()});
         }
+        if (auto result = apply_http_options(easy.get(), request->http); !result)
+            return std::unexpected(Failure{KARU_ERR_NETWORK, result.error()});
+        region_hint = request->routing_region;
 
-        state = SizeState{.easy = easy.get(), .response_region = {}};
+        state = SizeState{.easy = easy.get(),
+                          .follow_redirects = request->http.follow_redirects,
+                          .response_region = {}};
         error_buffer[0] = '\0';
         CURLcode code = curl_easy_perform(easy.get());
         long http_status = 0;
         curl_easy_getinfo(easy.get(), CURLINFO_RESPONSE_CODE, &http_status);
         if (code == CURLE_WRITE_ERROR && state.cut_short)
             code = CURLE_OK;
+
+        const std::string_view error_body(state.error_body.data(), state.error_body_size);
+        if (state.response_region.empty() && locator.resolved.backend == Backend::S3)
+            state.response_region = detail::s3_region(error_body);
 
         if (http_status >= 300 && !region_retried && !state.response_region.empty() &&
             state.response_region != region_hint && locator.resolved.backend == Backend::S3) {
@@ -463,11 +571,33 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
             continue;
         }
 
-        if (code == CURLE_OK && http_status == 416 && state.have_total && state.total == 0) {
-            return std::uint64_t{0};
+        if (!credentials_retried &&
+            detail::credentials_expired(locator.resolved.backend, http_status, error_body)) {
+            request_builder.invalidate_credentials(locator);
+            credentials_retried = true;
+            continue;
         }
 
-        if (code == CURLE_OK && http_status >= 200 && http_status < 300) {
+        if (code == CURLE_OK && http_status == 416) {
+            if (state.unsatisfied_content_range_valid && state.total == 0)
+                return std::uint64_t{0};
+            if (!state.unsatisfied_content_range_valid) {
+                return std::unexpected(
+                    Failure{KARU_ERR_HTTP, concat(redact_url(request->url),
+                                                  ": invalid Content-Range in HTTP 416")});
+            }
+        }
+
+        if (code == CURLE_OK && http_status == 206) {
+            if (!state.content_range_valid || !state.have_total) {
+                return std::unexpected(
+                    Failure{KARU_ERR_HTTP, concat(redact_url(request->url),
+                                                  ": partial response has no valid object size")});
+            }
+            return state.total;
+        }
+
+        if (code == CURLE_OK && http_status == 200) {
             if (!state.have_total) {
                 curl_off_t length = -1;
                 curl_easy_getinfo(easy.get(), CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &length);
@@ -478,13 +608,19 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
             }
             if (!state.have_total) {
                 return std::unexpected(
-                    Failure{KARU_ERR_HTTP, concat(request->url, ": the server reported no size")});
+                    Failure{KARU_ERR_HTTP,
+                            concat(redact_url(request->url), ": the server reported no size")});
             }
             return state.total;
         }
 
+        if (code == CURLE_OK && http_status >= 200 && http_status < 300) {
+            return std::unexpected(
+                Failure{KARU_ERR_HTTP, concat(redact_url(request->url), ": unexpected HTTP ",
+                                              http_status, " response to size request")});
+        }
+
         ++attempt;
-        const std::string_view error_body(state.error_body.data(), state.error_body_size);
         const bool request_timeout =
             http_status == 400 && error_body.find("RequestTimeout") != std::string_view::npos;
         if (attempt < options.max_attempts &&
@@ -497,13 +633,15 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
             continue;
         }
 
-        if (code != CURLE_OK && http_status >= 300 && http_status < 400) {
+        if (code != CURLE_OK && http_status >= 300 && http_status < 400 &&
+            request->http.follow_redirects) {
             const char* message =
                 error_buffer[0] != '\0' ? error_buffer.data() : curl_easy_strerror(code);
-            return std::unexpected(Failure{KARU_ERR_NETWORK, concat(request->url, ": ", message)});
+            return std::unexpected(
+                Failure{KARU_ERR_NETWORK, concat(redact_url(request->url), ": ", message)});
         }
         if (http_status >= 300) {
-            std::string detail = concat(request->url, ": HTTP ", http_status);
+            std::string detail = concat(redact_url(request->url), ": HTTP ", http_status);
             if (const std::string body = detail::summarize(error_body); !body.empty()) {
                 detail += ": " + body;
             }
@@ -512,7 +650,8 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURLSH* sh
         }
         const char* message =
             error_buffer[0] != '\0' ? error_buffer.data() : curl_easy_strerror(code);
-        return std::unexpected(Failure{KARU_ERR_NETWORK, concat(request->url, ": ", message)});
+        return std::unexpected(
+            Failure{KARU_ERR_NETWORK, concat(redact_url(request->url), ": ", message)});
     }
 
     return std::unexpected(Failure{KARU_ERR_NETWORK, "size request exhausted its retries"});

@@ -2,8 +2,6 @@
 #include "credentials.hpp"
 #include "url.hpp"
 
-#include <filesystem>
-
 namespace karu::backends {
 namespace {
 
@@ -16,14 +14,11 @@ std::expected<std::string, RequestError> hugging_face_token(const ConfigSnapshot
     if (token_path.empty())
         return std::string{};
 
-    std::error_code error;
-    if (!std::filesystem::exists(token_path, error)) {
-        if (!error)
-            return std::string{};
-        return std::unexpected(
-            RequestError{KARU_ERR_CREDENTIALS, "Hugging Face token: cannot inspect '" + token_path +
-                                                   "': " + error.message()});
-    }
+    auto exists = path_exists(token_path, "Hugging Face token");
+    if (!exists)
+        return std::unexpected(exists.error());
+    if (!*exists)
+        return std::string{};
 
     auto contents = read_text_file(token_path, "Hugging Face token");
     if (!contents)

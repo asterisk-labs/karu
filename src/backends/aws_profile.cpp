@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstdio>
-#include <filesystem>
 
 namespace karu::backends {
 namespace {
@@ -54,13 +53,21 @@ read_aws_profile(const ConfigSnapshot& config, std::string_view path, std::strin
     const std::string credentials_path = config.expand_user_path(
         config.option(path, credentials_file_option, config.default_aws_path("credentials")));
 
+    auto config_exists = path_exists(config_path, std::string(label) + " config file");
+    if (!config_exists)
+        return std::unexpected(config_exists.error());
+    auto credentials_exists =
+        path_exists(credentials_path, std::string(label) + " shared credentials file");
+    if (!credentials_exists)
+        return std::unexpected(credentials_exists.error());
+
     AwsProfile result;
-    if (config.has_option(path, config_file_option) && !std::filesystem::exists(config_path)) {
+    if (config.has_option(path, config_file_option) && !*config_exists) {
         return std::unexpected(RequestError{KARU_ERR_CREDENTIALS,
                                             std::string(label) + " config file does not exist: '" +
                                                 config_path + "'"});
     }
-    if (std::filesystem::exists(config_path)) {
+    if (*config_exists) {
         auto file = read_ini(config_path, std::string(label) + " config");
         if (!file)
             return std::unexpected(file.error());
@@ -72,14 +79,13 @@ read_aws_profile(const ConfigSnapshot& config, std::string_view path, std::strin
         }
     }
 
-    if (config.has_option(path, credentials_file_option) &&
-        !std::filesystem::exists(credentials_path)) {
+    if (config.has_option(path, credentials_file_option) && !*credentials_exists) {
         return std::unexpected(
             RequestError{KARU_ERR_CREDENTIALS, std::string(label) +
                                                    " shared credentials file does not exist: '" +
                                                    credentials_path + "'"});
     }
-    if (std::filesystem::exists(credentials_path)) {
+    if (*credentials_exists) {
         auto file = read_ini(credentials_path, std::string(label) + " shared credentials");
         if (!file)
             return std::unexpected(file.error());

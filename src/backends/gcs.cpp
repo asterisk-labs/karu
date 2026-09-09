@@ -66,7 +66,9 @@ prepare_gcs(const ConfigSnapshot& config, const Resolved& object, const Provider
     }
     if (!credentials.bearer_token.empty()) {
         headers.emplace_back("Authorization", "Bearer " + credentials.bearer_token);
-        return PreparedRequest{std::move(url), std::move(headers)};
+        PreparedRequest request{std::move(url), std::move(headers)};
+        request.http.follow_redirects = false;
+        return request;
     }
     if (!credentials.access_key_id.empty() && !credentials.secret_access_key.empty()) {
         const std::string date = rfc7231_date(std::time(nullptr));
@@ -80,7 +82,9 @@ prepare_gcs(const ConfigSnapshot& config, const Resolved& object, const Provider
         headers.emplace_back("Date", date);
         headers.emplace_back("Authorization", "GOOG1 " + credentials.access_key_id + ":" +
                                                   base64(hmac(EVP_sha1(), key, canonical)));
-        return PreparedRequest{std::move(url), std::move(headers)};
+        PreparedRequest request{std::move(url), std::move(headers)};
+        request.http.follow_redirects = false;
+        return request;
     }
     return std::unexpected(
         RequestError{KARU_ERR_CREDENTIALS,

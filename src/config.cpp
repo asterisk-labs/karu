@@ -52,6 +52,12 @@ bool valid_boolean(std::string_view value) {
            normalized == "1" || normalized == "0";
 }
 
+bool valid_http_version(std::string_view value) {
+    const std::string normalized = uppercase(value);
+    return normalized == "AUTO" || normalized == "1.1" || normalized == "2" ||
+           normalized == "2TLS" || normalized == "2PRIOR_KNOWLEDGE";
+}
+
 std::string append_local_path(std::string base, std::string_view suffix) {
     if (!base.empty() && base.back() != '/' && base.back() != '\\')
         base.push_back('/');
@@ -84,6 +90,10 @@ std::expected<void, std::string> validate_values(const OptionMap& values) {
         value != nullptr && uppercase(*value) != "REQUESTER") {
         return std::unexpected(std::string("AWS_REQUEST_PAYER must be 'requester'"));
     }
+    if (const std::string* value = find(values, "GDAL_HTTP_VERSION");
+        value != nullptr && !valid_http_version(*value)) {
+        return std::unexpected("GDAL_HTTP_VERSION must be AUTO, 1.1, 2TLS, 2, or 2PRIOR_KNOWLEDGE");
+    }
     return {};
 }
 
@@ -113,6 +123,8 @@ std::string canonical_option_name(std::string_view name) {
         return "CPL_GS_ENDPOINT";
     if (result == "HUGGING_FACE_HUB_TOKEN")
         return "HF_TOKEN";
+    if (result == "CURL_CA_BUNDLE" || result == "SSL_CERT_FILE")
+        return "GDAL_CURL_CA_BUNDLE";
     if (result == "SOURCE_PROXY_URL")
         return "SOURCE_ENDPOINT";
     return result;
@@ -338,6 +350,23 @@ std::string ConfigSnapshot::hugging_face_token_path(std::string_view path) const
     return home_directory_ + "/.cache/huggingface/token";
 }
 
+HttpRequestOptions ConfigSnapshot::http_options(std::string_view path) const {
+    HttpRequestOptions result;
+    const std::string version = uppercase(option(path, "GDAL_HTTP_VERSION", "1.1"));
+    if (version == "AUTO")
+        result.version = HttpVersion::Automatic;
+    else if (version == "2" || version == "2TLS")
+        result.version = HttpVersion::Http2Tls;
+    else if (version == "2PRIOR_KNOWLEDGE")
+        result.version = HttpVersion::Http2PriorKnowledge;
+    result.ca_bundle = option(path, "GDAL_CURL_CA_BUNDLE");
+    result.ca_path = option(path, "GDAL_HTTP_CAPATH");
+    result.proxy = option(path, "GDAL_HTTP_PROXY");
+    result.proxy_user_password = option(path, "GDAL_HTTP_PROXYUSERPWD");
+    result.user_agent = option(path, "GDAL_HTTP_USERAGENT");
+    return result;
+}
+
 std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
     ConfigSnapshot result;
     result.environment_ = environment_;
@@ -362,7 +391,7 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
         return result.option({}, name, fallback);
     };
     auto concurrency =
-        parse_integer<int>("KARU_CONCURRENCY", global("KARU_CONCURRENCY", "256"), 1, 4096);
+        parse_integer<int>("KARU_CONCURRENCY", global("KARU_CONCURRENCY", "64"), 1, 4096);
     if (!concurrency)
         return std::unexpected(concurrency.error());
     auto gap =
@@ -370,6 +399,24 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
                                      std::numeric_limits<std::uint64_t>::max());
     if (!gap)
         return std::unexpected(gap.error());
+    auto coalesce_limit = parse_integer<std::uint64_t>("KARU_COALESCE_LIMIT",
+                                                       global("KARU_COALESCE_LIMIT", "67108864"), 1,
+                                                       std::numeric_limits<std::uint64_t>::max());
+    if (!coalesce_limit)
+        return std::unexpected(coalesce_limit.error());
+    auto coalesce_parts = parse_integer<std::size_t>(
+        "KARU_COALESCE_PARTS", global("KARU_COALESCE_PARTS", "1024"), 1, 1048576);
+    if (!coalesce_parts)
+        return std::unexpected(coalesce_parts.error());
+    auto coalesce_amplification = parse_integer<std::uint64_t>(
+        "KARU_COALESCE_AMPLIFICATION", global("KARU_COALESCE_AMPLIFICATION", "16"), 1, 1048576);
+    if (!coalesce_amplification)
+        return std::unexpected(coalesce_amplification.error());
+    auto range_fallback_limit = parse_integer<std::uint64_t>(
+        "KARU_RANGE_FALLBACK_LIMIT", global("KARU_RANGE_FALLBACK_LIMIT", "8388608"), 0,
+        std::numeric_limits<std::uint64_t>::max());
+    if (!range_fallback_limit)
+        return std::unexpected(range_fallback_limit.error());
     auto attempts =
         parse_integer<int>("KARU_MAX_ATTEMPTS", global("KARU_MAX_ATTEMPTS", "3"), 1, 16);
     if (!attempts)
@@ -388,7 +435,16 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
     if (!low_limit)
         return std::unexpected(low_limit.error());
 
-    result.client_ = ClientOptions{*concurrency, *gap, *attempts, *connect, *low_time, *low_limit};
+    result.client_ = ClientOptions{.concurrency = *concurrency,
+                                   .coalesce_gap = *gap,
+                                   .coalesce_limit = *coalesce_limit,
+                                   .coalesce_parts = *coalesce_parts,
+                                   .coalesce_amplification = *coalesce_amplification,
+                                   .range_fallback_limit = *range_fallback_limit,
+                                   .max_attempts = *attempts,
+                                   .connect_timeout_seconds = *connect,
+                                   .low_speed_time_seconds = *low_time,
+                                   .low_speed_limit = *low_limit};
     return result;
 }
 

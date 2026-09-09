@@ -3,6 +3,7 @@
 #include "locator.hpp"
 #include "runtime/batch.hpp"
 #include "runtime/engine.hpp"
+#include "runtime/http_response.hpp"
 #include "runtime/planner.hpp"
 #include "runtime/transport.hpp"
 #include "test_support.hpp"
@@ -217,11 +218,15 @@ void test_planner_scope() {
     };
     karu::BatchCore no_merge;
     karu_status status = KARU_OK;
-    auto separate = karu::plan_transfers(no_merge, requests, 0, status);
+    karu::ClientOptions options;
+    options.coalesce_gap = 0;
+    auto separate = karu::plan_transfers(no_merge, requests, options, status);
     EQ(status, KARU_OK);
     EQ(separate.transfers.size(), 2u);
+    OK(separate.transfers[0]->locator == separate.transfers[1]->locator);
     karu::BatchCore merge;
-    auto together = karu::plan_transfers(merge, requests, 1, status);
+    options.coalesce_gap = 1;
+    auto together = karu::plan_transfers(merge, requests, options, status);
     EQ(status, KARU_OK);
     EQ(together.transfers.size(), 1u);
 
@@ -230,14 +235,37 @@ void test_planner_scope() {
         {&object, first.size(), second.size(), second.data(), nullptr, "\"two\""},
     };
     karu::BatchCore identities;
-    auto isolated = karu::plan_transfers(identities, conditioned, 1, status);
+    auto isolated = karu::plan_transfers(identities, conditioned, options, status);
     EQ(status, KARU_OK);
     EQ(isolated.transfers.size(), 2u);
+
+    const karu::Request sparse[] = {
+        {&object, 0, 1, first.data(), nullptr, {}},
+        {&object, 100, 1, second.data(), nullptr, {}},
+    };
+    options.coalesce_gap = 100;
+    options.coalesce_limit = 64;
+    karu::BatchCore span_limited;
+    auto spans = karu::plan_transfers(span_limited, sparse, options, status);
+    EQ(spans.transfers.size(), 2u);
+
+    options.coalesce_limit = 1024;
+    options.coalesce_amplification = 16;
+    karu::BatchCore amplification_limited;
+    auto amplified = karu::plan_transfers(amplification_limited, sparse, options, status);
+    EQ(amplified.transfers.size(), 2u);
+
+    options.coalesce_amplification = 1024;
+    options.coalesce_parts = 1;
+    karu::BatchCore part_limited;
+    auto parts = karu::plan_transfers(part_limited, sparse, options, status);
+    EQ(parts.transfers.size(), 2u);
 }
 
 void test_transport_statuses() {
     SECTION("transport status classification");
     karu::Transfer transfer;
+    transfer.http_buffers = std::make_unique<karu::HttpBuffers>();
     transfer.request_url = "https://example.test/object";
     transfer.http_status = 302;
     OK(!karu::transport::succeeded(transfer, CURLE_OK));
@@ -246,6 +274,22 @@ void test_transport_statuses() {
     EQ(karu::transport::failure(transfer, CURLE_OK).status, KARU_ERR_NOT_FOUND);
     transfer.http_status = 412;
     EQ(karu::transport::failure(transfer, CURLE_OK).status, KARU_ERR_PRECONDITION);
+    transfer.request_url = "https://example.test/object?token=secret";
+    transfer.http_status = 404;
+    const auto redacted = karu::transport::failure(transfer, CURLE_OK);
+    OK(redacted.detail.find("secret") == std::string::npos);
+    OK(redacted.detail.find("<redacted>") != std::string::npos);
+
+    auto transfer_locator = std::make_shared<karu::Locator>();
+    transfer_locator->resolved.backend = karu::Backend::S3;
+    transfer.locator = std::move(transfer_locator);
+    transfer.http_status = 403;
+    constexpr std::string_view expired = "<Error><Code>ExpiredToken</Code></Error>";
+    std::memcpy(transfer.http_buffers->error_body.data(), expired.data(), expired.size());
+    transfer.error_body_size = expired.size();
+    OK(karu::transport::detail::credentials_expired(transfer));
+    EQS(karu::transport::detail::s3_region("<Error><Region>eu-west-1</Region></Error>"),
+        "eu-west-1");
 }
 
 void test_cpp_facade() {

@@ -32,8 +32,10 @@ bool resource_less(const Request& left, const Request& right) {
 }
 
 std::string range_error(const Request& request, std::string_view reason) {
-    return concat(request.locator->resolved.canonical_uri, ": range [", request.offset, ", +",
-                  request.length, ") ", reason);
+    const auto& resolved = request.locator->resolved;
+    const std::string uri = resolved.backend == Backend::Http ? redact_url(resolved.canonical_uri)
+                                                              : resolved.canonical_uri;
+    return concat(uri, ": range [", request.offset, ", +", request.length, ") ", reason);
 }
 
 std::optional<ValidatedRequest> validate(const Request& request, std::string& error) {
@@ -66,10 +68,17 @@ bool allocate_part(Part& part) {
     return part.buffer != nullptr;
 }
 
+bool excessive_amplification(std::uint64_t span, std::uint64_t useful,
+                             std::uint64_t maximum) noexcept {
+    if (useful > std::numeric_limits<std::uint64_t>::max() / maximum)
+        return false;
+    return span > useful * maximum;
+}
+
 } // namespace
 
-TransferPlan plan_transfers(BatchCore& batch, std::span<const Request> requests, std::uint64_t gap,
-                            karu_status& status) {
+TransferPlan plan_transfers(BatchCore& batch, std::span<const Request> requests,
+                            const ClientOptions& options, karu_status& status) {
     TransferPlan plan;
     status = KARU_OK;
 
@@ -111,11 +120,18 @@ TransferPlan plan_transfers(BatchCore& batch, std::span<const Request> requests,
                          return left.absolute_offset < right.absolute_offset;
                      });
 
+    std::shared_ptr<const Locator> shared_locator;
     for (std::size_t first = 0; first < valid.size();) {
         const auto& head = valid[first];
+        if (!shared_locator ||
+            shared_locator->resolved.backend != head.request->locator->resolved.backend ||
+            shared_locator->resolved.canonical_uri !=
+                head.request->locator->resolved.canonical_uri) {
+            shared_locator = std::make_shared<Locator>(*head.request->locator);
+        }
         auto transfer = std::make_unique<Transfer>();
         transfer->batch = &batch;
-        transfer->locator = *head.request->locator;
+        transfer->locator = shared_locator;
         transfer->offset = head.absolute_offset;
         transfer->length = head.request->length;
         transfer->if_match = head.request->if_match;
@@ -126,20 +142,32 @@ TransferPlan plan_transfers(BatchCore& batch, std::span<const Request> requests,
         transfer->parts.push_back(std::move(first_part));
 
         std::uint64_t last_byte = head.last_byte;
+        std::uint64_t useful_bytes = head.request->length;
         std::size_t next = first + 1;
-        while (gap > 0 && next < valid.size()) {
+        while (options.coalesce_gap > 0 && next < valid.size()) {
             const auto& candidate = valid[next];
             if (!same_resource(*head.request, *candidate.request)) {
                 break;
             }
             if (candidate.absolute_offset > last_byte) {
                 const std::uint64_t distance = candidate.absolute_offset - last_byte;
-                if (distance - 1 > gap)
+                if (distance - 1 > options.coalesce_gap)
                     break;
             }
             const std::uint64_t merged_last = std::max(last_byte, candidate.last_byte);
             if (merged_last - transfer->offset == std::numeric_limits<std::uint64_t>::max())
                 break;
+            const std::uint64_t merged_length = merged_last - transfer->offset + 1;
+            const std::uint64_t merged_useful =
+                candidate.request->length > std::numeric_limits<std::uint64_t>::max() - useful_bytes
+                    ? std::numeric_limits<std::uint64_t>::max()
+                    : useful_bytes + candidate.request->length;
+            if (transfer->parts.size() == options.coalesce_parts ||
+                merged_length > options.coalesce_limit ||
+                excessive_amplification(merged_length, merged_useful,
+                                        options.coalesce_amplification)) {
+                break;
+            }
             Part part{};
             part.relative_offset = candidate.absolute_offset - transfer->offset;
             part.length = candidate.request->length;
@@ -147,6 +175,7 @@ TransferPlan plan_transfers(BatchCore& batch, std::span<const Request> requests,
             part.tag = candidate.request->tag;
             transfer->parts.push_back(std::move(part));
             last_byte = merged_last;
+            useful_bytes = merged_useful;
             ++next;
         }
         transfer->length = last_byte - transfer->offset + 1;
