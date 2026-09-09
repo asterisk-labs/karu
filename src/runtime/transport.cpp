@@ -124,6 +124,16 @@ bool valid_content_range(const Transfer& transfer) noexcept {
             transfer.content_range_end + 1 == transfer.content_range_total);
 }
 
+template <std::size_t Capacity>
+void capture_error_body(std::array<char, Capacity>& destination, std::size_t& used,
+                        const char* data, std::size_t size) noexcept {
+    const std::size_t take = std::min(destination.size() - used, size);
+    if (take > 0) {
+        std::memcpy(destination.data() + used, data, take);
+        used += take;
+    }
+}
+
 std::size_t write_callback(char* data, std::size_t size, std::size_t count,
                            void* userdata) noexcept {
     const auto incoming = callback_size(size, count);
@@ -163,13 +173,13 @@ std::size_t write_callback(char* data, std::size_t size, std::size_t count,
     }
 
     if (transfer.http_status >= 300) {
-        const std::size_t room =
-            transfer.http_buffers->error_body.size() - transfer.error_body_size;
-        const std::size_t take = std::min(room, *incoming);
-        std::memcpy(transfer.http_buffers->error_body.data() + transfer.error_body_size, data,
-                    take);
-        transfer.error_body_size += take;
-        return take == *incoming ? *incoming : 0;
+        capture_error_body(transfer.http_buffers->error_body, transfer.error_body_size, data,
+                           *incoming);
+        if (*incoming > kDrainLimit - std::min(kDrainLimit, transfer.error_body_received)) {
+            return 0;
+        }
+        transfer.error_body_received += *incoming;
+        return *incoming;
     }
 
     if (transfer.skip > 0) {
@@ -222,11 +232,13 @@ std::size_t header_callback(char* data, std::size_t size, std::size_t count,
         transfer.http_status = 0;
         transfer.content_range_seen = false;
         transfer.content_range_valid = false;
+        transfer.content_range_matches = false;
         transfer.content_range_has_total = false;
         transfer.range_fallback_rejected = false;
         transfer.response_region.clear();
         transfer.retry_after = 0;
         transfer.error_body_size = 0;
+        transfer.error_body_received = 0;
     } else if (header_name_is(line, "content-range:")) {
         transfer.content_range_seen = true;
         transfer.content_range_valid =
@@ -234,7 +246,7 @@ std::size_t header_callback(char* data, std::size_t size, std::size_t count,
                                 transfer.content_range_end, transfer.content_range_total,
                                 transfer.content_range_has_total);
         if (transfer.content_range_valid)
-            transfer.content_range_valid = valid_content_range(transfer);
+            transfer.content_range_matches = valid_content_range(transfer);
     } else if (header_name_is(line, "x-amz-bucket-region:")) {
         transfer.response_region = std::string(header_value(line, "x-amz-bucket-region:"));
     } else if (header_name_is(line, "retry-after:")) {
@@ -352,8 +364,9 @@ struct SizeState {
     bool follow_redirects = true;
     int retry_after = 0;
     std::string response_region;
-    std::array<char, 512> error_body{};
+    std::array<char, kErrorBodyCapacity> error_body{};
     std::size_t error_body_size = 0;
+    std::uint64_t error_body_received = 0;
 };
 
 std::size_t size_body_callback(char* data, std::size_t size, std::size_t count,
@@ -367,11 +380,11 @@ std::size_t size_body_callback(char* data, std::size_t size, std::size_t count,
     if (status >= 300 && status < 400 && state.follow_redirects)
         return *bytes;
     if (status >= 300) {
-        const std::size_t room = state.error_body.size() - state.error_body_size;
-        const std::size_t take = std::min(room, *bytes);
-        std::memcpy(state.error_body.data() + state.error_body_size, data, take);
-        state.error_body_size += take;
-        return take == *bytes ? *bytes : 0;
+        capture_error_body(state.error_body, state.error_body_size, data, *bytes);
+        if (*bytes > kDrainLimit - std::min(kDrainLimit, state.error_body_received))
+            return 0;
+        state.error_body_received += *bytes;
+        return *bytes;
     }
     state.cut_short = true;
     return 0;
@@ -461,6 +474,7 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
     transfer.http_status = 0;
     transfer.content_range_seen = false;
     transfer.content_range_valid = false;
+    transfer.content_range_matches = false;
     transfer.content_range_start = 0;
     transfer.content_range_end = 0;
     transfer.content_range_total = 0;
@@ -470,6 +484,7 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
     transfer.response_region.clear();
     transfer.retry_after = 0;
     transfer.error_body_size = 0;
+    transfer.error_body_received = 0;
     transfer.http_buffers->error[0] = '\0';
 
     const std::string range =

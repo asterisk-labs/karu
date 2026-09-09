@@ -17,6 +17,8 @@
 
 namespace karu {
 
+inline constexpr std::size_t kErrorBodyCapacity = 4u << 10;
+
 struct Request {
     const Locator* locator = nullptr;
     std::uint64_t offset = 0;
@@ -35,7 +37,7 @@ struct Part {
 };
 
 struct HttpBuffers {
-    std::array<char, 512> error_body{};
+    std::array<char, kErrorBodyCapacity> error_body{};
     std::array<char, CURL_ERROR_SIZE> error{};
 };
 
@@ -67,6 +69,7 @@ struct Transfer {
     long http_status = 0;
     bool content_range_seen = false;
     bool content_range_valid = false;
+    bool content_range_matches = false;
     std::uint64_t content_range_start = 0;
     std::uint64_t content_range_end = 0;
     std::uint64_t content_range_total = 0;
@@ -80,6 +83,7 @@ struct Transfer {
 
     int retry_after = 0;
     std::size_t error_body_size = 0;
+    std::uint64_t error_body_received = 0;
     std::unique_ptr<HttpBuffers> http_buffers;
 
     Easy easy;

@@ -139,14 +139,34 @@ int main(int argc, char** argv) {
     karu_locator_free(redirected);
     check(fetch(client, base + "/retry", 31, small) == KARU_OK, "retry after 503");
     check_bytes(small, 31, "retry contents");
+    check(fetch(client, base + "/large-error-retry", 31, small) == KARU_OK,
+          "large error body keeps the connection reusable");
+    check_bytes(small, 31, "large error retry contents");
+
+    karu_locator* large_size = nullptr;
+    check(karu_resolve((base + "/large-size-retry").c_str(), &large_size) == KARU_OK,
+          "resolve large-error size endpoint");
+    check(karu_client_size(client, large_size, &size) == KARU_OK && size == 4096,
+          "large size error keeps the connection reusable");
+    karu_locator_free(large_size);
+
     check(fetch(client, base + "/missing", 0, small) == KARU_ERR_NOT_FOUND, "404 mapping");
     check(fetch(client, base + "/unauthorized", 0, small) == KARU_ERR_AUTH, "401 mapping");
     check(fetch(client, base + "/precondition", 0, small, "\"wrong\"") == KARU_ERR_PRECONDITION,
           "412 mapping");
     check(fetch(client, base + "/precondition", 0, small, "\"v1\"") == KARU_OK, "matching ETag");
-    check(fetch(client, base + "/bad-range", 10, small) == KARU_ERR_HTTP, "invalid Content-Range");
-    check(fetch(client, base + "/bad-range-end", 10, small) == KARU_ERR_HTTP,
-          "oversized Content-Range rejected");
+    const karu_status bad_start = fetch(client, base + "/bad-range", 10, small);
+    const std::string bad_start_detail = karu_last_error();
+    check(bad_start == KARU_ERR_HTTP, "invalid Content-Range");
+    check(bad_start_detail.find("Content-Range [0, 15] does not satisfy requested [10, 25]") !=
+              std::string::npos,
+          "Content-Range start mismatch is precise");
+    const karu_status bad_end = fetch(client, base + "/bad-range-end", 10, small);
+    const std::string bad_end_detail = karu_last_error();
+    check(bad_end == KARU_ERR_HTTP, "oversized Content-Range rejected");
+    check(bad_end_detail.find("Content-Range [10, 26] does not satisfy requested [10, 25]") !=
+              std::string::npos,
+          "Content-Range end mismatch is precise");
 
     check(fetch(client, base + "/missing?token=do-not-log", 0, small) == KARU_ERR_NOT_FOUND,
           "query-bearing 404 mapping");
@@ -178,6 +198,8 @@ int main(int argc, char** argv) {
           "signed redirect not followed");
     check(fetch(signed_client, "s3://bucket/region", 0, small) == KARU_OK,
           "S3 region recovered from XML body");
+    check(fetch(signed_client, "s3://bucket/late-region", 0, small) == KARU_OK,
+          "S3 region recovered after a long XML message");
     check(fetch(signed_client, "s3://bucket/same-region", 0, small) == KARU_ERR_AUTH,
           "matching S3 region not retried");
     karu_client_free(signed_client);

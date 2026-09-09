@@ -15,7 +15,12 @@ DATA = bytes((index * 31 + 7) & 0xFF for index in range(4096))
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     retries = 0
+    large_error_retries = 0
+    large_error_connection = None
+    large_size_retries = 0
+    large_size_connection = None
     region_retries = 0
+    late_region_retries = 0
     same_region_requests = 0
 
     def reply(self, status: int, body: bytes = b"", **headers: str) -> None:
@@ -41,6 +46,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
             Handler.retries += 1
             self.reply(503, b"try again", Retry_After="0")
             return
+        if path == "/large-error-retry":
+            if Handler.large_error_retries == 0:
+                Handler.large_error_retries += 1
+                Handler.large_error_connection = self.connection
+                self.reply(503, b"x" * 8192, Retry_After="0")
+                return
+            if self.connection is not Handler.large_error_connection:
+                self.reply(409, b"connection was not reused")
+                return
+        if path == "/large-size-retry":
+            if Handler.large_size_retries == 0:
+                Handler.large_size_retries += 1
+                Handler.large_size_connection = self.connection
+                self.reply(503, b"x" * 8192, Retry_After="0")
+                return
+            if self.connection is not Handler.large_size_connection:
+                self.reply(409, b"connection was not reused")
+                return
         if path == "/redirect":
             self.reply(302, Location="/object")
             return
@@ -56,6 +79,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 400,
                 b"<Error><Code>AuthorizationHeaderMalformed</Code>"
                 b"<Region>us-west-2</Region></Error>",
+            )
+            return
+        if path == "/bucket/late-region" and Handler.late_region_retries == 0:
+            Handler.late_region_retries += 1
+            self.reply(
+                400,
+                b"<Error><Code>AuthorizationHeaderMalformed</Code><Message>"
+                + b"x" * 1024
+                + b"</Message><Region>us-west-2</Region></Error>",
             )
             return
         if path == "/bucket/same-region" and Handler.same_region_requests == 0:

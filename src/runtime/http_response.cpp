@@ -96,8 +96,7 @@ bool succeeded(const Transfer& transfer, CURLcode code) noexcept {
         return false;
     if (transfer.http_status != 206)
         return true;
-    if (!transfer.content_range_seen || !transfer.content_range_valid ||
-        transfer.content_range_start != transfer.offset) {
+    if (!transfer.content_range_matches) {
         return false;
     }
     return transfer.received == transfer.content_range_end - transfer.content_range_start + 1;
@@ -117,10 +116,19 @@ Failure failure(const Transfer& transfer, CURLcode code) {
                 concat(url, ": server ignored Range; refusing to discard ", transfer.offset,
                        " bytes (limit ", transfer.range_fallback_limit, ")")};
     }
-    if (transfer.http_status == 206 &&
-        (!transfer.content_range_seen || !transfer.content_range_valid ||
-         transfer.content_range_start != transfer.offset)) {
-        return {KARU_ERR_HTTP, concat(url, ": invalid Content-Range for byte ", transfer.offset)};
+    if (transfer.http_status == 206 && !transfer.content_range_matches) {
+        const std::uint64_t requested_end = transfer.offset + transfer.length - 1;
+        if (!transfer.content_range_seen) {
+            return {KARU_ERR_HTTP, concat(url, ": missing Content-Range for requested [",
+                                          transfer.offset, ", ", requested_end, "]")};
+        }
+        if (!transfer.content_range_valid) {
+            return {KARU_ERR_HTTP, concat(url, ": malformed Content-Range for requested [",
+                                          transfer.offset, ", ", requested_end, "]")};
+        }
+        return {KARU_ERR_HTTP, concat(url, ": Content-Range [", transfer.content_range_start, ", ",
+                                      transfer.content_range_end, "] does not satisfy requested [",
+                                      transfer.offset, ", ", requested_end, "]")};
     }
     if (code != CURLE_OK && transfer.http_status >= 300 && transfer.http_status < 400 &&
         transfer.http->follow_redirects) {
