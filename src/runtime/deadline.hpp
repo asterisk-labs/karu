@@ -34,7 +34,7 @@ class RequestDeadline {
         using Rep = Milliseconds::rep;
         const Rep remaining = std::chrono::ceil<Milliseconds>(expires_ - Clock::now()).count();
         constexpr Rep minimum = 1;
-        constexpr Rep maximum = static_cast<Rep>(std::numeric_limits<long>::max());
+        constexpr Rep maximum = static_cast<Rep>((std::numeric_limits<long>::max)());
         return static_cast<long>(std::clamp(remaining, minimum, maximum));
     }
 

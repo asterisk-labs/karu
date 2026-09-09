@@ -1,9 +1,7 @@
-// karu: stateless positional reads for local files, HTTP and object storage.
+// C API for positional byte-range reads.
 //
-// The public surface deliberately resembles GDAL VSI: /vsis3/, /vsigs/ and
-// /vsiaz/ paths use the same option names and path-specific overrides. The
-// execution model is object-store-like: there is no cursor and no semantic
-// cache. A client only retains transport pools and renewable credentials.
+// Karu reads local paths, HTTP URLs, and objects in S3, GCS, Azure,
+// Hugging Face, and Source Cooperative.
 //
 // Copyright (c) 2026 Asterisk Labs. MIT.
 #ifndef KARU_H
@@ -52,39 +50,29 @@ KARU_API void karu_free(void* ptr);
 
 // Configuration ------------------------------------------------------------
 
-// A mutable builder. Creating it snapshots supported environment variables;
-// changing the process environment afterwards cannot alter an existing
-// client. Builders need not be synchronized. Clients are immutable and safe
-// to share between threads.
+// Configuration is mutable until a client is created. Clients copy the
+// configuration and may be shared between threads.
 typedef struct karu_config karu_config;
 typedef struct karu_client karu_client;
 
+// Initializes a builder from the supported environment variables.
 KARU_API karu_status karu_config_create(karu_config** out);
-// Hermetic builder: no environment snapshot, default credential files, or
-// implicit metadata probes. Setting their paths/endpoints explicitly opts in.
+// Initializes an empty builder. Default credential files and metadata
+// services are not used unless configured explicitly.
 KARU_API karu_status karu_config_create_empty(karu_config** out);
 KARU_API void karu_config_free(karu_config* config);
 
-// Names are case-insensitive. GDAL names such as AWS_REGION,
-// AWS_ACCESS_KEY_ID, GS_NO_SIGN_REQUEST and AZURE_STORAGE_ACCESS_KEY are used
-// unchanged. Passing value == NULL removes an explicit option.
+// Option names are case-insensitive. A NULL value removes the option.
 KARU_API karu_status karu_config_set_option(karu_config* config, const char* name,
                                             const char* value);
 
-// The longest matching canonical VSI prefix wins. s3://bucket/key,
-// gs://bucket/key, az://container/key and source://account/product/key are
-// matched as /vsis3/bucket/key, /vsigs/bucket/key, /vsiaz/container/key and
-// /vsisource/account/product/key respectively. Empty path segments in object
-// keys are significant and are never collapsed.
+// Sets an option for a path prefix. URIs are normalized to VSI paths before
+// matching, and the longest matching prefix wins. A NULL value removes it.
 KARU_API karu_status karu_config_set_path_option(karu_config* config, const char* prefix,
                                                  const char* name, const char* value);
 
-// Custom credentials are fetched lazily and copied before the callback
-// returns. expires_at is Unix time, or 0 when the value does not expire.
-// AWS and Source use access_key_id/secret_access_key/session_token, with
-// separate callback kinds. GCS normally uses bearer_token (or the
-// access/secret pair for HMAC). Azure uses bearer_token, sas_token, or
-// account_name plus secret_access_key for Shared Key.
+// Credential callbacks run when a request needs credentials. Karu copies all
+// returned strings before the callback returns.
 typedef enum {
     KARU_CREDENTIALS_AWS = 1,
     KARU_CREDENTIALS_GCS = 2,
@@ -99,9 +87,9 @@ typedef struct {
     const char* bearer_token;
     const char* sas_token;
     const char* account_name;
-    // Optional canonical VSI prefix under which Karu may reuse this value
-    // until expires_at. NULL/empty asks Karu to call the provider every time.
+    // Optional VSI prefix for credential reuse. NULL or empty disables reuse.
     const char* cache_prefix;
+    // Expiration as Unix time, or 0 for credentials without an expiration.
     int64_t expires_at;
 } karu_credentials;
 
@@ -109,22 +97,19 @@ typedef karu_status (*karu_credentials_provider)(void* user_data, karu_credentia
                                                  const char* canonical_path, karu_credentials* out);
 typedef void (*karu_credentials_provider_free)(void* user_data);
 
-// Passing a NULL provider with NULL user_data and release clears that kind.
+// Pass NULL for provider, user_data, and release to remove the callback.
 KARU_API karu_status karu_config_set_credentials_provider(karu_config* config,
                                                           karu_credentials_kind kind,
                                                           karu_credentials_provider provider,
                                                           void* user_data,
                                                           karu_credentials_provider_free release);
 
-// Construction validates the snapshot's client-wide and scalar values.
-// Config can be freed as soon as this returns: the client owns an immutable
-// copy. Endpoint-specific validation occurs when an object is materialized.
+// Creates a client from a copy of config. The config may be freed afterwards.
 KARU_API karu_status karu_client_create(const karu_config* config, karu_client** out);
 KARU_API void karu_client_free(karu_client* client);
 
-// Compare a client's immutable snapshot with a builder after freezing it.
-// This performs no I/O and allows callers to reuse transport connections
-// without overlooking configuration changes between operations.
+// Reports whether config would produce the client's current configuration.
+// No I/O is performed.
 KARU_API karu_status karu_client_matches_config(const karu_client* client,
                                                 const karu_config* config, int* out_match);
 
@@ -136,21 +121,16 @@ KARU_API int karu_client_max_attempts(const karu_client* client);
 
 typedef struct karu_locator karu_locator;
 
-// Supported terminal forms: https://, http://, s3://, gs://, az://, hf://,
-// source://, file:// and bare paths. VSI forms are /vsicurl/, /vsis3/,
-// /vsigs/, /vsiaz/, /vsiadls/, /vsihf/, /vsisource/ and /vsisubfile/. Karu
-// intentionally does not accept GDAL's *_streaming spellings: every Karu
-// remote read is stateless.
+// Resolves a local path, supported URI, or VSI path.
 KARU_API karu_status karu_resolve(const char* uri, karu_locator** out);
 KARU_API void karu_locator_free(karu_locator* locator);
 KARU_API const char* karu_locator_uri(const karu_locator* locator);
-// Nonzero for HTTP and object-storage locators, zero for local files and NULL.
+// Returns nonzero for HTTP and object-storage locators.
 KARU_API int karu_locator_is_remote(const karu_locator* locator);
 KARU_API uint64_t karu_locator_window_offset(const karu_locator* locator);
 KARU_API uint64_t karu_locator_window_length(const karu_locator* locator);
 
-// Metadata is an explicit operation and is never cached. A fixed
-// /vsisubfile/ window can answer locally.
+// Gets the size visible through the locator. Results are not cached.
 KARU_API karu_status karu_client_size(karu_client* client, const karu_locator* locator,
                                       uint64_t* out_size);
 
@@ -160,13 +140,11 @@ typedef struct {
     const karu_locator* locator;
     uint64_t offset;
     uint64_t length;
-    // Caller-owned destination. NULL asks karu_client_submit() to allocate;
-    // the returned completion buffer must then be released with karu_free().
+    // Destination buffer. If NULL, submit allocates one and the caller must
+    // release the completion buffer with karu_free().
     void* buffer;
     void* tag;
-    // Optional remote-object ETag. The request fails if the object has
-    // changed; local files reject this precondition. Copied by submit, so the
-    // string only needs to live until that call returns.
+    // Optional ETag precondition for remote objects. Copied by submit.
     const char* if_match;
 } karu_req;
 
@@ -174,26 +152,22 @@ typedef struct {
     void* tag;
     karu_status status;
     uint64_t got;
-    // The request destination, or an allocated buffer owned by the caller.
+    // Request destination. If Karu allocated it, release it with karu_free().
     void* buffer;
 } karu_done;
 
 typedef struct karu_batch karu_batch;
 
-// Coalescing is scoped to this submission only. A zero KARU_COALESCE_GAP
-// disables it, including for adjacent ranges.
-// The request array, locators, and if_match strings are copied. Caller-owned
-// destination buffers must remain alive until the batch is freed.
+// Submits a batch. Karu copies the requests, locators, and ETags. Destination
+// buffers supplied by the caller must remain valid until the batch is freed.
 KARU_API karu_status karu_client_submit(karu_client* client, const karu_req* requests, size_t count,
                                         karu_batch** out_batch);
-// KARU_OK means a completion was produced; inspect out->status for that
-// request's result. KARU_END and KARU_TIMEOUT do not populate out.
+// Returns KARU_OK with one completion. KARU_END and KARU_TIMEOUT leave out
+// unchanged.
 KARU_API karu_status karu_batch_next(karu_batch* batch, karu_done* out, int timeout_ms);
-// Cancels pending work and waits until no worker can touch request buffers.
+// Cancels pending work and waits for active workers to release the buffers.
 KARU_API void karu_batch_free(karu_batch* batch);
-// Blocking convenience for caller-owned buffers. NULL request buffers are
-// rejected because this function has no completion through which to return
-// an allocated buffer.
+// Blocking batch read. Every request must provide a destination buffer.
 KARU_API karu_status karu_client_fetch(karu_client* client, const karu_req* requests, size_t count);
 
 #ifdef __cplusplus
