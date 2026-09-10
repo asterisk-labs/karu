@@ -5,16 +5,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Karu configuration reference.">
-  <title>Configuration — Karu</title>
-  <link rel="stylesheet" href="style.css">
+  <title>Configuration | Karu</title>
+  <link rel="stylesheet" href="style.css?v=39">
 </head>
 <body>
-  <article class="sheet">
+  <article class="sheet configuration-sheet">
     <header>
-      <a class="brand" href="index.html">karu</a>
+      <div>
+        <a class="brand" href="index.html">karu</a>
+        <span class="version">v0.2.1</span>
+        <p>Stateless byte range transport</p>
+      </div>
       <nav aria-label="Documentation links">
         <a href="index.html">Home</a>
         <a href="how-karu-reads.html">How Karu Reads</a>
+        <a href="configuration.html" aria-current="page">Configuration</a>
         <a class="github" href="https://github.com/asterisk-labs/karu" aria-label="Karu on GitHub">
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M8 0C3.58 0 0 3.64 0 8.13c0 3.59 2.29 6.64 5.47 7.71.4.08.55-.18.55-.39 0-.19-.01-.83-.01-1.51-2.01.38-2.53-.5-2.69-.96-.09-.23-.48-.96-.82-1.15-.28-.15-.68-.53-.01-.54.63-.01 1.08.59 1.23.83.72 1.23 1.87.88 2.33.67.07-.53.28-.88.51-1.08-1.78-.21-3.64-.91-3.64-4.02 0-.89.31-1.62.82-2.19-.08-.21-.36-1.04.08-2.16 0 0 .67-.22 2.2.84A7.44 7.44 0 0 1 8 3.91c.68 0 1.35.09 1.98.27 1.53-1.06 2.2-.84 2.2-.84.44 1.12.16 1.95.08 2.16.51.57.82 1.3.82 2.19 0 3.12-1.87 3.81-3.65 4.02.29.25.54.74.54 1.5 0 1.08-.01 1.95-.01 2.23 0 .21.15.47.55.39A8.12 8.12 0 0 0 16 8.13C16 3.64 12.42 0 8 0Z"/>
@@ -23,7 +28,7 @@
       </nav>
     </header>
 
-    <main>
+    <main class="configuration-page">
       <div class="docs-layout">
         <aside class="docs-nav">
           <p>Configuration</p>
@@ -37,10 +42,82 @@
 
         <article class="docs">
           <h1 id="configuration-reference">Configuration reference</h1>
-          <p><code>karu_config_create()</code> snapshots the supported environment variables and the OS home and cache directories used for default credential discovery. Calls to <code>karu_config_set_option()</code> override that snapshot. Calls to <code>karu_config_set_path_option()</code> override both for the longest matching VSI prefix. A client copies the result and never reads the environment again. <code>karu_config_create_empty()</code> starts without environment values or implicit home-directory or metadata-service credential discovery; it is useful for hermetic clients and tests. Explicit credential files, metadata endpoints, or the corresponding <code>..._DISABLED=NO</code> options still opt back in.</p>
-          <p>Names are case-insensitive. Unknown names are rejected instead of being silently ignored.</p>
-          <p>A path scope matches the named resource and its descendants. Segment boundaries matter: <code>/vsis3/team/private</code> matches <code>/vsis3/team/private/file</code>, but not <code>/vsis3/team/private-copy/file</code>.</p>
-          <p>Aliases are canonicalized before precedence is evaluated. In particular, <code>AWS_DEFAULT_PROFILE</code>, <code>AWS_DEFAULT_REGION</code>, <code>AWS_ENDPOINT_URL_S3</code>, <code>AWS_ENDPOINT_URL</code>, and <code>HUGGING_FACE_HUB_TOKEN</code> cannot bypass a more specific path option written under their canonical name. <code>SOURCE_PROXY_URL</code> is an alias for <code>SOURCE_ENDPOINT</code>. <code>CURL_CA_BUNDLE</code> and <code>SSL_CERT_FILE</code> are aliases for <code>KARU_HTTP_CA_BUNDLE</code>.</p>
+          <p class="config-lede">
+            Karu captures configuration when a client is created. The client keeps
+            that snapshot for its entire lifetime, so later changes to the process
+            environment do not change requests that are already using it.
+          </p>
+          <p>
+            <code>karu_config_create()</code> reads supported environment variables
+            and records the home and cache directories used for credential discovery.
+            <code>karu_config_create_empty()</code> starts without those implicit
+            sources, which is useful for isolated applications and tests.
+          </p>
+          <p>
+            Global options replace values captured from the environment. Path options
+            are more specific and win for the longest matching VSI prefix. A path
+            scope includes the named resource and its descendants, but stops at a
+            segment boundary.
+          </p>
+          <figure class="config-priority">
+            <svg viewBox="0 0 720 126" role="img" aria-labelledby="priority-title priority-desc">
+              <title id="priority-title">Configuration priority</title>
+              <desc id="priority-desc">
+                Karu checks a matching path option, then a global option, then the
+                captured environment, and finally the built in default. The first
+                available value is used.
+              </desc>
+              <defs>
+                <marker id="priority-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0 0 10 5 0 10Z"/>
+                </marker>
+              </defs>
+
+              <text class="priority-guide" x="20" y="18">FIRST MATCH WINS</text>
+
+              <g class="priority-box accent">
+                <rect x="20" y="34" width="150" height="58"/>
+                <text x="95" y="59">Longest path</text>
+                <text class="sub" x="95" y="77">most specific option</text>
+              </g>
+              <path class="priority-edge" d="M170 63H190"/>
+
+              <g class="priority-box">
+                <rect x="190" y="34" width="150" height="58"/>
+                <text x="265" y="59">Global option</text>
+                <text class="sub" x="265" y="77">client configuration</text>
+              </g>
+              <path class="priority-edge" d="M340 63H360"/>
+
+              <g class="priority-box">
+                <rect x="360" y="34" width="150" height="58"/>
+                <text x="435" y="59">Environment</text>
+                <text class="sub" x="435" y="77">captured at creation</text>
+              </g>
+              <path class="priority-edge" d="M510 63H530"/>
+
+              <g class="priority-box">
+                <rect x="530" y="34" width="170" height="58"/>
+                <text x="615" y="59">Built in default</text>
+                <text class="sub" x="615" y="77">final fallback</text>
+              </g>
+
+              <text class="priority-note" x="360" y="116">Karu stops when it finds a value for the request</text>
+            </svg>
+          </figure>
+          <p>
+            Option names ignore letter case and unknown names are rejected. Aliases
+            are converted to their canonical names before priority is evaluated, so
+            an alias cannot bypass a more specific path option.
+          </p>
+          <p class="config-detail">
+            <code>AWS_DEFAULT_PROFILE</code>, <code>AWS_DEFAULT_REGION</code>,
+            <code>AWS_ENDPOINT_URL_S3</code>, <code>AWS_ENDPOINT_URL</code>, and
+            <code>HUGGING_FACE_HUB_TOKEN</code> use their canonical AWS or Hugging
+            Face names. <code>SOURCE_PROXY_URL</code> maps to
+            <code>SOURCE_ENDPOINT</code>. <code>CURL_CA_BUNDLE</code> and
+            <code>SSL_CERT_FILE</code> map to <code>KARU_HTTP_CA_BUNDLE</code>.
+          </p>
           <h2 id="aws-s3">AWS S3</h2>
           <table><thead><tr><th>Option</th><th>Purpose</th></tr></thead><tbody><tr><td><code>AWS_ACCESS_KEY_ID</code></td><td>static access key ID</td></tr><tr><td><code>AWS_SECRET_ACCESS_KEY</code></td><td>static secret; must accompany the access key ID</td></tr><tr><td><code>AWS_SESSION_TOKEN</code></td><td>optional temporary session token</td></tr><tr><td><code>AWS_PROFILE</code> / <code>AWS_DEFAULT_PROFILE</code></td><td>shared profile name</td></tr><tr><td><code>AWS_SHARED_CREDENTIALS_FILE</code></td><td>credentials file path</td></tr><tr><td><code>AWS_CONFIG_FILE</code></td><td>config file path</td></tr><tr><td><code>AWS_REGION</code> / <code>AWS_DEFAULT_REGION</code></td><td>SigV4 region; default <code>us-east-1</code></td></tr><tr><td><code>AWS_S3_ENDPOINT</code></td><td>service-root host or URL</td></tr><tr><td><code>AWS_ENDPOINT_URL_S3</code> / <code>AWS_ENDPOINT_URL</code></td><td>aliases for <code>AWS_S3_ENDPOINT</code></td></tr><tr><td><code>AWS_HTTPS</code></td><td>add <code>https://</code> to a host-only endpoint; default <code>YES</code></td></tr><tr><td><code>AWS_VIRTUAL_HOSTING</code></td><td>put the bucket before the host; defaults to <code>YES</code> for AWS and <code>NO</code> for a custom endpoint</td></tr><tr><td><code>AWS_REQUEST_PAYER</code></td><td><code>requester</code> for requester-pays buckets</td></tr><tr><td><code>AWS_NO_SIGN_REQUEST</code></td><td>explicit anonymous access</td></tr><tr><td><code>AWS_ROLE_ARN</code></td><td>role used with web identity</td></tr><tr><td><code>AWS_WEB_IDENTITY_TOKEN_FILE</code></td><td>OIDC token file</td></tr><tr><td><code>AWS_ROLE_SESSION_NAME</code></td><td>optional web-identity session name</td></tr><tr><td><code>AWS_STS_ENDPOINT</code></td><td>web-identity STS endpoint</td></tr><tr><td><code>AWS_CONTAINER_CREDENTIALS_RELATIVE_URI</code></td><td>ECS credential endpoint path</td></tr><tr><td><code>AWS_CONTAINER_CREDENTIALS_FULL_URI</code></td><td>HTTPS, loopback, or ECS credential endpoint</td></tr><tr><td><code>AWS_CONTAINER_AUTHORIZATION_TOKEN</code></td><td>ECS credential endpoint authorization</td></tr><tr><td><code>AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE</code></td><td>file containing that authorization value</td></tr><tr><td><code>AWS_EC2_METADATA_DISABLED</code></td><td>disable IMDS discovery</td></tr><tr><td><code>AWS_METADATA_SERVICE_TIMEOUT</code></td><td>IMDS connect timeout in seconds, <code>1</code>–<code>60</code></td></tr></tbody></table>
           <p>Static profiles, <code>credential_process</code>, and web-identity profiles are handled natively. Chained source-profile AssumeRole and IAM Identity Center should be provided by the application&#x27;s AWS SDK through the callback API. A <code>credential_process</code> is terminated if it exceeds <code>KARU_REQUEST_TIMEOUT</code>.</p>
@@ -172,8 +249,7 @@ endpoint_url = https://data.source.coop</code></pre>
     </main>
 
     <footer>
-      <span><em>Karu</em> means far in Quechua.</span>
-      <span>MIT · Asterisk Labs</span>
+      <span class="footer-credit">Made with <span class="heart" aria-label="love" role="img">♥</span> by <a class="asterisk-credit" href="https://asterisk.coop" rel="noopener noreferrer" aria-label="Asterisk Labs"><img src="asterisk-mark.svg" alt="Asterisk Labs"></a></span>
     </footer>
   </article>
 </body>

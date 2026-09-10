@@ -15,11 +15,6 @@ keeping reads positional and stateless.
 
 Karu's VSI path syntax is strongly inspired by GDAL VSI.
 
-[**How Karu Reads**](https://asterisk-labs.github.io/karu/how-karu-reads.html) is
-the guide: what a range read costs, how a batch becomes HTTP requests, and why
-the engine is built the way it is. Start there if you want to understand Karu
-rather than look something up.
-
 ## Quick start
 
 This reads the first 4 KiB of a public
@@ -51,15 +46,7 @@ token created by the Hugging Face CLI.
 | Azure Data Lake | `abfs://container/key` | `/vsiadls/container/key` |
 | Hugging Face | `hf://datasets/org/repo/path` | `/vsihf/datasets/org/repo/path` |
 | Source Cooperative | `source://account/product/key` | `/vsisource/account/product/key` |
-
-`/vsisubfile/OFFSET_LENGTH,<path>` and `#bytes=FIRST-LAST` select a byte
-window. When combined, `#bytes` defines the inner window and each surrounding
-`/vsisubfile` offset is relative to that window. Karu does not use separate
-`_streaming` paths because all remote reads are stateless.
-
-Source Cooperative reads use `https://data.source.coop` and are anonymous by
-default. Set `SOURCE_PROFILE=source-coop` after `source-coop login` when a
-product requires authentication.
+|---|---|---|
 
 ## Configuration
 

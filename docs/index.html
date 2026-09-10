@@ -5,20 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta
     name="description"
-    content="Karu is a stateless byte-range transport library for local files, HTTP, and object storage."
+    content="Karu is a stateless byte range transport library for local files, HTTP, and object storage."
   >
-  <title>Karu — byte-range transport</title>
-  <link rel="stylesheet" href="style.css">
+  <title>Karu | Byte range transport</title>
+  <link rel="stylesheet" href="style.css?v=39">
 </head>
 <body>
-  <article class="sheet">
+  <article class="sheet landing-sheet">
     <header>
       <div>
         <a class="brand" href="index.html">karu</a>
-        <span class="version">v0.2.0</span>
-        <p>Stateless byte-range transport</p>
+        <span class="version">v0.2.1</span>
+        <p>Stateless byte range transport</p>
       </div>
-      <nav aria-label="Project links">
+      <nav aria-label="Documentation links">
+        <a href="index.html" aria-current="page">Home</a>
         <a href="how-karu-reads.html">How Karu Reads</a>
         <a href="configuration.html">Configuration</a>
         <a class="github" href="https://github.com/asterisk-labs/karu" aria-label="Karu on GitHub">
@@ -29,157 +30,45 @@
       </nav>
     </header>
 
-    <main>
-      <div class="essay">
-        <section>
-          <p class="eyebrow">The problem</p>
-          <h1>Large files.<br>Small reads.</h1>
+    <main class="landing">
+      <section class="paper-copy" aria-label="Technical overview of Karu">
+        <div class="paper-column">
+          <h2>Reading without a cursor</h2>
           <p>
-            A cloud-native file is built to be read in pieces. A Cloud-Optimized GeoTIFF
-            puts its tile index where a reader can find it. Parquet keeps its footer at
-            the end. A Rumi shard stores frames that decode independently. In each case
-            the format has already done the hard work of arranging bytes so that a reader
-            who knows the layout can take a few kilobytes and ignore the rest.
+            Karu treats every read as a complete request containing an object,
+            byte position, length, destination buffer, and caller tag. Because the
+            position travels with the request, reads can run independently without
+            sharing a moving cursor. Before data moves, Karu resolves each window
+            to its real byte position, rejects invalid ranges, and groups reads from
+            the same object so the engine can build an efficient transfer plan.
           </p>
+          <h2>Combining nearby ranges</h2>
           <p>
-            Karu is the part that goes and gets them.
-          </p>
-        </section>
-
-        <section>
-          <p class="eyebrow">The cost</p>
-          <h2>A remote read is not a small read</h2>
-          <p>
-            On a local disk, taking four kilobytes from the middle of a two-gigabyte file
-            is one system call and a few microseconds. Against object storage the same
-            request carries headers, a cryptographic signature, and a round trip that
-            costs somewhere between twenty and two hundred milliseconds.
-          </p>
-          <p>
-            The size barely matters. Asking a bucket for four kilobytes and asking it for
-            four megabytes take nearly the same time, because almost all of that time is
-            the trip rather than the transfer. What costs is the <em>number</em> of
-            requests, and a format designed to be read in fragments produces a great many
-            of them.
-          </p>
-          <p>
-            So the work is not making a read fast. An individual read is as fast as the
-            network allows and no faster. The work is making sure a read is never
-            happening alone.
-          </p>
-        </section>
-
-        <section>
-          <p class="eyebrow">The lever</p>
-          <h2>Concurrency is the whole game</h2>
-          <p>
-            A client's read rate is its concurrency divided by its latency. You cannot
-            lower the latency of a bucket on another continent, and no amount of careful
-            local code changes it. What you can raise is how many requests are outstanding
-            at once — and between one in flight and two hundred and fifty-six lies a
-            factor of two hundred and fifty-six.
-          </p>
-          <p class="pull">
-            Everything else in Karu is subordinate to keeping requests in flight.
-          </p>
-          <p>
-            That is a constraint, not a slogan, and the rest of the design answers to it.
-            A credential lookup on the wrong thread does not cost its own duration; for as
-            long as it blocks, effective concurrency is zero. A retry policy without jitter
-            turns sixty-four failures into a synchronised second wave against a service
-            that just asked for less load. Both are the same mistake wearing different
-            clothes, and both are why Karu keeps credential resolution, local file reads
-            and the network event loop on separate threads.
-          </p>
-        </section>
-
-        <section>
-          <p class="eyebrow">The interface</p>
-          <h2>Batches, not reads</h2>
-          <p>
-            An interface that accepts one read at a time has already thrown away what it
-            needed. The caller usually knows every range it wants before it asks for the
-            first one — the format index has just told it — and taking them one at a time
-            discards that knowledge before the engine can act on it.
-          </p>
-          <p>
-            Karu takes a batch: objects, offsets and destinations submitted together,
-            completing in whatever order they finish. Each buffer comes back tagged with
-            whatever bookkeeping the caller attached to it, so a decoder can work on the
-            frames that have landed while the rest are still in the air.
-          </p>
-          <p>
-            Reads are positional. The offset travels inside the request rather than living
-            in a cursor, so there is no open, no seek, and no handle to keep alive. A
-            cursor would force either a lock per file or a handle per thread; a position
-            forces neither. That is what makes a batch of a thousand unrelated reads a
-            natural thing to write instead of an awkward one.
-          </p>
-        </section>
-
-        <section>
-          <p class="eyebrow">The trade</p>
-          <h2>When one request should serve two reads</h2>
-          <p>
-            One optimisation always tempts and often misfires. If two wanted ranges sit
-            close together, a single request covering both — gap included — costs one
-            round trip instead of two, and a few wasted bytes.
-          </p>
-          <p>
-            Whether that is a good bargain depends on how far apart they are, how fast the
-            link is, and how many requests are already in flight. Merging ranges a megabyte
-            apart can turn a thousand requests into sixteen. It can also turn sixty-two
-            megabytes of wanted data into nearly a gigabyte on the wire.
-          </p>
-          <p>
-            Karu bounds the trade with four numbers: how wide a gap may be bridged, how
-            large a merged request may grow, how many reads it may serve, and how many
-            bytes it may fetch for each byte actually asked for. A caller can override all
-            four for a single batch, because the caller knows its own layout and the
-            library does not. Local files skip the mechanism entirely, since a positional
-            read on a disk has no round trip to amortise: reading through a gap there buys
-            nothing and costs the bytes.
-          </p>
-        </section>
-
-        <section>
-          <p class="eyebrow">The boundary</p>
-          <h2>What Karu refuses to do</h2>
-          <p>
-            It does not write. It does not list. It does not cache object bytes or
-            metadata. It does not know what a GeoTIFF is.
-          </p>
-          <p>
-            Each of those absences buys something. With no writes, every request is
-            idempotent and safe to retry without a second thought. With no data cache,
-            there is no invalidation to reason about and no memory competing with the model
-            being trained — and a dataloader that shuffles its order would miss such a
-            cache most of the time anyway. With no format knowledge, the planner can merge
-            two ranges without wondering whether it just crossed a boundary that meant
-            something.
-          </p>
-          <p>
-            The narrowness is not modesty. It is what lets the engine be aggressive about
-            the one thing it does.
-          </p>
-        </section>
-      </div>
-
-      <section class="sync">
-        <div class="sync-heading">
-          <div>
-            <p class="eyebrow">Rumi + Karu</p>
-            <h2>Reading Rumi frames</h2>
-          </div>
-          <p>
-            The clearest example of the split. Rumi turns a pixel window into the exact
-            frames that cover it and hands Karu a tagged range for each one. Karu knows
-            nothing about pixels, frames or compression; it sees offsets. Each buffer
-            returns carrying the tag it was submitted with, which is what lets Rumi start
-            decoding the frames that arrived without waiting for the slowest one.
+            Nearby ranges can share one larger transfer when that costs less than
+            separate network trips. Strict limits on gaps, transfer size, pieces,
+            and extra bytes keep this optimization from fetching too much data.
           </p>
         </div>
+        <div class="paper-column">
+          <h2>Local and remote reads</h2>
+          <p>
+            Local files use direct positional reads. Remote objects use HTTP requests
+            for exact byte ranges. Karu keeps several transfers active, so one slow
+            response does not stop the rest of the batch. The engine tracks queued
+            work, active transfers, retries, and completed results while reusing
+            network connections and TLS sessions. Credentials are resolved
+            separately, without blocking bytes already in motion.
+          </p>
+          <h2>Checking every result</h2>
+          <p>
+            Karu accepts a result only when its returned range and byte count match
+            the request. It retries temporary failures with bounded delays, then
+            separates merged data into the original buffers and caller tags.
+          </p>
+        </div>
+      </section>
 
+      <figure class="sync" aria-label="Rumi and Karu data flow">
         <svg class="sync-diagram" viewBox="0 0 900 300" role="img" aria-labelledby="sync-title sync-desc">
           <title id="sync-title">Detailed synchronization between Rumi, Karu, and storage</title>
           <desc id="sync-desc">
@@ -258,31 +147,20 @@
           <path class="edge" d="M179 154V105H375V72"/>
           <text class="edge-label" x="276" y="124">Rumi decodes ready frames while other reads finish</text>
         </svg>
-      </section>
-
-      <div class="essay onward-block">
-        <section>
-          <p class="eyebrow">Read on</p>
-          <h2>Where to go next</h2>
-          <p class="onward">
-            <a href="how-karu-reads.html">How Karu Reads</a> is the guide. It starts from
-            what a range request costs and works through the planner, the engine, signing
-            and failure recovery, in the order you would need to learn them. Read it if
-            you want to understand Karu rather than look something up.
-          </p>
-          <p class="onward">
-            The <a href="configuration.html">configuration reference</a> lists every
-            option, every credential source and how path scopes resolve. The
-            <a href="https://github.com/asterisk-labs/karu">README</a> has the path
-            grammar, a quick start and the build instructions.
-          </p>
-        </section>
-      </div>
+        <figcaption>
+          <span class="caption-label">Figure 1</span>
+          <span class="caption-copy">
+            Rumi turns a pixel window into tagged frame ranges. Karu groups those
+            ranges, obtains the required credentials, and retrieves only the needed
+            bytes. Each result keeps its frame tag, so Rumi can decode completed
+            frames while the remaining reads continue.
+          </span>
+        </figcaption>
+      </figure>
     </main>
 
     <footer>
-      <span><em>Karu</em> means far in Quechua.</span>
-      <span>Asterisk Labs · MIT</span>
+      <span class="footer-credit">Made with <span class="heart" aria-label="love" role="img">♥</span> by <a class="asterisk-credit" href="https://asterisk.coop" rel="noopener noreferrer" aria-label="Asterisk Labs"><img src="asterisk-mark.svg" alt="Asterisk Labs"></a></span>
     </footer>
   </article>
 </body>
