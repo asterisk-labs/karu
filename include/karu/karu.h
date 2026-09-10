@@ -46,14 +46,16 @@ typedef enum {
 } karu_status;
 
 KARU_API const char* karu_status_string(karu_status status);
+// Error text is thread-local. Copy it before another failing Karu call on the
+// same thread if it must outlive that call.
 KARU_API const char* karu_last_error(void);
 KARU_API void karu_clear_error(void);
 KARU_API void karu_free(void* ptr);
 
 // Configuration ------------------------------------------------------------
 
-// Configuration is mutable until a client is created. Clients copy the
-// configuration and may be shared between threads.
+// Configuration builders are mutable and must be externally synchronized.
+// Clients copy the configuration and may be shared between threads.
 typedef struct karu_config karu_config;
 typedef struct karu_client karu_client;
 
@@ -68,14 +70,16 @@ KARU_API void karu_config_free(karu_config* config);
 KARU_API karu_status karu_config_set_option(karu_config* config, const char* name,
                                             const char* value);
 
-// Sets an option for a path prefix. URIs are normalized to VSI paths before
-// matching, and the longest matching prefix wins. A NULL value removes it.
+// Sets an option for one path or its descendants. URIs are normalized to VSI
+// paths before matching, and the longest matching prefix wins. A NULL value
+// removes it. A partial path segment never matches.
 KARU_API karu_status karu_config_set_path_option(karu_config* config, const char* prefix,
                                                  const char* name, const char* value);
 
 // Credential callbacks run when a request needs credentials and may run
-// concurrently for different paths. Karu copies all returned strings before
-// the callback returns.
+// concurrently for different paths. They must not re-enter the same client
+// and should bound any I/O they perform; Karu cannot interrupt caller code.
+// Karu copies all returned strings before the callback returns.
 typedef enum {
     KARU_CREDENTIALS_AWS = 1,
     KARU_CREDENTIALS_GCS = 2,
@@ -90,7 +94,8 @@ typedef struct {
     const char* bearer_token;
     const char* sas_token;
     const char* account_name;
-    // Optional VSI prefix for credential reuse. NULL or empty disables reuse.
+    // Optional VSI path scope for credential reuse. The scope matches itself
+    // and descendants, never a partial segment. NULL or empty disables reuse.
     const char* cache_prefix;
     // Expiration as Unix time, or 0 for credentials without an expiration.
     int64_t expires_at;
@@ -165,10 +170,11 @@ typedef struct karu_batch karu_batch;
 // buffers supplied by the caller must remain valid until the batch is freed.
 KARU_API karu_status karu_client_submit(karu_client* client, const karu_req* requests, size_t count,
                                         karu_batch** out_batch);
-// Returns KARU_OK with one completion. KARU_END and KARU_TIMEOUT leave out
-// unchanged.
+// Returns KARU_OK with one completion. Multiple threads may consume the same
+// batch. KARU_END and KARU_TIMEOUT leave out unchanged.
 KARU_API karu_status karu_batch_next(karu_batch* batch, karu_done* out, int timeout_ms);
 // Cancels pending work and waits for active workers to release the buffers.
+// Do not call concurrently with karu_batch_next on the same batch.
 KARU_API void karu_batch_free(karu_batch* batch);
 // Blocking batch read. Every request must provide a destination buffer.
 KARU_API karu_status karu_client_fetch(karu_client* client, const karu_req* requests, size_t count);

@@ -13,6 +13,10 @@ the corresponding `..._DISABLED=NO` options still opt back in.
 Names are case-insensitive. Unknown names are rejected instead of being
 silently ignored.
 
+A path scope matches the named resource and its descendants. Segment
+boundaries matter: `/vsis3/team/private` matches
+`/vsis3/team/private/file`, but not `/vsis3/team/private-copy/file`.
+
 Aliases are canonicalized before precedence is evaluated. In particular,
 `AWS_DEFAULT_PROFILE`, `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL_S3`,
 `AWS_ENDPOINT_URL`, and `HUGGING_FACE_HUB_TOKEN` cannot bypass a more specific
@@ -31,7 +35,7 @@ for `SOURCE_ENDPOINT`. `CURL_CA_BUNDLE` and `SSL_CERT_FILE` are aliases for
 | `KARU_COALESCE_AMPLIFICATION` | `16` | largest ratio of transferred bytes to requested bytes in a merge |
 | `KARU_RANGE_FALLBACK_LIMIT` | `8388608` | largest prefix Karu may discard when a server ignores `Range`; `0` disables nonzero-offset fallback |
 | `KARU_MAX_ATTEMPTS` / `KARU_MAX_RETRIES` | `3` | total attempts for transient failures |
-| `KARU_REQUEST_TIMEOUT` | `120` | total seconds available to one remote transfer, including retry delays; `0` disables the deadline |
+| `KARU_REQUEST_TIMEOUT` | `120` | total seconds available to one remote transfer and the limit applied to each `credential_process`; `0` disables both deadlines |
 | `KARU_CONNECT_TIMEOUT` | `30` | connection timeout in seconds |
 | `KARU_LOW_SPEED_TIME` | `60` | seconds below the low-speed threshold before aborting |
 | `KARU_LOW_SPEED_LIMIT` | `1024` | low-speed threshold in bytes per second |
@@ -69,7 +73,8 @@ not persist object data or metadata beyond that batch.
 
 Static profiles, `credential_process`, and web-identity profiles are handled
 natively. Chained source-profile AssumeRole and IAM Identity Center should be
-provided by the application's AWS SDK through the callback API.
+provided by the application's AWS SDK through the callback API. A
+`credential_process` is terminated if it exceeds `KARU_REQUEST_TIMEOUT`.
 
 `AWS_S3_ENDPOINT` is a service root. With virtual hosting enabled, an endpoint
 of `https://objects.example.test` becomes
@@ -120,7 +125,8 @@ endpoint_url = https://data.source.coop
 
 Run `source-coop login`, then set `SOURCE_PROFILE=source-coop` in Karu. Karu
 executes the profile's credential process and refreshes its temporary result
-when needed; it does not implement the browser login or read the CLI keyring.
+when needed. The process is terminated if it exceeds `KARU_REQUEST_TIMEOUT`;
+Karu does not implement the browser login or read the CLI keyring.
 The profile's `endpoint_url` is intentionally ignored because
 `SOURCE_ENDPOINT` owns endpoint selection for `/vsisource/` paths.
 
@@ -202,7 +208,7 @@ never replayed against a different request target.
 | `KARU_HTTP_CA_PATH` | directory containing CA certificates |
 | `KARU_HTTP_PROXY` | explicit HTTP proxy; libcurl proxy environment variables also work |
 | `KARU_HTTP_PROXY_CREDENTIALS` | proxy credentials in `user:password` form |
-| `KARU_HTTP_USER_AGENT` | explicit User-Agent value |
+| `KARU_HTTP_USER_AGENT` | User-Agent; defaults to `karu/<version>`, and an empty value disables it |
 | `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | bearer token; takes precedence over token files |
 | `HF_TOKEN_PATH` | path to the token written by Hugging Face tooling |
 | `HF_HOME` | Hugging Face state directory; the token is read from `<HF_HOME>/token` |
@@ -237,7 +243,7 @@ Azure, or Source Cooperative. The callback receives the canonical VSI path.
 It returns strings that Karu copies immediately, an optional Unix expiry, and
 an optional canonical `cache_prefix`.
 
-Use a prefix only when the credential is valid for every object beneath it.
+Use a prefix only when the credential is valid for that path and every object beneath it.
 For example, `/vsis3/team-bucket/` shares one renewable value across that
 bucket. Without a prefix Karu calls the provider for every request, which is
 appropriate when the provider or vendor SDK owns its own cache.
@@ -249,11 +255,16 @@ prefix therefore starts with `/vsisource/`, not `/vsis3/`.
 Karu coalesces simultaneous callback refreshes for the same path. Callbacks for
 different paths may run concurrently, so the callback and its `user_data` must
 be thread-safe.
-Expiring credentials refresh near the end of their lifetime rather than at a
-fixed 60-second boundary. Native static credentials are rechecked after one
-minute so profile rotation remains visible; callback values with
-`expires_at == 0` remain valid until the callback's documented lifetime.
+
+Refresh is lazy: the first request inside the refresh window obtains a new
+value while later requests for that same path wait for it. There is no
+background thread. Expiring credentials enter that window during the last ten
+percent of their lifetime, clamped to 1–60 seconds. Already-expired values are
+rejected. Native static credentials are rechecked after one minute so profile
+rotation remains visible; callback values with `expires_at == 0` remain valid
+until invalidated by an authentication response or client destruction.
 These operational values do not cache object contents or metadata.
 
 The callback must not re-enter that same client; it should obtain credentials
-from the vendor SDK or identity service and return them directly.
+from the vendor SDK or identity service and return them directly. Karu cannot
+interrupt caller code, so the callback must place its own deadline on any I/O.
