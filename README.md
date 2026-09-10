@@ -15,6 +15,11 @@ keeping reads positional and stateless.
 
 Karu's VSI path syntax is strongly inspired by GDAL VSI.
 
+[**How Karu Reads**](https://asterisk-labs.github.io/karu/how-karu-reads.html) is
+the guide: what a range read costs, how a batch becomes HTTP requests, and why
+the engine is built the way it is. Start there if you want to understand Karu
+rather than look something up.
+
 ## Quick start
 
 This reads the first 4 KiB of a public

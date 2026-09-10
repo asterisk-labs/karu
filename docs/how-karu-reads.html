@@ -1,0 +1,1867 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="A guide to Karu 0.2: what a byte range costs, how a batch becomes HTTP requests, and why the engine is built the way it is."
+  >
+  <title>How Karu Reads</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <article class="sheet">
+    <header>
+      <div>
+        <a class="brand" href="index.html">karu</a>
+        <span class="version">v0.2.0</span>
+        <p>Stateless byte-range transport</p>
+      </div>
+      <nav aria-label="Documentation links">
+        <a href="index.html">Home</a>
+        <a href="configuration.html">Configuration</a>
+        <a class="github" href="https://github.com/asterisk-labs/karu" aria-label="Karu on GitHub">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 0C3.58 0 0 3.64 0 8.13c0 3.59 2.29 6.64 5.47 7.71.4.08.55-.18.55-.39 0-.19-.01-.83-.01-1.51-2.01.38-2.53-.5-2.69-.96-.09-.23-.48-.96-.82-1.15-.28-.15-.68-.53-.01-.54.63-.01 1.08.59 1.23.83.72 1.23 1.87.88 2.33.67.07-.53.28-.88.51-1.08-1.78-.21-3.64-.91-3.64-4.02 0-.89.31-1.62.82-2.19-.08-.21-.36-1.04.08-2.16 0 0 .67-.22 2.2.84A7.44 7.44 0 0 1 8 3.91c.68 0 1.35.09 1.98.27 1.53-1.06 2.2-.84 2.2-.84.44 1.12.16 1.95.08 2.16.51.57.82 1.3.82 2.19 0 3.12-1.87 3.81-3.65 4.02.29.25.54.74.54 1.5 0 1.08-.01 1.95-.01 2.23 0 .21.15.47.55.39A8.12 8.12 0 0 0 16 8.13C16 3.64 12.42 0 8 0Z"/>
+          </svg>
+        </a>
+      </nav>
+    </header>
+
+    <main>
+      <div class="manual-layout">
+
+        <aside class="manual-nav" aria-label="Contents">
+          <p class="here">How Karu Reads</p>
+          <p>43 sections · 4 appendices</p>
+
+          <h4>I · The problem</h4>
+          <ol>
+            <li><a href="#s1"><i>1</i><span>What a range read costs</span></a></li>
+            <li><a href="#s2"><i>2</i><span>Not a filesystem</span></a></li>
+            <li><a href="#s3"><i>3</i><span>Little's law</span></a></li>
+            <li><a href="#s4"><i>4</i><span>The workload</span></a></li>
+            <li><a href="#s5"><i>5</i><span>Where Karu stops</span></a></li>
+          </ol>
+
+          <h4>II · Foundations</h4>
+          <ol>
+            <li><a href="#s6"><i>6</i><span>HTTP, briefly</span></a></li>
+            <li><a href="#s7"><i>7</i><span>Range, 206, 416</span></a></li>
+            <li><a href="#s8"><i>8</i><span>An ignored Range</span></a></li>
+            <li><a href="#s9"><i>9</i><span>The TLS handshake</span></a></li>
+            <li><a href="#s10"><i>10</i><span>Keeping a connection</span></a></li>
+            <li><a href="#s11"><i>11</i><span>HTTP/2</span></a></li>
+            <li><a href="#s12"><i>12</i><span>easy, multi, share</span></a></li>
+            <li><a href="#s13"><i>13</i><span>The event loop</span></a></li>
+            <li><a href="#s14"><i>14</i><span>Returning zero</span></a></li>
+          </ol>
+
+          <h4>III · The surface</h4>
+          <ol>
+            <li><a href="#s15"><i>15</i><span>A C ABI, a C++ facade</span></a></li>
+            <li><a href="#s16"><i>16</i><span>Objects and paths</span></a></li>
+            <li><a href="#s17"><i>17</i><span>Byte windows</span></a></li>
+            <li><a href="#s18"><i>18</i><span>Config is a snapshot</span></a></li>
+            <li><a href="#s19"><i>19</i><span>Path scopes</span></a></li>
+            <li><a href="#s20"><i>20</i><span>Reads and batches</span></a></li>
+            <li><a href="#s21"><i>21</i><span>What you may read back</span></a></li>
+          </ol>
+
+          <h4>IV · Inside a read</h4>
+          <ol>
+            <li><a href="#s22"><i>22</i><span>The engine at a glance</span></a></li>
+            <li><a href="#s23"><i>23</i><span>The planner</span></a></li>
+            <li><a href="#s24"><i>24</i><span>Coalescing, four guards</span></a></li>
+            <li><a href="#s25"><i>25</i><span>Per-batch overrides</span></a></li>
+            <li><a href="#s26"><i>26</i><span>Scattering on arrival</span></a></li>
+            <li><a href="#s27"><i>27</i><span>Local files</span></a></li>
+            <li><a href="#s28"><i>28</i><span>Request in three phases</span></a></li>
+            <li><a href="#s29"><i>29</i><span>The backend contract</span></a></li>
+            <li><a href="#s30"><i>30</i><span>Signing</span></a></li>
+            <li><a href="#s31"><i>31</i><span>Size probes</span></a></li>
+          </ol>
+
+          <h4>V · When it fails</h4>
+          <ol>
+            <li><a href="#s32"><i>32</i><span>Classifying a failure</span></a></li>
+            <li><a href="#s33"><i>33</i><span>Backoff and jitter</span></a></li>
+            <li><a href="#s34"><i>34</i><span>Region redirects</span></a></li>
+            <li><a href="#s35"><i>35</i><span>Expired credentials</span></a></li>
+            <li><a href="#s36"><i>36</i><span>Deadlines</span></a></li>
+            <li><a href="#s37"><i>37</i><span>Draining a body</span></a></li>
+            <li><a href="#s38"><i>38</i><span>Error text</span></a></li>
+          </ol>
+
+          <h4>VI · Credentials</h4>
+          <ol>
+            <li><a href="#s39"><i>39</i><span>Where they come from</span></a></li>
+            <li><a href="#s40"><i>40</i><span>Cache and single flight</span></a></li>
+            <li><a href="#s41"><i>41</i><span>Your own provider</span></a></li>
+          </ol>
+
+          <h4>VII · Running it</h4>
+          <ol>
+            <li><a href="#s42"><i>42</i><span>Threads</span></a></li>
+            <li><a href="#s43"><i>43</i><span>Measuring</span></a></li>
+          </ol>
+
+          <h4>Appendices</h4>
+          <ol>
+            <li><a href="#apA"><i>A</i><span>Next to other libraries</span></a></li>
+            <li><a href="#apB"><i>B</i><span>Recipes</span></a></li>
+            <li><a href="#apC"><i>C</i><span>Diagnosing a failure</span></a></li>
+            <li><a href="#apD"><i>D</i><span>Glossary</span></a></li>
+          </ol>
+        </aside>
+
+        <article class="manual">
+          <h1 id="top">How Karu Reads</h1>
+          <p class="lede">
+            Karu answers one question: give me these bytes, from these objects, now.
+            Everything below explains what stands between that question and the answer
+            when the bytes are eighty milliseconds away, behind a signature, on a service
+            that sometimes returns 503.
+          </p>
+          <p class="runline">
+            <span>Karu 0.2.0</span>
+            <span>C++23 · libcurl 7.83+ · OpenSSL 3</span>
+            <span>Assumes C++, assumes nothing about object storage</span>
+          </p>
+
+          <p>
+            The order matters. Part I is the problem, Part II the network facts the design
+            rests on, Part III the API you call, Part IV the machinery behind it, and
+            Parts V through VII what happens when things go wrong and how to run the
+            result. Skipping Part II is the common mistake: most of the engine looks
+            arbitrary until you know what a TLS handshake costs and what returning zero
+            from a libcurl callback does.
+          </p>
+          <p>
+            Code references name files, not line numbers, because line numbers rot.
+            Measurements name the machine. Comparisons with other libraries name the file
+            or document they came from, and they describe those projects as they are, not
+            as foils.
+          </p>
+
+          <!-- ============================ PART I ============================ -->
+          <section class="part">
+            <b>Part I</b>
+            <strong>The problem</strong>
+            <span>Why a whole library exists for something that is one system call on a local disk.</span>
+          </section>
+
+          <h2 id="s1"><i>1</i>What a range read costs</h2>
+          <p>
+            On a local disk, reading 4&nbsp;096 bytes starting at byte 1&nbsp;048&nbsp;576
+            is one call:
+          </p>
+          <pre><code>pread(fd, buffer, 4096, 1048576);</code></pre>
+          <p>
+            A few microseconds when the page is warm. The kernel puts exactly the bytes
+            you asked for into exactly the buffer you named. There is no network, no
+            authentication, no retry, no format to negotiate.
+          </p>
+          <p>
+            Karu's operation is conceptually the same one. It is called a
+            <em>positional</em> read because the offset travels inside the request rather
+            than living in a cursor that moves. No <code>seek</code>, no <code>tell</code>,
+            no shared state between reads. Two threads can read the same object at the
+            same time without coordinating, because there is nothing to coordinate.
+          </p>
+          <p>
+            That choice comes first and everything else follows from it. A cursor API
+            forces either a mutex per open file or a handle per thread. A positional API
+            forces neither, which is what makes a batch of a thousand unrelated reads a
+            natural thing to express rather than an awkward one.
+          </p>
+
+          <h2 id="s2"><i>2</i>An object store is not a filesystem</h2>
+          <p>
+            The tempting shape for a storage layer is <code>open</code>,
+            <code>seek</code>, <code>read</code>, <code>close</code>. The differences that
+            defeat it are not about speed; they are about meaning.
+          </p>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th>&nbsp;</th><th>Local file</th><th>Remote object</th></tr></thead>
+            <tbody>
+              <tr><td><b>Opening</b></td><td>a descriptor, microseconds</td><td>does not exist; either you make a request or you do nothing</td></tr>
+              <tr><td><b>One read</b></td><td>1–100 µs</td><td>20–200 ms of round trip</td></tr>
+              <tr><td><b>Partial read</b></td><td>free, at any offset</td><td>a full HTTP request with headers and a signature</td></tr>
+              <tr><td><b>Mutability</b></td><td>changes underneath you</td><td>objects are replaced, not edited</td></tr>
+              <tr><td><b>Metadata</b></td><td><code>stat</code>, nearly free</td><td>another request</td></tr>
+              <tr><td><b>Failure</b></td><td>rare and fatal</td><td>routine and transient</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p>Three consequences run through the whole design.</p>
+          <p>
+            <strong>Latency dominates, not bandwidth.</strong> Asking S3 for 4&nbsp;KiB and
+            asking for 4&nbsp;MiB cost nearly the same in round-trip time. What hurts is
+            the <em>count</em> of requests. That is where coalescing comes from
+            (§24): merge nearby ranges into one request even though you download bytes
+            nobody asked for.
+          </p>
+          <p>
+            <strong>Failure is part of the normal path.</strong> A client that treats 503
+            as fatal is unusable at scale, so classification, backoff and jitter are
+            core machinery rather than a wrapper (§32–§33).
+          </p>
+          <p>
+            <strong>There is no open to amortize.</strong> With no descriptor, every read
+            carries the whole weight: resolve credentials, build a URL, sign it, find a
+            connection. Most of the engineering in Karu is about amortizing things that a
+            local file gets for free.
+          </p>
+
+          <h2 id="s3"><i>3</i>Little's law, and the only lever</h2>
+          <p>
+            The most important result here fits on one line. In a stable system,
+            <code>in-flight = rate × latency</code>. Rearranged:
+            <code>rate = concurrency / latency</code>. With a typical 60&nbsp;ms round trip
+            for a small GET:
+          </p>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th class="num">In flight</th><th class="num">Latency</th><th class="num">Requests/s</th></tr></thead>
+            <tbody>
+              <tr><td class="num">1</td><td class="num">60 ms</td><td class="num">17</td></tr>
+              <tr><td class="num">8</td><td class="num">60 ms</td><td class="num">133</td></tr>
+              <tr><td class="num">64</td><td class="num">60 ms</td><td class="num">1 067</td></tr>
+              <tr><td class="num">256</td><td class="num">60 ms</td><td class="num">4 267</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p>
+            You cannot lower S3's latency. You can raise how many requests are in flight.
+            That is the whole reason <code>KARU_CONCURRENCY</code> defaults to 64 and the
+            reason a carefully written sequential client still tops out in the low tens of
+            requests per second.
+          </p>
+          <p>
+            The other half of the law matters just as much. Anything that stalls the state
+            machine holding those requests open drops effective concurrency to zero while
+            it stalls. A network call for credentials on the wrong thread is not a small
+            regression; for its duration it is a total one. §42 is about which thread does
+            what, and this is why it exists.
+          </p>
+
+          <h2 id="s4"><i>4</i>The workload Karu is shaped around</h2>
+          <p>
+            Karu was not designed in the abstract. The target is a machine-learning
+            dataloader that performs on the order of a million small range reads per
+            epoch — image tiles, compressed frames — spread across thousands of objects.
+          </p>
+          <ul>
+            <li>
+              <strong>Batches, not single reads.</strong> The consumer already knows the
+              sixty-four ranges it needs. An API that accepts one read at a time throws
+              that information away, so <code>submit</code> and <code>fetch</code> take
+              an array.
+            </li>
+            <li>
+              <strong>Fixed cost per read is budget.</strong> At a million reads, fifty
+              microseconds of overhead is fifty seconds an epoch. An allocation that is
+              noise elsewhere is a line item here.
+            </li>
+            <li>
+              <strong>No data cache.</strong> A dataloader shuffles; a block cache would
+              miss most of the time and would spend the memory the model needs. Karu
+              caches credentials, connections and TLS sessions, which are reused, and
+              never object bytes, which are not.
+            </li>
+            <li>
+              <strong>It must survive <code>fork</code>.</strong> PyTorch's
+              <code>DataLoader</code> forks workers. A client with inherited threads is a
+              trap, which is why §42 ends where it does.
+            </li>
+          </ul>
+
+          <h2 id="s5"><i>5</i>Where Karu stops</h2>
+          <p>Karu does three things.</p>
+          <dl class="terms">
+            <dt>resolve</dt>
+            <dd>Turn a string — <code>s3://bucket/key</code>, <code>/vsis3/bucket/key</code>, <code>/tmp/file.tif</code>, <code>hf://datasets/org/repo/x</code> — into a structured object.</dd>
+            <dt>read</dt>
+            <dd>Given a batch of <code>(object, offset, length, destination)</code>, fill the destinations.</dd>
+            <dt>size</dt>
+            <dd>Report how many bytes are visible through an object.</dd>
+          </dl>
+          <p>The list of what it will not do is just as informative.</p>
+          <ul>
+            <li><strong>It does not write.</strong> No PUT, no multipart, no delete.</li>
+            <li><strong>It does not list.</strong> Discovering what lives under a prefix is another layer's job.</li>
+            <li><strong>It does not cache object data or metadata.</strong> <code>karu_client_size</code> makes a request every time, and the header says so.</li>
+            <li><strong>It does not understand formats.</strong> GeoTIFF, Parquet and Zarr mean nothing here; Karu addresses bytes and someone above interprets them.</li>
+            <li><strong>It does not emulate a filesystem.</strong> No <code>FILE*</code>, no <code>std::istream</code>, no open handle.</li>
+          </ul>
+          <p>
+            The narrowness is what lets the engine be aggressive. With no writes, every
+            request is idempotent and safe to retry without thought. With no data cache,
+            there is no invalidation to reason about. With no formats, the planner can
+            merge two ranges without wondering whether it just crossed a semantic
+            boundary.
+          </p>
+
+          <figure>
+            <svg viewBox="0 0 700 172" role="img" aria-label="Four layers: application, format, Karu, transport">
+              <g class="d-box soft"><rect x="0" y="2" width="700" height="30"/>
+                <text x="14" y="21" style="text-anchor:start">Application — dataloader, notebook, service</text>
+                <text class="sub" x="686" y="21" style="text-anchor:end">wants tensors</text></g>
+              <g class="d-box soft"><rect x="0" y="36" width="700" height="30"/>
+                <text x="14" y="55" style="text-anchor:start">Format — Rumi, GDAL, Parquet, Zarr</text>
+                <text class="sub" x="686" y="55" style="text-anchor:end">knows which byte, and why</text></g>
+              <g class="d-box accent"><rect x="0" y="70" width="700" height="42"/>
+                <text x="14" y="88" style="text-anchor:start">Karu</text>
+                <text class="sub" x="14" y="103" style="text-anchor:start">addresses, plans, signs, retries, delivers bytes</text>
+                <text class="sub" x="686" y="95" style="text-anchor:end">does not know what the bytes mean</text></g>
+              <g class="d-box soft"><rect x="0" y="116" width="700" height="30"/>
+                <text x="14" y="135" style="text-anchor:start">libcurl · OpenSSL · pread</text>
+                <text class="sub" x="686" y="135" style="text-anchor:end">moves octets</text></g>
+              <text class="d-note left" x="0" y="164">The heavy border is where semantic knowledge ends and pure addressing begins.</text>
+            </svg>
+            <figcaption>
+              Karu occupies one layer and occupies all of it. The rule that keeps the
+              boundary: if a decision needs to know what the bytes mean, it does not
+              belong here.
+            </figcaption>
+          </figure>
+
+          <!-- ============================ PART II ============================ -->
+          <section class="part">
+            <b>Part II</b>
+            <strong>Foundations</strong>
+            <span>HTTP, TLS and libcurl at the depth needed to see why the engine looks the way it does.</span>
+          </section>
+
+          <h2 id="s6"><i>6</i>HTTP, briefly</h2>
+          <p>An HTTP/1.1 request is text. This is literally what crosses the socket:</p>
+          <pre><code>GET /path/to/tile.tif HTTP/1.1
+Host: bucket.s3.us-west-2.amazonaws.com
+Range: bytes=1048576-1052671
+Authorization: AWS4-HMAC-SHA256 Credential=...
+x-amz-date: 20260910T120000Z
+</code></pre>
+          <p>A request line, <code>Name: value</code> headers, a blank line. The response has the same shape:</p>
+          <pre><code>HTTP/1.1 206 Partial Content
+Content-Range: bytes 1048576-1052671/2147483648
+Content-Length: 4096
+
+&lt;4096 binary bytes&gt;</code></pre>
+          <p>
+            <strong>Headers are separated by CRLF.</strong> That is why Karu rejects any
+            header name or value containing <code>\r</code> or <code>\n</code>. Let a
+            newline through a user-controlled value and the caller gets to append headers
+            of their own. The check is applied wherever headers are assembled —
+            <code>build_headers</code>, <code>credential_request</code>, and
+            <code>add_configured_headers</code>.
+          </p>
+          <p>
+            <strong>Status arrives before the body.</strong> A client can decide what to do
+            with a body <em>while</em> receiving it, because the status line and headers
+            came first. Half a dozen decisions in Part IV depend on that.
+          </p>
+          <p>
+            <strong>One TCP connection can serve many requests.</strong> Without HTTP/1.1
+            keep-alive none of this is viable (§10).
+          </p>
+
+          <h2 id="s7"><i>7</i>Range, 206 and 416</h2>
+          <p>
+            The <code>Range</code> header is what turns HTTP into a random-access medium.
+            Karu always sends the closed form:
+          </p>
+          <pre><code>Range: bytes=&lt;first&gt;-&lt;last&gt;      // both inclusive</code></pre>
+          <p>
+            Never the open form <code>bytes=100-</code> and never the suffix form
+            <code>bytes=-500</code>. A closed range can be validated exactly: you know
+            precisely how many bytes should arrive, so a server that returns something
+            else is caught rather than trusted.
+          </p>
+          <p>A server that honours the range answers <strong>206</strong> with:</p>
+          <pre><code>Content-Range: bytes 1048576-1052671/2147483648
+               │       │       │        └─ total object size ('*' if unknown)
+               │       │       └────────── last byte, inclusive
+               │       └────────────────── first byte
+               └────────────────────────── unit, always "bytes"</code></pre>
+          <p>
+            <code>parse_content_range</code> reads it and <code>valid_content_range</code>
+            checks it against what was asked. The response is accepted only when the first
+            byte matches the requested offset, the last byte does not exceed the requested
+            one, and either it equals the requested last byte or it is the final byte of
+            the object.
+          </p>
+          <p>
+            That last clause is the subtle one. Ask for <code>bytes=0-4095</code> of a
+            1&nbsp;000-byte object and the correct answer is
+            <code>bytes 0-999/1000</code>: shorter than requested and entirely legitimate.
+            Karu accepts it, delivers 1&nbsp;000 bytes, and marks only the parts that fell
+            past the end with <code>KARU_ERR_RANGE</code>.
+          </p>
+          <p>
+            <strong>416 Range Not Satisfiable</strong> arrives when the range starts past
+            the end, carrying <code>Content-Range: bytes */1000</code>. Karu uses this for
+            one specific case: a zero-byte object answers 416 with <code>bytes */0</code>
+            even to <code>Range: bytes=0-0</code>. The size probe (§31) recognises that
+            shape and reports a size of zero rather than an error.
+          </p>
+          <p class="source"><a href="https://www.rfc-editor.org/rfc/rfc9110#name-range-requests">RFC 9110 §14 — Range Requests</a></p>
+
+          <h2 id="s8"><i>8</i>When the server ignores your Range</h2>
+          <p>
+            <code>Range</code> is a request, not an instruction. A server may legally
+            ignore it and answer <strong>200</strong> with the whole object. Misconfigured
+            proxies do it, some CDNs do it, and so do partial S3 implementations.
+          </p>
+          <p>
+            That leaves two bad options: download two gigabytes to throw them away, or
+            fail. Karu takes a third — discard up to a limit, fail past it. In
+            <code>write_callback</code>:
+          </p>
+          <pre><code>if (transfer.http_status == 200 &amp;&amp; transfer.offset &gt; 0) {
+    if (transfer.offset &gt; transfer.range_fallback_limit) {
+        transfer.range_fallback_rejected = true;
+        return 0;                     // abort the transfer
+    }
+    transfer.skip = transfer.offset;  // silently drop the prefix
+}</code></pre>
+          <p>
+            The limit is <code>KARU_RANGE_FALLBACK_LIMIT</code>, 8&nbsp;MiB by default.
+            Below it the prefix is dropped and the caller gets correct bytes. Above it the
+            error names the number to change:
+          </p>
+          <pre><code>https://host/obj: server ignored Range; refusing to discard 2147483648 bytes (limit 8388608)</code></pre>
+          <div class="callout">
+            <b>Why a limit and not a flag</b>
+            <p>
+              A client that always fails is brittle against mediocre servers. A client
+              that always discards can pull gigabytes without saying so. A limit turns a
+              policy question into a number an operator can move, and the error message
+              says which number.
+            </p>
+          </div>
+
+          <h2 id="s9"><i>9</i>The cost of a handshake</h2>
+          <p>Opening a fresh TLS connection costs, at minimum:</p>
+          <ol class="body">
+            <li>DNS resolution, cacheable;</li>
+            <li>the TCP handshake, one full round trip;</li>
+            <li>the TLS handshake, one round trip on TLS 1.3 and two on 1.2;</li>
+            <li>certificate chain verification, which is real CPU work.</li>
+          </ol>
+          <p>
+            At 30&nbsp;ms of network latency that is 60–90&nbsp;ms before a single byte of
+            the request goes out. Against that, the request itself is free.
+          </p>
+          <p>
+            The failure mode this produces is nasty because it is not an error. If every
+            transfer opens its own connection, every read pays its own handshake, and
+            throughput goes flat in a way that adding concurrency does not fix. Nothing in
+            a functional test catches it. Three mechanisms in Part IV exist to keep it from
+            happening: reusing easy handles so their connection caches survive (§12),
+            sharing DNS and TLS sessions between handles (§12), and choosing carefully when
+            an abort is worth the closed connection (§14, §37).
+          </p>
+
+          <h2 id="s10"><i>10</i>Keeping a connection</h2>
+          <p>
+            HTTP/1.1 leaves the connection open after a response. If the next request goes
+            to the same origin — scheme, host and port — it can travel on the same
+            connection and skip all three handshakes.
+          </p>
+          <p>
+            In libcurl this happens by itself, with one condition that is easy to break:
+            the connection cache lives <em>inside the easy handle</em>. Destroy the handle
+            and you destroy the cache. Reset it and you keep it.
+          </p>
+          <div class="callout mark">
+            <b>libcurl, curl_easy_reset</b>
+            <p>
+              It resets all options to their defaults but does not change live
+              connections, the SSL session cache, the DNS cache, cookies, or shares.
+            </p>
+          </div>
+          <p class="source"><a href="https://curl.se/libcurl/c/curl_easy_reset.html">curl.se — curl_easy_reset</a></p>
+          <p>
+            That paragraph is the entire reason Karu keeps a pool of easy handles instead
+            of creating and destroying them. Each pooled handle carries its open
+            connections with it.
+          </p>
+          <p>
+            The other way to lose keep-alive is aborting mid-response. When a write
+            callback returns something other than what libcurl expects, the connection is
+            marked unusable and closed, because libcurl can no longer know where in the
+            stream it stopped. §14 and §37 are about when that trade is worth making.
+          </p>
+
+          <h2 id="s11"><i>11</i>HTTP/2, and why the default is 1.1</h2>
+          <p>
+            HTTP/2 carries many concurrent requests over one TCP connection as independent
+            streams. On paper that is ideal here: sixty-four ranges in flight behind a
+            single handshake. Two objections get in the way.
+          </p>
+          <p>
+            <strong>The server has to speak it.</strong> Negotiation happens in ALPN during
+            the TLS handshake, so it is directly observable — offer both protocols and see
+            what comes back:
+          </p>
+          <pre><code>curl -v -o /dev/null https://s3.us-east-1.amazonaws.com/ 2&gt;&amp;1 | grep ALPN</code></pre>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th>Endpoint</th><th>ALPN result</th></tr></thead>
+            <tbody>
+              <tr><td><code>s3.us-east-1.amazonaws.com</code></td><td>http/1.1</td></tr>
+              <tr><td><code>*.blob.core.windows.net</code></td><td>no agreement, falls back to HTTP/1.1</td></tr>
+              <tr><td><code>storage.googleapis.com</code></td><td><b>h2</b></td></tr>
+              <tr><td><code>huggingface.co</code></td><td><b>h2</b></td></tr>
+              <tr><td><code>data.source.coop</code></td><td><b>h2</b></td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p>
+            The two most used backends are on the wrong side of that table. Forcing HTTP/2
+            breaks nothing, since libcurl falls back, but against S3 and Azure Blob it gains
+            nothing either.
+          </p>
+          <p>
+            <strong>One connection has one congestion window.</strong> Sixty-four
+            multiplexed streams share the throughput of a single tunnel. For many small
+            requests that is fine; for large parallel downloads several TCP connections
+            usually win.
+          </p>
+          <p>
+            Karu sets <code>KARU_HTTP_VERSION=1.1</code> by default and leaves the door
+            open: <code>AUTO</code>, <code>2TLS</code>, <code>2</code> and
+            <code>2PRIOR_KNOWLEDGE</code> are all accepted, and the multiplexing machinery
+            — <code>CURLMOPT_PIPELINING</code> set to <code>CURLPIPE_MULTIPLEX</code>, plus
+            <code>CURLOPT_PIPEWAIT</code> enabled only when an HTTP/2 version is selected —
+            is already wired for when it is turned on.
+          </p>
+          <div class="callout">
+            <b>Why the version is set rather than inherited</b>
+            <p>
+              libcurl's own default for <code>CURLOPT_HTTP_VERSION</code> has changed
+              three times: 1.1 through 7.62, <code>2TLS</code> from 7.62 to 8.12, and
+              <code>NONE</code> from 8.13. Karu supports libcurl from 7.83 upward, so it
+              cannot assume any of them and states the version explicitly.
+            </p>
+          </div>
+          <p class="source"><a href="https://curl.se/libcurl/c/CURLOPT_HTTP_VERSION.html">curl.se — CURLOPT_HTTP_VERSION</a></p>
+
+          <h2 id="s12"><i>12</i>easy, multi and share</h2>
+          <p>libcurl exposes three objects, and understanding them is understanding the engine.</p>
+          <dl class="terms">
+            <dt>CURL *easy</dt>
+            <dd>One transfer. Holds the options and, crucially, its own connection cache. <code>curl_easy_perform</code> runs it synchronously.</dd>
+            <dt>CURLM *multi</dt>
+            <dd>A set of easy handles progressing together on one thread. An event loop: you push it, it advances everything it can without blocking.</dd>
+            <dt>CURLSH *share</dt>
+            <dd>State shared between handles — DNS cache, TLS sessions, cookies, connections. You must supply the locking callbacks.</dd>
+          </dl>
+          <p>
+            Karu uses all three. The multi is the heart of the I/O thread. Easy handles are
+            recycled through a pool. The share is configured with exactly two kinds of
+            data:
+          </p>
+          <pre><code>require_shared_data(share_.get(), CURL_LOCK_DATA_DNS);
+require_shared_data(share_.get(), CURL_LOCK_DATA_SSL_SESSION);</code></pre>
+          <p>
+            One obvious candidate is missing: <code>CURL_LOCK_DATA_CONNECT</code>, which
+            would share the connection cache. Leaving it out is deliberate.
+          </p>
+          <div class="callout mark">
+            <b>libcurl, CURLSHOPT_SHARE on CURL_LOCK_DATA_CONNECT</b>
+            <p>Sharing connections across multiple concurrent threads is not supported.</p>
+          </div>
+          <p class="source"><a href="https://curl.se/libcurl/c/CURLSHOPT_SHARE.html">curl.se — CURLSHOPT_SHARE</a></p>
+          <p>
+            Karu's size probe (§31) runs on the calling thread rather than the I/O thread,
+            so sharing connections between the two would be exactly the scenario the
+            documentation rules out. DNS and TLS sessions are safe to share given the
+            locking callbacks, and they carry most of the benefit.
+          </p>
+
+          <h2 id="s13"><i>13</i>The event loop</h2>
+          <p>
+            The multi interface is driven by three calls. This is the skeleton of
+            <code>Engine::io_loop</code>:
+          </p>
+          <pre><code>while (!stop) {
+    // 1. advance every transfer until it would block
+    curl_multi_perform(multi, &amp;running);
+
+    // 2. collect the ones that finished
+    while (CURLMsg* m = curl_multi_info_read(multi, &amp;left)) {
+        if (m-&gt;msg == CURLMSG_DONE) { /* ... */ }
+    }
+
+    // 3. sleep until a socket wakes up or the timeout expires
+    curl_multi_poll(multi, nullptr, 0, timeout_ms, &amp;n);
+}</code></pre>
+          <p>
+            <code>curl_multi_perform</code> never blocks: it makes all the progress it can
+            and returns. <code>curl_multi_poll</code> does sleep, and it is what keeps the
+            loop from burning a core.
+          </p>
+          <p>
+            That raises the obvious question — if the thread is asleep in
+            <code>poll</code> and new work arrives from another thread, how does it wake?
+            <code>curl_multi_wakeup</code> is safe to call from any thread and makes an
+            in-flight poll return immediately. Karu calls it when a batch is submitted,
+            when one is cancelled, and when a credential resolution finishes.
+          </p>
+          <div class="callout mark">
+            <b>libcurl, curl_multi_info_read</b>
+            <p>
+              The data the returned pointer refers to does not survive calling
+              <code>curl_multi_cleanup</code>, <code>curl_multi_remove_handle</code> or
+              <code>curl_easy_cleanup</code>.
+            </p>
+          </div>
+          <p class="source"><a href="https://curl.se/libcurl/c/curl_multi_info_read.html">curl.se — curl_multi_info_read</a></p>
+          <p>
+            Read that carefully: removing the handle and <em>then</em> reading
+            <code>msg-&gt;data.result</code> reads memory the contract has already
+            invalidated. Karu copies the easy handle and the result code into locals
+            before touching the multi.
+          </p>
+
+          <h2 id="s14"><i>14</i>Returning zero</h2>
+          <p>libcurl delivers data by pushing it into your functions. Karu registers two:</p>
+          <pre><code>CURLOPT_HEADERFUNCTION  →  header_callback(data, size, count, userdata)
+CURLOPT_WRITEFUNCTION   →  write_callback (data, size, count, userdata)</code></pre>
+          <p>
+            Each receives a chunk and returns how many bytes it consumed. The contract is
+            blunt, which is what makes it expressive:
+          </p>
+          <dl class="terms">
+            <dt>size*count</dt>
+            <dd>Fine, keep going.</dd>
+            <dt>anything else</dt>
+            <dd>Abort. libcurl ends the transfer with <code>CURLE_WRITE_ERROR</code> and closes the connection, because it can no longer know where the stream stopped.</dd>
+          </dl>
+          <p>That "anything else" — in practice, zero — is a flow-control tool. Karu uses it in four places, each a decision:</p>
+          <ol class="body">
+            <li>a <strong>206 whose Content-Range does not match</strong>, rather than accept bytes from the wrong place;</li>
+            <li>a <strong>200 whose offset exceeds the discard limit</strong>, rather than swallow gigabytes (§8);</li>
+            <li><strong>the requested range is complete and the remaining body is large</strong>, rather than download it for nothing (§37);</li>
+            <li><strong>an error body exceeded its drain budget</strong> (§37).</li>
+          </ol>
+          <p>
+            There is a fifth case where Karu deliberately does <em>not</em> return zero:
+            when the leftover body is small, it finishes reading it so the connection stays
+            reusable. The arithmetic of that choice is §37.
+          </p>
+
+          <!-- ============================ PART III ============================ -->
+          <section class="part">
+            <b>Part III</b>
+            <strong>The surface</strong>
+            <span>What you actually call, and what the calls promise.</span>
+          </section>
+
+          <h2 id="s15"><i>15</i>A C ABI with a C++ facade</h2>
+          <p>
+            The stable interface is C. <code>karu/karu.h</code> exposes opaque handles,
+            plain structs and status codes, and nothing else. The reason is reach: Karu has
+            to be callable from Python, R and Julia, and a C ABI is the only interface all
+            three speak natively. A C++ ABI would tie every binding to one compiler and one
+            standard library.
+          </p>
+          <p>
+            <code>karu/karu.hpp</code> is a header-only facade over that ABI, not a second
+            implementation. It gives C++ callers <code>std::expected</code>,
+            <code>std::span</code>, RAII handles and move-only types:
+          </p>
+          <pre><code>auto config = karu::Config::from_environment().value();
+auto client = karu::Client::create(config).value();
+auto object = karu::Object::parse("s3://bucket/data.bin").value();
+
+auto bytes = client.read(object, 0, 4096).value();</code></pre>
+          <p>
+            Every one of those types wraps a C handle in a <code>unique_ptr</code> with the
+            matching free function, and every fallible call returns
+            <code>karu::Result&lt;T&gt;</code>, which is
+            <code>std::expected&lt;T, karu::Error&gt;</code>. Nothing throws.
+          </p>
+          <p>
+            The version handshake is <code>karu_api_version()</code>, currently 1.
+            Structures that a caller allocates and that may grow — today
+            <code>karu_submit_options</code> — begin with a <code>struct_size</code> field
+            so a newer library can serve an older caller (§25).
+          </p>
+
+          <h2 id="s16"><i>16</i>Objects and paths</h2>
+          <p>
+            <code>karu::Object::parse</code> — <code>karu_resolve</code> in C — turns a
+            string into a resolved object. It performs no I/O and touches no credentials;
+            it is pure parsing, which is why it is cheap enough to call in a loop.
+          </p>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th>Backend</th><th>URI</th><th>VSI path</th></tr></thead>
+            <tbody>
+              <tr><td>HTTP</td><td><code>https://host/object</code></td><td><code>/vsicurl/https://host/object</code></td></tr>
+              <tr><td>AWS S3</td><td><code>s3://bucket/key</code></td><td><code>/vsis3/bucket/key</code></td></tr>
+              <tr><td>Google Cloud Storage</td><td><code>gs://bucket/key</code></td><td><code>/vsigs/bucket/key</code></td></tr>
+              <tr><td>Azure Blob</td><td><code>az://container/key</code></td><td><code>/vsiaz/container/key</code></td></tr>
+              <tr><td>Azure Data Lake</td><td><code>abfs://container/key</code></td><td><code>/vsiadls/container/key</code></td></tr>
+              <tr><td>Hugging Face</td><td><code>hf://datasets/org/repo/path</code></td><td><code>/vsihf/datasets/org/repo/path</code></td></tr>
+              <tr><td>Source Cooperative</td><td><code>source://account/product/key</code></td><td><code>/vsisource/account/product/key</code></td></tr>
+              <tr><td>Local</td><td><code>file:///path</code> or a bare path</td><td>—</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p>
+            The VSI spelling is borrowed from GDAL's virtual file system prefixes, so paths
+            already written for GDAL resolve here unchanged. The borrowing is deliberate
+            and partial: Karu implements the prefixes above and rejects everything else
+            with a message naming what it does support. There are no
+            <code>_streaming</code> variants, because every remote read is already
+            stateless.
+          </p>
+          <p class="source"><a href="https://gdal.org/en/stable/user/virtual_file_systems.html">GDAL — Virtual file systems</a></p>
+          <p>
+            Whatever spelling goes in, a canonical VSI path comes out. That canonical form
+            is what path-scoped options and credential scopes match against (§19), so
+            <code>s3://data/x</code> and <code>/vsis3/data/x</code> behave identically.
+          </p>
+
+          <h2 id="s17"><i>17</i>Byte windows</h2>
+          <p>Two constructs narrow an object to a sub-range before any read happens.</p>
+          <pre><code>/vsisubfile/OFFSET_LENGTH,&lt;path&gt;
+&lt;path&gt;#bytes=FIRST-LAST</code></pre>
+          <p>
+            Both produce a window with an offset and a length. Reads are then addressed
+            relative to the window, and a read that leaves it fails with
+            <code>KARU_ERR_RANGE</code> before a request is built.
+          </p>
+          <p>
+            They compose. <code>#bytes</code> defines the inner window, and each surrounding
+            <code>/vsisubfile</code> offset is relative to the window beneath it. Nesting is
+            capped at sixteen levels, which is a guard against a pathological path rather
+            than a meaningful limit.
+          </p>
+          <p>
+            The interesting consequence is invisible from outside. Two reads that arrive
+            through different windows over the same underlying object are recognised as the
+            same resource by the planner, because offsets are made absolute before anything
+            is grouped (§23). A read through <code>/vsisubfile/100_500,s3://b/k</code> at
+            offset 0 and a read of <code>s3://b/k</code> at offset 100 are the same ten
+            bytes, and they can share one request.
+          </p>
+
+          <h2 id="s18"><i>18</i>Configuration is a snapshot</h2>
+          <p>
+            <code>karu::Config::from_environment()</code> reads the supported environment
+            variables once, along with the home and cache directories used for default
+            credential discovery. <code>Config::empty()</code> starts with none of that,
+            which is what hermetic tests want.
+          </p>
+          <p>
+            <code>Client::create</code> then <em>copies</em> the configuration into an
+            immutable snapshot. From that moment the client never reads the environment
+            again. Changing <code>AWS_REGION</code> in the process afterwards has no effect
+            on an existing client, and that is the point: a request built at second one and
+            a request built at second nine thousand are built from the same inputs.
+          </p>
+          <p>
+            Unknown option names are rejected rather than ignored. A typo in
+            <code>AWS_SECRET_ACCESS_KEY</code> should be a configuration error, not an
+            authentication failure twenty minutes later.
+          </p>
+          <p>
+            <code>Client::matches(config)</code> reports whether a configuration would
+            produce the client you already have, without performing I/O. It exists so a
+            long-lived process can decide whether to keep a client — and its warm
+            connections — or build a new one.
+          </p>
+
+          <h2 id="s19"><i>19</i>Path scopes</h2>
+          <p>
+            Options apply either to the whole client or to a path prefix, and the longest
+            matching prefix wins:
+          </p>
+          <pre><code>config.set("AWS_REGION", "us-west-2").value();
+config.set_path("/vsis3/public/",  "AWS_NO_SIGN_REQUEST", "YES").value();
+config.set_path("/vsis3/private/", "AWS_PROFILE", "research").value();</code></pre>
+          <p>
+            Matching stops at segment boundaries. A rule for <code>s3://data</code> covers
+            <code>s3://data/file</code> and does not cover <code>s3://data-private/file</code>.
+            The same rule governs the <code>cache_prefix</code> a custom credential provider
+            may return (§41), so a credential scoped to one bucket cannot leak into a
+            similarly named one.
+          </p>
+          <p>
+            Options whose names begin with <code>KARU_</code> are client-wide and cannot be
+            path-scoped. They describe the engine — concurrency, timeouts, the planner —
+            and an engine has one of each. Per-batch planner settings are the deliberate
+            exception, and they go through a different door (§25).
+          </p>
+          <p>
+            Aliases are canonicalised before precedence is evaluated, so
+            <code>AWS_DEFAULT_REGION</code> in the environment cannot quietly outrank
+            <code>AWS_REGION</code> set on a path.
+          </p>
+
+          <h2 id="s20"><i>20</i>Reads, batches and completions</h2>
+          <p>A read names an object, an offset and a destination:</p>
+          <pre><code>struct Read {
+    const Object* object;
+    std::uint64_t offset;
+    std::span&lt;std::byte&gt; destination;   // length comes from the span
+    void* tag;                          // yours, returned untouched
+    std::string_view if_match;          // optional ETag precondition
+};</code></pre>
+          <p>There are two ways to run a batch of them.</p>
+          <p>
+            <code>fetch</code> is blocking. It submits, waits for everything, and returns
+            either success or the first failure. It is the right call when you cannot
+            proceed until all the bytes are present.
+          </p>
+          <p>
+            <code>submit</code> returns a <code>Batch</code>, and <code>Batch::next</code>
+            yields one completion at a time as they finish, in whatever order they finish:
+          </p>
+          <pre><code>auto batch = client.submit(reads).value();
+while (true) {
+    auto event = batch.next().value();
+    if (event.state == karu::BatchState::end) break;
+    decode(event.tag, event.bytes_read);   // work while the rest is still moving
+}</code></pre>
+          <p>
+            The <code>tag</code> is how a caller reconnects a completion to its own
+            bookkeeping. Karu never interprets it. For a decoder this is the whole point:
+            frames become decodable as they land instead of after the slowest one.
+          </p>
+          <p>
+            Several threads may consume the same batch. <code>next</code> accepts a
+            timeout: negative blocks, zero polls, positive waits. Freeing a batch cancels
+            whatever is still pending and waits for workers to let go of the destination
+            buffers, which is what makes it safe to free the buffers immediately
+            afterwards.
+          </p>
+
+          <h2 id="s21"><i>21</i>What you may read back</h2>
+          <p>
+            A completion reports <code>bytes_read</code>, and that number is the contract.
+            Only that prefix of the destination may be inspected.
+          </p>
+          <ul>
+            <li><strong>Success</strong> reports the full requested length.</li>
+            <li><strong>An error</strong> normally reports zero.</li>
+            <li><strong><code>KARU_ERR_RANGE</code></strong> may report a valid prefix: the object ended partway through the requested range, and the bytes that did exist are there.</li>
+            <li><strong>Anything past <code>bytes_read</code> is unspecified.</strong> A failed attempt may have written into the destination before failing.</li>
+          </ul>
+          <p>
+            That last point matters for anyone pooling buffers. A destination handed to a
+            failed read is not guaranteed untouched, so it must be treated as dirty rather
+            than reused blind. If <code>fetch</code> fails, every destination in the batch
+            is unspecified.
+          </p>
+          <p>
+            When a read's destination is left empty in the C API — <code>buffer</code> set
+            to <code>NULL</code> — Karu allocates one and hands ownership over in the
+            completion; release it with <code>karu_free</code> whatever the status. The C++
+            facade always supplies a destination, so this only arises through the C ABI.
+          </p>
+
+          <!-- ============================ PART IV ============================ -->
+          <section class="part">
+            <b>Part IV</b>
+            <strong>Inside a read</strong>
+            <span>From a submitted batch to bytes in your buffer.</span>
+          </section>
+
+          <h2 id="s22"><i>22</i>The engine at a glance</h2>
+          <p>
+            A client owns one engine, created lazily on first use. The engine owns the
+            threads, the curl multi, the share and the handle pool.
+          </p>
+          <figure>
+            <svg viewBox="0 0 700 236" role="img" aria-label="Path of a batch through the engine">
+              <defs>
+                <marker id="d-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0 0 10 5 0 10Z"/>
+                </marker>
+              </defs>
+
+              <text class="d-lane" x="0" y="12">CALLER</text>
+              <g class="d-box"><rect x="0" y="20" width="150" height="40"/>
+                <text x="75" y="38">submit(reads)</text>
+                <text class="sub" x="75" y="52">object · offset · destination</text></g>
+              <path class="d-edge" d="M150 40H196"/>
+
+              <g class="d-box accent"><rect x="196" y="20" width="150" height="40"/>
+                <text x="271" y="38">planner</text>
+                <text class="sub" x="271" y="52">validate · sort · coalesce</text></g>
+
+              <text class="d-lane" x="392" y="12">ENGINE</text>
+              <path class="d-edge" d="M346 40H392"/>
+              <g class="d-box soft"><rect x="392" y="14" width="140" height="24"/>
+                <text x="462" y="30" style="font-size:9px">file queue</text></g>
+              <g class="d-box soft"><rect x="392" y="42" width="140" height="24"/>
+                <text x="462" y="58" style="font-size:9px">credential queue</text></g>
+              <g class="d-box soft"><rect x="392" y="70" width="140" height="24"/>
+                <text x="462" y="86" style="font-size:9px">http queue</text></g>
+
+              <path class="d-edge" d="M532 26H578"/>
+              <g class="d-box"><rect x="578" y="14" width="122" height="24"/>
+                <text x="639" y="30" style="font-size:9px">4 file workers</text></g>
+              <path class="d-edge" d="M532 54H578"/>
+              <g class="d-box"><rect x="578" y="42" width="122" height="24"/>
+                <text x="639" y="58" style="font-size:9px">4 credential workers</text></g>
+              <path class="d-edge dashed" d="M639 66V80H532"/>
+              <text class="d-note" x="600" y="78">resolved</text>
+
+              <path class="d-edge" d="M532 82H578"/>
+              <g class="d-box accent"><rect x="578" y="70" width="122" height="24"/>
+                <text x="639" y="86" style="font-size:9px">I/O thread</text></g>
+
+              <g class="d-box"><rect x="578" y="112" width="122" height="46"/>
+                <text x="639" y="131">curl multi</text>
+                <text class="sub" x="639" y="145">up to concurrency</text></g>
+              <path class="d-edge" d="M639 94V112"/>
+
+              <path class="d-edge dashed" d="M639 158V186H271V60"/>
+              <text class="d-note" x="440" y="182">completions, in finish order</text>
+
+              <g class="d-box"><rect x="0" y="196" width="150" height="34"/>
+                <text x="75" y="216">batch.next()</text></g>
+              <path class="d-edge dashed" d="M196 213H150"/>
+              <text class="d-note left" x="200" y="216">one completion per call, any order</text>
+            </svg>
+            <figcaption>
+              Local reads and credential resolution never touch the curl event loop.
+              Anything that can block for an unbounded time is kept off the one thread
+              that keeps every connection alive.
+            </figcaption>
+          </figure>
+          <p>
+            Three thread groups, with a strict division of labour. One <strong>I/O
+            thread</strong> owns the curl multi and everything reachable from it — the
+            pending list, the retry list, the active map, the handle pool. Four
+            <strong>file workers</strong> serve local reads with <code>pread</code>. Four
+            <strong>credential workers</strong> run profile helpers, metadata endpoints and
+            user callbacks, all of which can block for seconds.
+          </p>
+          <p>
+            The reason credentials get their own threads is §3. A credential lookup that
+            stalls on the I/O thread stalls every connection the engine is holding open.
+          </p>
+
+          <h2 id="s23"><i>23</i>The planner</h2>
+          <p>
+            <code>plan_transfers</code> runs on the submitting thread, before any I/O, and
+            turns N reads into M transfers where M ≤ N. It does four things in order.
+          </p>
+          <p>
+            <strong>Validate.</strong> A read that leaves its window, overflows its
+            absolute offset, or asks for an ETag precondition on a local file is completed
+            immediately with an error and never reaches a queue. These land in the batch as
+            ordinary completions, so a caller draining with <code>next</code> sees them
+            alongside the rest.
+          </p>
+          <p>
+            <strong>Make offsets absolute.</strong> Each read's offset is added to its
+            window offset. From here on, everything is in coordinates of the underlying
+            object, which is what lets reads arriving through different windows merge.
+          </p>
+          <p>
+            <strong>Sort.</strong> A stable sort by backend, canonical URI, ETag
+            precondition, then absolute offset. Sorting by resource first is what groups
+            reads of the same object together; sorting by offset within a resource is what
+            makes coalescing a linear sweep. Reads carrying different
+            <code>if_match</code> values are kept apart deliberately — they are different
+            HTTP requests even when they address the same object.
+          </p>
+          <p>
+            <strong>Coalesce.</strong> Walk each group and merge neighbours while the four
+            guards in §24 allow it. Each resulting <code>Transfer</code> carries a list of
+            <code>Part</code>s: one per original read, each with its offset relative to the
+            merged span, its length, its destination and its tag.
+          </p>
+          <p>
+            One <code>Locator</code> is shared by reference across all transfers for the
+            same object, so a thousand reads of one file do not copy the parsed path a
+            thousand times.
+          </p>
+
+          <h2 id="s24"><i>24</i>Coalescing and its four guards</h2>
+          <p>
+            Merging two nearby ranges into one request trades bytes for round trips.
+            Whether that is a good trade depends entirely on how far apart they are, so
+            four numbers bound it.
+          </p>
+          <dl class="terms">
+            <dt>coalesce_gap</dt>
+            <dd>The largest gap that may be bridged. Default 1&nbsp;MiB. Zero disables merging.</dd>
+            <dt>coalesce_limit</dt>
+            <dd>The largest merged span. Default 64&nbsp;MiB.</dd>
+            <dt>coalesce_parts</dt>
+            <dd>The most reads one transfer may serve. Default 1&nbsp;024.</dd>
+            <dt>coalesce_amplification</dt>
+            <dd>The most bytes fetched per byte requested. Default 16.</dd>
+          </dl>
+          <p>
+            The repository ships a benchmark that plans a batch and reports what it would
+            fetch, with no network involved. It is deterministic, so these numbers are
+            reproducible anywhere:
+          </p>
+          <pre><code>make benchmark</code></pre>
+          <p>
+            One thousand reads of 64&nbsp;KiB from one HTTP object, varying only the
+            stride between them, under the shipped defaults:
+          </p>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th>Pattern</th><th class="num">Stride</th><th class="num">Transfers</th><th class="num">Requested</th><th class="num">Fetched</th><th class="num">Amplification</th></tr></thead>
+            <tbody>
+              <tr><td>contiguous</td><td class="num">64 KiB</td><td class="num">1</td><td class="num">62.5 MB</td><td class="num">62.5 MB</td><td class="num">1.00×</td></tr>
+              <tr><td>alternating</td><td class="num">128 KiB</td><td class="num">2</td><td class="num">62.5 MB</td><td class="num">124.9 MB</td><td class="num">2.00×</td></tr>
+              <tr><td>sparse</td><td class="num">1 MiB</td><td class="num">16</td><td class="num">62.5 MB</td><td class="num">985.0 MB</td><td class="num">15.76×</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p>
+            The sparse row is the shape to understand. Reads a megabyte apart sit just
+            inside the default gap, so a thousand of them collapse into sixteen requests
+            that pull 985&nbsp;MB to deliver 62.5&nbsp;MB. The amplification guard is what
+            stops it there rather than at one enormous request.
+          </p>
+          <p>
+            Whether that is the right trade depends on the link. Sixteen requests instead
+            of a thousand saves roughly a thousand round trips; 922&nbsp;MB of extra
+            transfer costs about seven seconds on a gigabit link and well under one on
+            twenty-five. Coalescing pays while the latency it saves outweighs the bytes it
+            adds, and the crossover moves with bandwidth, round-trip time and how many
+            requests are already in flight.
+          </p>
+          <p>
+            The same benchmark shows the lever. Lowering <code>coalesce_amplification</code>
+            to 4 takes the sparse pattern from 15.76× to 1.00×, leaves the contiguous
+            pattern untouched at 1.00×, and costs 1&nbsp;000 requests instead of 16.
+            Neither setting is universally right, which is why §25 exists.
+          </p>
+          <div class="callout">
+            <b>Where the defaults come from</b>
+            <p>
+              A 1&nbsp;MiB gap is the same default Apache's <code>object_store</code> uses
+              in <code>coalesce_ranges</code>. Karu adds the span, part-count and
+              amplification bounds, which that implementation does not have. GDAL sits at
+              the other end: its <code>ReadMultiRange</code> merges only strictly adjacent
+              ranges, and its <code>AdviseRead</code> allows a tolerance of
+              <code>2 * sizeof(uint32_t)</code> — eight bytes, enough to bridge the two
+              markers in a COG tile and nothing more.
+            </p>
+          </div>
+          <p class="source">
+            <a href="https://docs.rs/object_store/latest/object_store/fn.coalesce_ranges.html">object_store 0.14 — coalesce_ranges</a> ·
+            <a href="https://github.com/OSGeo/gdal/blob/master/port/cpl_vsil_curl.cpp">GDAL — port/cpl_vsil_curl.cpp</a>
+          </p>
+
+          <h2 id="s25"><i>25</i>Overriding the plan for one batch</h2>
+          <p>
+            The four guards are client settings, but the caller usually knows more than the
+            client does. A layout index knows the stride it just computed. An opening pass
+            that reads one trailer per file across a thousand files knows those reads have
+            nothing to merge. Rebuilding a client to say so would throw away every warm
+            connection.
+          </p>
+          <p>So the planner settings can be overridden for a single batch:</p>
+          <pre><code>karu::SubmitOptions options;
+options.coalesce_gap = 8 * 1024;    // this batch is sparse; do not bridge far
+auto batch = client.submit(reads, options).value();</code></pre>
+          <p>
+            <code>SubmitOptions</code> holds four <code>std::optional</code> fields. An
+            empty one inherits the client setting. In C the same thing is a struct:
+          </p>
+          <pre><code>karu_submit_options options = KARU_SUBMIT_OPTIONS_INIT;
+options.coalesce_gap = 8 * 1024;
+karu_client_submit_with(client, requests, count, &amp;options, &amp;batch);</code></pre>
+          <p>
+            Two details make that struct safe to grow. Every field defaults to
+            <code>KARU_INHERIT</code>, which is distinct from zero — and zero is
+            meaningful, since <code>coalesce_gap = 0</code> means do not merge at all.
+            And <code>struct_size</code>, set by the initialiser to the size the caller
+            compiled against, tells the library how much of the struct is really there. A
+            newer Karu reading an older caller's struct simply stops at the fields that
+            existed then.
+          </p>
+          <p>
+            The override affects planning only. Concurrency, timeouts and retry budget stay
+            with the client, because they describe the engine rather than the batch.
+          </p>
+
+          <h2 id="s26"><i>26</i>Scattering on arrival</h2>
+          <p>
+            A merged transfer fetches one contiguous span and owes bytes to several
+            destinations at different offsets inside it, with gaps in between that nobody
+            asked for.
+          </p>
+          <p>
+            The obvious approach is to stage: allocate the whole span, let curl fill it,
+            then copy each part out. Karu does not do that for HTTP. Instead
+            <code>store_payload</code> walks the parts with a cursor and copies each
+            arriving chunk straight into whichever destinations it overlaps. Gap bytes are
+            never stored anywhere.
+          </p>
+          <figure>
+            <svg viewBox="0 0 700 132" role="img" aria-label="A merged span scattered into three destinations">
+              <text class="d-note left" x="0" y="10">merged span on the wire</text>
+              <rect class="d-fill" x="0" y="16" width="120" height="18"/>
+              <rect class="d-gap"  x="120" y="16" width="90" height="18"/>
+              <rect class="d-fill" x="210" y="16" width="120" height="18"/>
+              <rect class="d-gap"  x="330" y="16" width="150" height="18"/>
+              <rect class="d-fill" x="480" y="16" width="120" height="18"/>
+              <rect class="d-gap"  x="600" y="16" width="100" height="18"/>
+              <text class="d-note" x="165" y="29">gap</text>
+              <text class="d-note" x="405" y="29">gap</text>
+              <text class="d-note" x="650" y="29">gap</text>
+
+              <path class="d-edge" d="M60 34V70"/>
+              <path class="d-edge" d="M270 34V70"/>
+              <path class="d-edge" d="M540 34V70"/>
+
+              <g class="d-box"><rect x="0" y="72" width="120" height="30"/><text x="60" y="91" style="font-size:9px">read 1 buffer</text></g>
+              <g class="d-box"><rect x="210" y="72" width="120" height="30"/><text x="270" y="91" style="font-size:9px">read 2 buffer</text></g>
+              <g class="d-box"><rect x="480" y="72" width="120" height="30"/><text x="540" y="91" style="font-size:9px">read 3 buffer</text></g>
+
+              <text class="d-note left" x="0" y="124">Gap bytes cross the socket, are counted, and are dropped without being written anywhere.</text>
+            </svg>
+            <figcaption>
+              One copy, from libcurl's buffer into the caller's memory. No staging
+              allocation, and the gaps never occupy memory even briefly.
+            </figcaption>
+          </figure>
+          <p>
+            Two properties make this worth the cursor bookkeeping. Peak memory becomes the
+            sum of the useful bytes rather than the merged span, which at the amplification
+            ceiling is a sixteen-fold difference per in-flight transfer. And the copying
+            work is proportional to what was asked for rather than what was fetched.
+          </p>
+          <p>
+            Measured directly on an Apple&nbsp;M-series machine at <code>-O2</code>,
+            delivering 1&nbsp;000 reads through a 62.5&nbsp;MB merged span in
+            16&nbsp;KiB chunks: staging costs 3.6&nbsp;ms and touches 187.5&nbsp;MB;
+            scattering costs 1.5&nbsp;ms and touches 62.5&nbsp;MB. At the sparse layout
+            above the difference widens to 2.4&nbsp;ms against 0.09&nbsp;ms, because
+            staging pays for the gaps twice — once to allocate, once to fill — and
+            scattering does not pay for them at all.
+          </p>
+          <p>
+            Parts are allowed to overlap, so the cursor only skips past parts the current
+            chunk cannot reach, and every remaining part that intersects the chunk is
+            written. Two reads asking for the same bytes both get them.
+          </p>
+          <p>
+            One implementation note worth knowing if you read the code: the scatter path
+            requires the transport to hand over arbitrary chunks, which curl does and
+            <code>pread</code> does not. Local reads therefore keep a contiguous staging
+            buffer (§27).
+          </p>
+
+          <h2 id="s27"><i>27</i>Local files</h2>
+          <p>
+            Local reads take a different path through the same API. They go to the file
+            workers, which open the file and issue positional reads directly into the
+            destination.
+          </p>
+          <p>
+            They also get a different planning policy. For a local batch the effective gap
+            is zero, so only ranges that overlap or touch are merged. The reason is that
+            coalescing exists to amortize a round trip, and a <code>pread</code> does not
+            have one. Reading through a gap on a local file buys nothing and costs the
+            bytes.
+          </p>
+          <p>
+            Measured on the same machine, 1&nbsp;000 reads of 64&nbsp;KiB from a local
+            file, comparing one <code>pread</code> per range against reading the merged
+            span and copying out:
+          </p>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th>Stride</th><th class="num">One pread each</th><th class="num">Merged span</th><th class="num">Merged is</th></tr></thead>
+            <tbody>
+              <tr><td>contiguous, 64 KiB</td><td class="num">3.99 ms</td><td class="num">4.79 ms</td><td class="num">1.20× slower</td></tr>
+              <tr><td>256 KiB</td><td class="num">0.94 ms</td><td class="num">4.27 ms</td><td class="num">4.53× slower</td></tr>
+              <tr><td>1 MiB</td><td class="num">0.22 ms</td><td class="num">3.81 ms</td><td class="num">17.30× slower</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p>
+            Merging never wins, not even in the contiguous case where it saves syscalls,
+            because the staging buffer and the copy out cost more than the calls saved.
+            Hence a gap of zero, applied automatically by the planner when the backend is
+            local.
+          </p>
+          <p>
+            ETag preconditions are not available on local files and are rejected during
+            planning rather than silently ignored.
+          </p>
+
+          <h2 id="s28"><i>28</i>Building a request in three phases</h2>
+          <p>
+            A resolved object holds no endpoint, no credential and no signature. That is
+            deliberate: an object is parsed once and may be read a million times, while a
+            signature is valid for minutes. Splitting them means the expensive, changing
+            part is rebuilt exactly when it must be.
+          </p>
+          <ol class="body">
+            <li><strong>Resolve</strong> the object — pure parsing, no I/O (§16).</li>
+            <li><strong>Resolve credentials</strong> for the object's canonical path, on a credential worker, through a cache (§40).</li>
+            <li><strong>Materialize</strong> the request once the byte range is known: endpoint, URL, headers, signature.</li>
+          </ol>
+          <p>
+            Phase three runs again for every attempt. A retry re-signs, which is what makes
+            an expired signature recoverable and a region redirect possible: both change
+            inputs that only phase three depends on.
+          </p>
+          <p>
+            The range is an input to signing, not an afterthought. SigV4 covers the
+            <code>Range</code> header, so a request cannot be signed before the planner has
+            decided what the merged span is.
+          </p>
+
+          <h2 id="s29"><i>29</i>The backend contract</h2>
+          <p>
+            Every cloud backend implements the same small interface, declared in
+            <code>src/backends/contract.hpp</code>:
+          </p>
+          <dl class="terms">
+            <dt>backend</dt>
+            <dd>Which resolved backend it serves.</dd>
+            <dt>credentials_kind</dt>
+            <dd>Which callback slot and cache namespace it uses.</dd>
+            <dt>no_sign_option</dt>
+            <dd>The option that forces anonymous access.</dd>
+            <dt>credential_options</dt>
+            <dd>The option names whose origin defines a credential scope (§40).</dd>
+            <dt>load_credentials</dt>
+            <dd>Discovery for this provider.</dd>
+            <dt>prepare_request</dt>
+            <dd>Turn object, credentials, range and preconditions into a signed request.</dd>
+          </dl>
+          <p>
+            Adding a backend means writing one translation unit against that contract and
+            registering it. Nothing in the engine, planner or transport needs to know the
+            backend exists — they see a URL, headers and a range.
+          </p>
+          <p>
+            Source Cooperative is the clearest illustration. It reuses the S3 signing path
+            entirely but keeps its own credential kind, option namespace and cache
+            namespace, so ambient AWS credentials are never forwarded to the Source proxy.
+            Sharing a signature algorithm does not mean sharing an identity.
+          </p>
+
+          <h2 id="s30"><i>30</i>Signing</h2>
+          <p>Four schemes, chosen by backend and by which credential is available.</p>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th>Scheme</th><th>Used by</th><th>Shape</th></tr></thead>
+            <tbody>
+              <tr><td>AWS SigV4</td><td>S3, Source Cooperative</td><td>canonical request → string to sign → chained HMAC-SHA256 signing key</td></tr>
+              <tr><td>GOOG1</td><td>GCS interoperable HMAC keys</td><td>HMAC-SHA1 over method, date and canonical resource</td></tr>
+              <tr><td>SharedKey</td><td>Azure account keys</td><td>HMAC-SHA256 over a fixed field order plus canonical headers</td></tr>
+              <tr><td>Bearer</td><td>GCS OAuth, Azure Entra, Hugging Face</td><td>a token in the <code>Authorization</code> header</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p>
+            SigV4 is the involved one. The canonical request covers the method, the
+            URI-encoded path, the query, a sorted set of signed headers and a payload hash
+            — <code>UNSIGNED-PAYLOAD</code>, since these are GETs. The signing key is
+            derived through four chained HMACs, scoping the secret to a date, then a
+            region, then a service.
+          </p>
+          <p>
+            Two consequences follow. The region is part of the signature, so recovering
+            from a region redirect means rebuilding and re-signing rather than following a
+            <code>Location</code> (§34). And a signature is bound to one exact request,
+            so signed requests do not follow redirects at all: replaying the signature at
+            the target would either fail or send credentials somewhere they were not meant
+            for.
+          </p>
+          <p class="source"><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html">AWS — Create a signed request with Signature Version 4</a></p>
+          <p>
+            Hugging Face is the one backend that both follows redirects and carries a
+            bearer token, because the Hub redirects to a CDN. Karu requires libcurl 7.83 or
+            newer, from which libcurl drops the <code>Authorization</code> header when a
+            redirect crosses to a different origin.
+          </p>
+          <p class="source"><a href="https://curl.se/docs/CVE-2022-27776.html">curl — CVE-2022-27776, auth/cookie leak on redirect</a></p>
+          <p>
+            <code>Range</code> and <code>Host</code> always belong to Karu, and cloud
+            backends additionally reserve their authentication and signature headers.
+            Custom headers set through <code>KARU_HTTP_HEADERS</code> cannot override them.
+          </p>
+
+          <h2 id="s31"><i>31</i>Size probes</h2>
+          <p>
+            <code>Client::size</code> answers how many bytes are visible through an object.
+            If the object carries a bounded window (§17), the answer is arithmetic. For a
+            local file it is a <code>stat</code>. For a remote object it is a request.
+          </p>
+          <p>
+            That request is a one-byte GET, <code>Range: bytes=0-0</code>, and the total
+            comes from the <code>Content-Range</code> of the 206. A HEAD would be the
+            obvious choice and is less dependable across object stores and proxies —
+            some do not sign it the same way, some answer differently, some do not allow
+            it at all. A ranged GET exercises the same path a real read will take, which
+            means a size probe that succeeds is evidence that reads will too.
+          </p>
+          <p>
+            The 416 case is handled specially: an empty object answers 416 with
+            <code>Content-Range: bytes */0</code> even to a request for byte zero, and that
+            is reported as a size of zero rather than an error.
+          </p>
+          <p>
+            Size probes run on the calling thread with their own pool of easy handles,
+            separate from the I/O thread's. Results are not cached, which the header states
+            plainly. A caller that needs many sizes should ask for them from several
+            threads; the handle pool is built for that.
+          </p>
+          <p>
+            Probes share the transport's response handling with ordinary reads — the same
+            response-state reset, the same <code>Retry-After</code> parsing, the same
+            backoff — so a probe and a read fail the same way and retry the same way.
+          </p>
+
+          <!-- ============================ PART V ============================ -->
+          <section class="part">
+            <b>Part V</b>
+            <strong>When it fails</strong>
+            <span>Classification, backoff, and the three recoveries that are not retries.</span>
+          </section>
+
+          <h2 id="s32"><i>32</i>Classifying a failure</h2>
+          <p>
+            Every finished transfer is sorted into one of four outcomes: it succeeded, it
+            can be recovered by changing an input, it can be retried unchanged, or it
+            failed.
+          </p>
+          <p>Success is stricter than a 2xx. For a 206 Karu also requires that the Content-Range matches what was asked and that exactly that many bytes arrived. A response that claims a range and delivers less is a failure, not a short read.</p>
+          <p>Retryable covers two families. By libcurl result code:</p>
+          <pre><code>CURLE_OPERATION_TIMEDOUT   CURLE_COULDNT_CONNECT   CURLE_COULDNT_RESOLVE_HOST
+CURLE_GOT_NOTHING          CURLE_SEND_ERROR        CURLE_RECV_ERROR
+CURLE_PARTIAL_FILE         CURLE_SSL_CONNECT_ERROR CURLE_HTTP2  CURLE_HTTP2_STREAM</code></pre>
+          <p>
+            And by HTTP status: 408, 425, 429 and anything in the 5xx range. One special
+            case joins them — a 400 whose body contains <code>RequestTimeout</code>, which
+            is how S3 reports a client that stopped sending in time.
+          </p>
+          <p>
+            Classifying on the result code rather than on the text of an error message is a
+            deliberate choice. A connection reset arrives as <code>CURLE_RECV_ERROR</code>
+            or <code>CURLE_SEND_ERROR</code> regardless of how the platform words it, and
+            error strings are not part of libcurl's stable interface.
+          </p>
+          <p>
+            Failures map to statuses a caller can branch on: 401 and 403 to
+            <code>KARU_ERR_AUTH</code>, 404 to <code>KARU_ERR_NOT_FOUND</code>, 412 to
+            <code>KARU_ERR_PRECONDITION</code>, 416 to <code>KARU_ERR_RANGE</code>, and
+            anything else to <code>KARU_ERR_HTTP</code>.
+          </p>
+
+          <h2 id="s33"><i>33</i>Backoff and jitter</h2>
+          <p>
+            The retry budget is <code>KARU_MAX_ATTEMPTS</code>, three by default, counting
+            the first try. Between attempts the delay doubles from a 100&nbsp;ms base,
+            capped after six doublings, with full jitter added on top.
+          </p>
+          <p>
+            Jitter is not decoration. Sixty-four transfers that fail together and retry on
+            an identical schedule arrive together, and a service that just asked for less
+            load gets a synchronised burst instead. Randomising each delay spreads the
+            second wave across the window.
+          </p>
+          <p>
+            A <code>Retry-After</code> header takes precedence when present, in both its
+            seconds form and its HTTP-date form. It is clamped to sixty seconds, because a
+            server asking a batch read to wait an hour is better reported than obeyed, and
+            a small random offset is still added so a shared retry instant does not become
+            a shared thundering herd.
+          </p>
+          <p>
+            Before sleeping, Karu checks the transfer deadline. A retry that could not
+            finish before the deadline expires is not attempted; the transfer reports a
+            timeout immediately, with a message that says the budget left no room for
+            another attempt.
+          </p>
+
+          <h2 id="s34"><i>34</i>Region redirects</h2>
+          <p>
+            An S3 request sent to the wrong region fails, and the response says where the
+            bucket actually lives — in the <code>x-amz-bucket-region</code> header, or in a
+            <code>&lt;Region&gt;</code> element inside the error body.
+          </p>
+          <p>
+            Karu reads both, and takes the header when it is present. This is not a
+            redirect that can be followed: the region is an input to the SigV4 signing key,
+            so the request has to be rebuilt and re-signed against the correct region
+            (§30).
+          </p>
+          <p>
+            The discovered region is remembered on the batch, keyed by object. The first
+            read to hit the wrong region pays for the discovery; every other read of that
+            object in the same batch is built correctly the first time. The retry happens
+            once per transfer and does not consume the ordinary retry budget, because it is
+            a correction rather than a repetition.
+          </p>
+
+          <h2 id="s35"><i>35</i>Expired credentials</h2>
+          <p>
+            Temporary credentials expire, and a request signed at the wrong moment fails
+            with an authentication error rather than a network one.
+          </p>
+          <p>Karu recognises two shapes. A 401 from GCS, Azure or Source Cooperative. And a 403 from S3 or Source whose body carries one of:</p>
+          <pre><code>&lt;Code&gt;ExpiredToken&lt;/Code&gt;
+&lt;Code&gt;InvalidToken&lt;/Code&gt;
+&lt;Code&gt;RequestExpired&lt;/Code&gt;</code></pre>
+          <p>
+            Either invalidates the cached credential for that scope and sends the transfer
+            back to a credential worker for a fresh lookup, then to be re-signed. Like the
+            region correction this happens once per transfer and sits outside the retry
+            budget. A second authentication failure with freshly fetched credentials is a
+            real one and is reported.
+          </p>
+          <p>
+            Most of the time this path is never taken, because refresh is proactive:
+            credentials are renewed during the last tenth of their lifetime, bounded to a
+            one-to-sixty-second window (§40). The reactive path exists for clock skew and
+            for credentials revoked early.
+          </p>
+
+          <h2 id="s36"><i>36</i>Deadlines</h2>
+          <p>
+            <code>KARU_REQUEST_TIMEOUT</code>, 120 seconds by default, bounds one logical
+            read from end to end — every attempt, every backoff, every re-signature. It is
+            not a per-attempt timeout, which would let three attempts and two sleeps run
+            for far longer than the number suggests.
+          </p>
+          <p>
+            The deadline starts when the transfer first enters a worker, so credential
+            resolution is inside the budget. It is checked before building a request, after
+            building one, before sleeping between attempts, and when a transfer completes.
+            Each check has its own message, so a timeout says which stage ran out of time.
+          </p>
+          <p>Two narrower timeouts sit underneath.</p>
+          <dl class="terms">
+            <dt>KARU_CONNECT_TIMEOUT</dt>
+            <dd>30 s, for the connect phase alone.</dd>
+            <dt>KARU_LOW_SPEED_LIMIT<br>KARU_LOW_SPEED_TIME</dt>
+            <dd>1&nbsp;024 bytes/s sustained below the limit for 60 s aborts the transfer. This catches a connection that is open and technically alive but making no progress, which a total timeout would only notice at the very end.</dd>
+          </dl>
+          <p>
+            Setting the request timeout to zero removes the outer bound. Everything else
+            keeps working; nothing then bounds total time.
+          </p>
+
+          <h2 id="s37"><i>37</i>Draining a body</h2>
+          <p>
+            When a transfer has the bytes it needs, or has failed, there is usually more
+            body still arriving. Two options: read it and keep the connection, or abort and
+            pay a handshake next time.
+          </p>
+          <p>
+            Karu decides by size. Up to 256&nbsp;KiB of unwanted body is read and dropped,
+            which leaves the connection reusable. Beyond that the transfer aborts, because
+            a full TLS handshake is cheaper than megabytes of pointless transfer.
+          </p>
+          <p>
+            The same budget bounds error bodies. The first 4&nbsp;KiB is captured for
+            diagnostics and for the XML that region and credential detection read; beyond
+            256&nbsp;KiB, the response is cut short. A misbehaving endpoint cannot make a
+            failing request expensive.
+          </p>
+          <p>
+            This is the fifth case from §14 — the one where returning zero would be
+            available and is deliberately not used. Small waste to keep a connection is a
+            good trade; large waste is not.
+          </p>
+
+          <h2 id="s38"><i>38</i>Error text</h2>
+          <p>
+            Every failure carries a message alongside its status. The status is for
+            branching; the message is for a human.
+          </p>
+          <p>
+            Messages are thread-local and valid until the next Karu call on that thread. In
+            C, <code>karu_last_error()</code> returns it; the C++ facade copies it into
+            <code>Error::message</code> so it can outlive the call.
+          </p>
+          <p>
+            URLs in messages are redacted before they are stored. Userinfo is replaced and
+            everything from the first <code>?</code> onward is dropped, because a presigned
+            URL or a SAS token carries its credential in the query string. An error message
+            reaching a log should not be a credential leak.
+          </p>
+          <pre><code>https://account.blob.core.windows.net/c/blob?&lt;redacted&gt;: HTTP 403: AuthenticationFailed ...</code></pre>
+          <p>
+            Bodies are summarised rather than pasted: whitespace collapsed, truncated to
+            200 characters. Enough to see <code>AccessDenied</code> or
+            <code>NoSuchBucket</code>, not enough to flood a log with XML.
+          </p>
+
+          <!-- ============================ PART VI ============================ -->
+          <section class="part">
+            <b>Part VI</b>
+            <strong>Credentials</strong>
+            <span>Where they come from, how they are cached, and how to supply your own.</span>
+          </section>
+
+          <h2 id="s39"><i>39</i>Where credentials come from</h2>
+          <p>
+            Each backend has its own discovery order, and each begins the same way: an
+            installed callback wins over everything else, and an explicit
+            <code>..._NO_SIGN_REQUEST=YES</code> wins over that.
+          </p>
+          <p>
+            For AWS the order is static options, then the named profile — including
+            <code>credential_process</code> and web-identity profiles — then container
+            credentials, then IMDS. GCS reads static tokens and interoperable HMAC keys,
+            then Application Default Credentials, then the metadata server. Azure reads a
+            connection string, SAS, account key or static token, then client secret,
+            workload identity and managed identity. Hugging Face reads
+            <code>HF_TOKEN</code> and then the token file the CLI writes.
+          </p>
+          <p>
+            Two backends are anonymous by default: plain HTTP, which has no credential
+            concept, and Source Cooperative, whose public products need none. Configuring
+            any Source credential option or installing a Source callback switches it to
+            signed automatically.
+          </p>
+          <p>
+            Some mechanisms are deliberately out of scope — chained AssumeRole through a
+            source profile, IAM Identity Center, environment-specific external-account
+            suppliers. They belong to the vendor SDKs, which already implement and maintain
+            them, and the callback in §41 is how you hand them over.
+          </p>
+          <p>
+            The full option tables live in the
+            <a href="configuration.html">configuration reference</a>.
+          </p>
+
+          <h2 id="s40"><i>40</i>The cache and its single flight</h2>
+          <p>
+            A credential lookup can be a file read, a subprocess, or an HTTP round trip to a
+            metadata service. Doing that per request would be absurd, so results are cached
+            — and the interesting part is what they are cached <em>against</em>.
+          </p>
+          <p>
+            The key is not the path. It is which <em>origin</em> supplies each of that
+            backend's credential options for that path: a path rule, an explicit value, the
+            environment, or nothing. Two paths that draw their credentials from the same
+            places share a cache entry; a path with its own <code>AWS_PROFILE</code> rule
+            gets its own. The entry stays correct without being invalidated when an
+            unrelated path is configured.
+          </p>
+          <p>
+            Refresh is proactive and lazy. A credential with an expiry is renewed during
+            the last tenth of its lifetime, bounded to between one and sixty seconds before
+            it expires. There is no background thread: the first request that arrives inside
+            the refresh window does the work. Credentials without an expiry are re-checked
+            every sixty seconds, so an <code>aws sso login</code> that rewrites
+            <code>~/.aws/credentials</code> underneath a running process is picked up.
+          </p>
+          <p>
+            Concurrent misses collapse into one lookup. The first request for a scope starts
+            the load and registers it; every other request for that same scope waits on it
+            and takes the same result. Sixty-four transfers starting together against a cold
+            cache produce one call to the metadata service, not sixty-four.
+          </p>
+          <p>
+            A failed lookup is never cached. One anonymous or unavailable result must not
+            poison later signed requests, so failures are returned to the waiters and
+            forgotten. An expired credential is rejected rather than stored, and an
+            invalidation that lands while a load is in flight marks that load so its result
+            is delivered but not kept.
+          </p>
+
+          <h2 id="s41"><i>41</i>Your own provider</h2>
+          <p>
+            <code>karu_config_set_credentials_provider</code> installs one callback per
+            backend kind. It is how an application hands Karu credentials from a vendor SDK,
+            a secrets manager, or anything else Karu should not know about.
+          </p>
+          <pre><code>karu_status provide(void* user_data, karu_credentials_kind kind,
+                    const char* canonical_path, karu_credentials* out) {
+    out-&gt;access_key_id     = "...";
+    out-&gt;secret_access_key = "...";
+    out-&gt;session_token     = "...";
+    out-&gt;expires_at        = 1789000000;      // Unix time, or 0 for none
+    out-&gt;cache_prefix      = "/vsis3/team-bucket/";
+    return KARU_OK;
+}</code></pre>
+          <p>
+            The callback receives the canonical VSI path, so one provider can serve many
+            buckets and decide per path. Karu copies every returned string before the
+            callback returns, so the callback may own its buffers.
+          </p>
+          <p>
+            <code>cache_prefix</code> is the important field. It declares the scope over
+            which the returned credential is valid, and it is checked: a prefix that does
+            not contain the requested path is a configuration error rather than a silent
+            widening. Leave it empty and Karu calls the provider for every request, which is
+            the right choice when the provider or its SDK owns its own cache.
+          </p>
+          <p>Three obligations come with it, all for the same reason — Karu cannot interrupt caller code.</p>
+          <ul>
+            <li>It must be thread-safe. Callbacks for different paths may run at the same time.</li>
+            <li>It must not re-enter the same client.</li>
+            <li>It must bound its own I/O. A callback that hangs holds a credential worker until it returns.</li>
+          </ul>
+
+          <!-- ============================ PART VII ============================ -->
+          <section class="part">
+            <b>Part VII</b>
+            <strong>Running it</strong>
+            <span>Threads, processes, and how to measure without fooling yourself.</span>
+          </section>
+
+          <h2 id="s42"><i>42</i>Threads and processes</h2>
+          <p>
+            A <code>karu_client</code> is safe to share across threads and is meant to be.
+            One client, one engine, one connection pool, one credential cache: splitting it
+            per thread multiplies handshakes and lookups for nothing.
+          </p>
+          <p>Which thread runs what:</p>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th>Thread</th><th class="num">Count</th><th>Owns</th></tr></thead>
+            <tbody>
+              <tr><td>I/O</td><td class="num">1</td><td>curl multi, handle pool, pending and retry lists, request materialization, response handling</td></tr>
+              <tr><td>File workers</td><td class="num">4</td><td>local positional reads</td></tr>
+              <tr><td>Credential workers</td><td class="num">4</td><td>profile helpers, metadata endpoints, user callbacks</td></tr>
+              <tr><td>Caller</td><td class="num">any</td><td>planning at submit, size probes, draining a batch</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p>
+            Everything the I/O thread reaches belongs to it alone, which is why there are no
+            locks in the hot path. Other threads hand work over through queues.
+          </p>
+          <p>
+            <strong>Forking</strong> is the sharp edge. A forked child inherits the parent's
+            memory but none of its threads: the engine's threads simply do not exist there,
+            and a mutex held by a vanished thread stays held forever. Since PyTorch's
+            <code>DataLoader</code> forks workers by default, this is not a corner case for
+            Karu's main consumer.
+          </p>
+          <p>
+            The client records the process that created its engine. On first use it compares
+            that against the current process, and on a mismatch it abandons the inherited
+            engine and mutex rather than touching them — allocating replacements first, then
+            releasing the old pointers without running their destructors. Destroying a
+            threaded engine in a child would mean joining threads that were never cloned.
+            The pages leak, and the child exits shortly after; that is the correct trade.
+          </p>
+          <p>
+            The practical consequence is that a client created before a fork works in the
+            child, transparently, by building a fresh engine on first use. It also means the
+            child pays for its own connections, which is unavoidable — file descriptors for
+            TLS connections cannot be meaningfully shared across a fork anyway.
+          </p>
+
+          <h2 id="s43"><i>43</i>Measuring</h2>
+          <p>
+            Measuring a network client is unusually easy to get wrong, and most wrong
+            measurements point the same way: they make the client look better than it is.
+          </p>
+          <p>
+            <strong>A local HTTP server measures the wrong thing.</strong> With a
+            sub-millisecond round trip, latency stops being the bottleneck and per-request
+            CPU takes over. Concurrency shows almost no benefit, coalescing looks like pure
+            overhead, and connection reuse looks irrelevant. Every conclusion inverts
+            against a real endpoint.
+          </p>
+          <p>
+            <strong>The first request is not representative.</strong> It pays DNS, a TCP
+            handshake, a TLS handshake and a credential lookup. Discard a warm-up round or
+            report it separately.
+          </p>
+          <p>
+            <strong>Report bytes fetched, not just bytes requested.</strong> Coalescing
+            moves work between those two numbers. A benchmark that reports only throughput
+            of useful bytes cannot tell a good merge from a wasteful one.
+          </p>
+          <p>
+            <strong>Separate what you can measure offline.</strong> Planning is
+            deterministic and needs no network, which is exactly what
+            <code>make benchmark</code> exercises: transfer counts, byte amplification and
+            planning time for several range patterns and policies. Those numbers are stable
+            and comparable across machines. Network numbers are neither.
+          </p>
+          <p>
+            When you do measure against real storage, the effect that dominates everything
+            else is concurrency. Moving the same reads, on the same machine, from sequential
+            to concurrent against a real bucket is a hundredfold difference in requests per
+            second. No amount of local optimization approaches it, which is the practical
+            restatement of §3.
+          </p>
+          <p>
+            One ceiling is worth knowing about. Request materialization — building the URL,
+            headers and signature — happens on the I/O thread, so its cost per request bounds
+            how fast the engine can issue requests regardless of the network. On an Apple
+            M-series machine at <code>-O2</code> against S3 with static credentials, that is
+            a few microseconds per request, which places the CPU-only ceiling in the low
+            hundreds of thousands of requests per second. Far above what any network will
+            deliver, but it is the number that would matter first if one ever did.
+          </p>
+
+          <!-- ============================ APPENDICES ============================ -->
+          <section class="part">
+            <b>Appendices</b>
+            <strong>Reference</strong>
+            <span>Comparisons, recipes, diagnosis and vocabulary.</span>
+          </section>
+
+          <h2 id="apA"><i>A</i>Karu next to other libraries</h2>
+          <p>
+            These are neighbours, not competitors, and most of them do more than Karu does.
+            The comparison is only useful if it is specific, so each row below names where
+            it came from.
+          </p>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th>&nbsp;</th><th>Karu 0.2</th><th>GDAL VSI</th><th>object_store 0.14</th></tr></thead>
+            <tbody>
+              <tr><td><b>Scope</b></td><td>reads only</td><td>read, write, list, filesystem emulation</td><td>read, write, list, multipart</td></tr>
+              <tr><td><b>Interface</b></td><td>positional batch</td><td>file-like handles</td><td>async object API</td></tr>
+              <tr><td><b>Data cache</b></td><td>none</td><td>block cache plus a global LRU</td><td>none</td></tr>
+              <tr><td><b>Range forms</b></td><td>closed only</td><td>closed</td><td>bounded, offset, suffix</td></tr>
+              <tr><td><b>Merge tolerance</b></td><td>1 MiB, overridable per batch</td><td>0, or 8 bytes in AdviseRead</td><td>1 MiB</td></tr>
+              <tr><td><b>Merge bounds</b></td><td>span, parts, amplification</td><td>range count</td><td>none beyond the gap</td></tr>
+              <tr><td><b>Cross-object batch</b></td><td>yes</td><td>per handle</td><td>per path</td></tr>
+              <tr><td><b>Language</b></td><td>C ABI, C++23 core</td><td>C++ with a C API</td><td>Rust</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p class="source">
+            <a href="https://gdal.org/en/stable/user/virtual_file_systems.html">GDAL — Virtual file systems</a> ·
+            <a href="https://github.com/OSGeo/gdal/blob/master/port/cpl_vsil_curl.cpp">GDAL — port/cpl_vsil_curl.cpp</a> ·
+            <a href="https://docs.rs/object_store/latest/object_store/">object_store 0.14 documentation</a> ·
+            <a href="https://docs.rs/object_store/latest/object_store/enum.GetRange.html">object_store — GetRange</a>
+          </p>
+          <p>
+            The differences that matter in practice are narrow. Karu's batch spans objects,
+            which suits a consumer that already knows every range it needs across a thousand
+            files; <code>object_store</code>'s <code>get_ranges</code> is per path, and
+            fanning out across paths happens above it. Karu has no suffix range, so reading
+            a trailer requires knowing the size first, where
+            <code>GetRange::Suffix</code> does not. GDAL caches blocks, which helps repeated
+            overlapping reads and hurts a shuffled dataloader; Karu caches nothing and says
+            so.
+          </p>
+          <p>
+            One convention worth borrowing from either of them if you write your own client:
+            neither Karu nor <code>object_store</code> asks for compressed transfer
+            encodings, because content coding interferes with the
+            <code>Content-Length</code> that range accounting depends on.
+          </p>
+          <p class="source"><a href="https://github.com/apache/arrow-rs-object-store/blob/main/src/client/mod.rs">object_store — src/client/mod.rs</a></p>
+
+          <h2 id="apB"><i>B</i>Recipes</h2>
+          <h3>A public bucket, no credentials</h3>
+          <pre><code>auto config = karu::Config::empty().value();
+config.set("AWS_NO_SIGN_REQUEST", "YES").value();
+config.set("AWS_REGION", "us-west-2").value();</code></pre>
+          <p><code>Config::empty()</code> skips environment and home-directory discovery entirely, which makes the behaviour identical on a laptop and in CI.</p>
+
+          <h3>Two buckets, two identities</h3>
+          <pre><code>auto config = karu::Config::from_environment().value();
+config.set_path("/vsis3/open-data/", "AWS_NO_SIGN_REQUEST", "YES").value();
+config.set_path("/vsis3/private/",   "AWS_PROFILE", "research").value();</code></pre>
+          <p>One client, one connection pool, two credential scopes. The cache keeps them apart because their credential options come from different origins (§40).</p>
+
+          <h3>An S3-compatible endpoint</h3>
+          <pre><code>config.set("AWS_S3_ENDPOINT", "https://minio.example.test").value();
+config.set("AWS_VIRTUAL_HOSTING", "NO").value();</code></pre>
+          <p>The endpoint is a service root. With virtual hosting off it becomes <code>https://minio.example.test/bucket/key</code>.</p>
+
+          <h3>A sparse batch that should not merge</h3>
+          <pre><code>karu::SubmitOptions options;
+options.coalesce_gap = 0;
+auto batch = client.submit(reads, options).value();</code></pre>
+          <p>Use this when the caller knows its ranges are far apart — an opening pass across many files, for instance — and would rather pay round trips than bytes.</p>
+
+          <h3>Reading a private Hugging Face repository</h3>
+          <pre><code>hf auth login</code></pre>
+          <p>Karu reads the token the CLI writes. No configuration is needed unless the token lives somewhere non-standard, in which case set <code>HF_TOKEN_PATH</code>.</p>
+
+          <h3>Decoding while the rest is still in flight</h3>
+          <pre><code>auto batch = client.submit(reads).value();
+for (;;) {
+    auto event = batch.next().value();
+    if (event.state == karu::BatchState::end) break;
+    if (event.status == KARU_OK) decode(event.tag, event.bytes_read);
+}</code></pre>
+
+          <h2 id="apC"><i>C</i>Diagnosing a failure</h2>
+          <div class="tablewrap">
+          <table>
+            <thead><tr><th>Status</th><th>Usually means</th><th>Where to look</th></tr></thead>
+            <tbody>
+              <tr><td><code>KARU_ERR_URI</code></td><td>the path did not parse</td><td>scheme spelling; <code>/vsi</code> prefix supported (§16)</td></tr>
+              <tr><td><code>KARU_ERR_UNSUPPORTED</code></td><td>a <code>/vsi</code> handler Karu does not implement</td><td>the message lists what is supported</td></tr>
+              <tr><td><code>KARU_ERR_CONFIG</code></td><td>an option name or value was rejected</td><td>typos; unknown names are errors by design (§18)</td></tr>
+              <tr><td><code>KARU_ERR_CREDENTIALS</code></td><td>none were found, or a provider failed</td><td>discovery order (§39); the message names the stage</td></tr>
+              <tr><td><code>KARU_ERR_AUTH</code></td><td>the service rejected valid-looking credentials</td><td>region (§34), clock skew, bucket policy</td></tr>
+              <tr><td><code>KARU_ERR_NOT_FOUND</code></td><td>404</td><td>key spelling; a missing object, not a missing bucket</td></tr>
+              <tr><td><code>KARU_ERR_RANGE</code></td><td>the range fell past the end of the object</td><td><code>bytes_read</code> may hold a valid prefix (§21)</td></tr>
+              <tr><td><code>KARU_ERR_PRECONDITION</code></td><td>412, the ETag no longer matches</td><td>the object was replaced between reads</td></tr>
+              <tr><td><code>KARU_ERR_HTTP</code></td><td>an unhandled status</td><td>the message carries a 200-character body summary (§38)</td></tr>
+              <tr><td><code>KARU_ERR_NETWORK</code></td><td>the transfer did not complete</td><td>the message carries libcurl's own text</td></tr>
+              <tr><td><code>KARU_TIMEOUT</code></td><td>the deadline expired</td><td>which stage ran out is in the message (§36)</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p>
+            Two symptoms worth naming because they do not look like errors. Throughput that
+            does not improve with concurrency usually means connections are not being reused;
+            check that one client is shared rather than created per read. And far more bytes
+            transferred than requested means coalescing is bridging gaps that are not worth
+            bridging — run <code>make benchmark</code> with your own pattern, or set
+            <code>coalesce_gap</code> per batch (§25).
+          </p>
+
+          <h2 id="apD"><i>D</i>Glossary</h2>
+          <dl class="terms">
+            <dt>amplification</dt>
+            <dd>Bytes fetched divided by bytes requested. One means no waste.</dd>
+            <dt>batch</dt>
+            <dd>A set of reads submitted together, completing in any order.</dd>
+            <dt>coalescing</dt>
+            <dd>Merging nearby ranges of one object into a single request.</dd>
+            <dt>completion</dt>
+            <dd>One finished read: its tag, status and byte count.</dd>
+            <dt>easy handle</dt>
+            <dd>libcurl's single-transfer object, carrying its own connection cache.</dd>
+            <dt>multi handle</dt>
+            <dd>libcurl's event loop over many easy handles on one thread.</dd>
+            <dt>part</dt>
+            <dd>One original read inside a merged transfer, with its offset in the merged span.</dd>
+            <dt>positional read</dt>
+            <dd>A read whose offset is in the request, not in a cursor.</dd>
+            <dt>scope</dt>
+            <dd>The set of paths a cached credential is valid for.</dd>
+            <dt>share</dt>
+            <dd>libcurl's container for state reused across handles: DNS, TLS sessions.</dd>
+            <dt>transfer</dt>
+            <dd>One request Karu will issue, serving one or more parts.</dd>
+            <dt>window</dt>
+            <dd>A byte range that narrows an object before any read is addressed.</dd>
+          </dl>
+        </article>
+      </div>
+    </main>
+
+    <footer>
+      <span><em>Karu</em> means far in Quechua.</span>
+      <span>Asterisk Labs · MIT</span>
+    </footer>
+  </article>
+</body>
+</html>
