@@ -204,9 +204,17 @@ int main(int argc, char** argv) {
     check_bytes(ignored, 100, "ignored Range contents");
 
     std::array<unsigned char, 16> clipped{};
-    check(fetch(client, base + "/object", 4090, clipped) == KARU_ERR_RANGE,
-          "range clipped at object end");
+    const karu_req clipped_request{object, 4090, clipped.size(), clipped.data(), nullptr, nullptr};
+    karu_batch* clipped_batch = nullptr;
+    check(karu_client_submit(client, &clipped_request, 1, &clipped_batch) == KARU_OK,
+          "submit range clipped at object end");
+    karu_done clipped_done{};
+    check(karu_batch_next(clipped_batch, &clipped_done, -1) == KARU_OK,
+          "receive clipped range completion");
+    check(clipped_done.status == KARU_ERR_RANGE, "range clipped at object end");
+    check(clipped_done.got == 6, "clipped range reports its valid prefix");
     check_bytes(std::span(clipped).first(6), 4090, "clipped range contents");
+    karu_batch_free(clipped_batch);
 
     std::array<unsigned char, 16> small{};
     check(fetch(client, base + "/redirect", 21, small) == KARU_OK, "same-origin redirect");
@@ -289,6 +297,23 @@ int main(int argc, char** argv) {
     check(fetch(client, base + "/precondition", 0, small, "\"wrong\"") == KARU_ERR_PRECONDITION,
           "412 mapping");
     check(fetch(client, base + "/precondition", 0, small, "\"v1\"") == KARU_OK, "matching ETag");
+
+    karu_locator* truncated = nullptr;
+    check(karu_resolve((base + "/truncated").c_str(), &truncated) == KARU_OK,
+          "resolve truncated response");
+    std::array<unsigned char, 32> truncated_bytes{};
+    const karu_req truncated_request{
+        truncated, 0, truncated_bytes.size(), truncated_bytes.data(), nullptr, nullptr};
+    karu_batch* truncated_batch = nullptr;
+    check(karu_client_submit(client, &truncated_request, 1, &truncated_batch) == KARU_OK,
+          "submit truncated response");
+    karu_done truncated_done{};
+    check(karu_batch_next(truncated_batch, &truncated_done, -1) == KARU_OK,
+          "receive truncated completion");
+    check(truncated_done.status == KARU_ERR_NETWORK, "truncated response status");
+    check(truncated_done.got == 0, "failed transfer exposes no readable prefix");
+    karu_batch_free(truncated_batch);
+    karu_locator_free(truncated);
 
     struct BackendCase {
         const char* root;

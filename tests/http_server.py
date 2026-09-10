@@ -191,6 +191,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply(416, Content_Range=f"bytes */{len(DATA)}")
             return
         body = DATA[first : last + 1]
+        if path == "/truncated":
+            self.send_response(206)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Range", f"bytes {first}-{last}/{len(DATA)}")
+            self.end_headers()
+            self.wfile.write(body[: max(1, len(body) // 2)])
+            self.wfile.flush()
+            self.close_connection = True
+            return
         reported_first = 0 if path == "/bad-range" else first
         reported_last = reported_first + len(body) - 1
         if path == "/bad-range-end":

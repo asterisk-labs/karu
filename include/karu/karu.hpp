@@ -153,6 +153,7 @@ class Object {
 struct Read {
     const Object* object = nullptr;
     std::uint64_t offset = 0;
+    // Only the prefix reported by BatchEvent::bytes_read may be inspected.
     std::span<std::byte> destination;
     void* tag = nullptr;
     std::string_view if_match;
@@ -164,6 +165,8 @@ struct BatchEvent {
     BatchState state = BatchState::end;
     void* tag = nullptr;
     karu_status status = KARU_OK;
+    // Equals the requested length on success. An error normally reports zero;
+    // KARU_ERR_RANGE may expose a valid prefix.
     std::uint64_t bytes_read = 0;
     std::string message;
 };

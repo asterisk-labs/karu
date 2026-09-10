@@ -149,7 +149,8 @@ typedef struct {
     uint64_t offset;
     uint64_t length;
     // Destination buffer. If NULL, submit allocates one and the caller must
-    // release the completion buffer with karu_free().
+    // release the completion buffer with karu_free(). Only the first `got`
+    // bytes reported by the completion may be read; the rest is unspecified.
     void* buffer;
     void* tag;
     // Optional ETag precondition for remote objects. Copied by submit.
@@ -160,7 +161,10 @@ typedef struct {
     void* tag;
     karu_status status;
     uint64_t got;
-    // Request destination. If Karu allocated it, release it with karu_free().
+    // Request destination. Only the first `got` bytes may be read. A successful
+    // completion reports the requested length; an error normally reports zero,
+    // except KARU_ERR_RANGE may report a valid prefix. If Karu allocated the
+    // buffer, release it with karu_free() regardless of status.
     void* buffer;
 } karu_done;
 
@@ -176,7 +180,8 @@ KARU_API karu_status karu_batch_next(karu_batch* batch, karu_done* out, int time
 // Cancels pending work and waits for active workers to release the buffers.
 // Do not call concurrently with karu_batch_next on the same batch.
 KARU_API void karu_batch_free(karu_batch* batch);
-// Blocking batch read. Every request must provide a destination buffer.
+// Blocking batch read. Every request must provide a destination buffer. If the
+// call fails, the contents of every destination buffer are unspecified.
 KARU_API karu_status karu_client_fetch(karu_client* client, const karu_req* requests, size_t count);
 
 #ifdef __cplusplus
