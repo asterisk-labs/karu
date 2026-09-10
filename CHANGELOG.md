@@ -4,6 +4,13 @@ Notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-10
+
+### Fixed
+
+- macOS discovers the host system CA bundle at runtime instead of retaining a
+  certificate path from the build environment.
+
 ## [0.2.0] - 2026-09-10
 
 ### Added
@@ -60,7 +67,8 @@ Notable user-visible changes are recorded here.
 
 First public release.
 
-[Unreleased]: https://github.com/asterisk-labs/karu/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/asterisk-labs/karu/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/asterisk-labs/karu/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/asterisk-labs/karu/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/asterisk-labs/karu/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/asterisk-labs/karu/releases/tag/v0.1.0

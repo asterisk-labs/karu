@@ -238,9 +238,9 @@ credential options or callback instead of injecting those headers through
 `KARU_HTTP_HEADERS`.
 
 Object transfers and their redirects are restricted to HTTP and HTTPS.
-On Linux, Karu uses the system CA bundle available at runtime when none of the
-CA options above is set. This keeps binaries built in one Linux distribution
-from retaining that build machine's certificate path.
+On Linux and macOS, Karu uses the system CA bundle available at runtime when
+none of the CA options above is set. This keeps binaries from retaining the
+build machine's certificate path.
 
 ## Custom providers
 

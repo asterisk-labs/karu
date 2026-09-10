@@ -147,7 +147,7 @@ void test_config_precedence() {
     OK(no_user_agent.set("KARU_HTTP_USER_AGENT", ""));
     EQS(must_freeze(no_user_agent).http_options("https://example.test").user_agent, "");
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
     {
         ScopedEnvironment karu_ca("KARU_HTTP_CA_BUNDLE", nullptr);
         ScopedEnvironment curl_ca("CURL_CA_BUNDLE", nullptr);

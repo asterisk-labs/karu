@@ -60,7 +60,7 @@ bool valid_http_version(std::string_view value) {
 }
 
 std::string system_ca_bundle() {
-#ifdef __linux__
+#if defined(__linux__)
     static constexpr std::array candidates{
         "/etc/ssl/certs/ca-certificates.crt",
         "/etc/pki/tls/certs/ca-bundle.crt",
@@ -69,6 +69,12 @@ std::string system_ca_bundle() {
         "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
         "/etc/ssl/cert.pem",
     };
+#elif defined(__APPLE__)
+    static constexpr std::array candidates{
+        "/etc/ssl/cert.pem",
+    };
+#endif
+#if defined(__linux__) || defined(__APPLE__)
     for (const char* path : candidates) {
         std::error_code error;
         if (std::filesystem::is_regular_file(path, error))
