@@ -84,7 +84,6 @@ TransferPlan plan_transfers(BatchCore& batch, std::span<const Request> requests,
 
     std::vector<ValidatedRequest> valid;
     valid.reserve(requests.size());
-    plan.immediate.reserve(requests.size());
 
     for (const Request& request : requests) {
         if (request.locator->resolved.backend == Backend::File && !request.if_match.empty()) {

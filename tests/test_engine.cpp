@@ -263,6 +263,41 @@ void test_planner_scope() {
     karu::BatchCore part_limited;
     auto parts = karu::plan_transfers(part_limited, sparse, options, status);
     EQ(parts.transfers.size(), 2u);
+
+    // Duplicate logical reads share one transfer and retain distinct parts.
+    const karu::Request duplicates[] = {
+        {&object, 300, first.size(), first.data(), reinterpret_cast<void*>(1), {}},
+        {&object, 300, second.size(), second.data(), reinterpret_cast<void*>(2), {}},
+    };
+    options = {};
+    karu::BatchCore duplicate_batch;
+    auto duplicate_plan = karu::plan_transfers(duplicate_batch, duplicates, options, status);
+    EQ(status, KARU_OK);
+    EQ(duplicate_plan.transfers.size(), 1u);
+    EQ(duplicate_plan.transfers.front()->length, first.size());
+    EQ(duplicate_plan.transfers.front()->parts.size(), 2u);
+    EQ(duplicate_plan.transfers.front()->parts[0].relative_offset, 0u);
+    EQ(duplicate_plan.transfers.front()->parts[1].relative_offset, 0u);
+
+    // Keep the amplification guard honest for a sparse batch. This is the
+    // synthetic pattern used by benchmarks/coalescing.cpp.
+    constexpr std::size_t request_count = 1'000;
+    constexpr std::uint64_t request_length = 64u << 10;
+    constexpr std::uint64_t request_stride = 1u << 20;
+    std::vector<karu::Request> strided(request_count);
+    for (std::size_t index = 0; index < strided.size(); ++index) {
+        strided[index] = {&object, index * request_stride, request_length, first.data(), nullptr,
+                          {}};
+    }
+    karu::BatchCore strided_batch;
+    auto strided_plan = karu::plan_transfers(strided_batch, strided, {}, status);
+    EQ(status, KARU_OK);
+    EQ(strided_plan.transfers.size(), 16u);
+    std::uint64_t fetched = 0;
+    for (const auto& transfer : strided_plan.transfers)
+        fetched += transfer->length;
+    const std::uint64_t requested = request_count * request_length;
+    OK(fetched <= requested * karu::ClientOptions{}.coalesce_amplification);
 }
 
 void test_transport_statuses() {

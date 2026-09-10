@@ -14,9 +14,10 @@ project(karu
     LANGUAGES   C CXX
 )
 
-option(KARU_BUILD_TESTS "Build the Karu component tests" OFF)
-option(KARU_WERROR      "Treat warnings in Karu as errors" OFF)
-option(KARU_COVERAGE    "Instrument Karu for GCC coverage reporting" OFF)
+option(KARU_BUILD_TESTS      "Build the Karu component tests" OFF)
+option(KARU_BUILD_BENCHMARKS "Build the Karu development benchmarks" OFF)
+option(KARU_WERROR            "Treat warnings in Karu as errors" OFF)
+option(KARU_COVERAGE          "Instrument Karu for GCC coverage reporting" OFF)
 set(KARU_SANITIZE "" CACHE STRING
     "Sanitizers used to compile and link Karu component tests")
 
@@ -139,4 +140,8 @@ if(KARU_BUILD_TESTS)
     include(CTest)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(KARU_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()

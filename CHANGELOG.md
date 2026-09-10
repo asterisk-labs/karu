@@ -4,6 +4,16 @@ Notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- An optional planner benchmark records transfer counts, byte amplification and
+  planning cost for contiguous and sparse range batches.
+
+### Changed
+
+- The C and C++ APIs now define which bytes may be inspected after a failed or
+  short read.
+
 ## [0.2.0] - 2026-09-10
 
 ### Added

@@ -73,6 +73,7 @@ jobs:
         run: |
           args=(
             -DCMAKE_BUILD_TYPE=Release
+            -DKARU_BUILD_BENCHMARKS=ON
             -DKARU_BUILD_TESTS=ON
             -DKARU_WERROR=ON
           )

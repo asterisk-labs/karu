@@ -14,6 +14,7 @@ PREFIX     ?= $(abspath $(BUILD)/stage)
 ASAN_BUILD     ?= build-asan
 TSAN_BUILD     ?= build-tsan
 COVERAGE_BUILD ?= build-coverage
+BENCHMARK_BUILD ?= build-benchmarks
 PACKAGE_BUILD  ?= $(BUILD)/package-test
 
 SYSTEM_NAME := $(shell uname -s 2>/dev/null)
@@ -27,14 +28,14 @@ CMAKE_FLAGS ?=
 PARALLEL := --parallel $(JOBS)
 
 CHANGED_SOURCES := $(shell \
-	(git diff --name-only --diff-filter=ACMR HEAD -- include src tests; \
-	 git ls-files --others --exclude-standard -- include src tests) | \
+	(git diff --name-only --diff-filter=ACMR HEAD -- benchmarks include src tests; \
+	 git ls-files --others --exclude-standard -- benchmarks include src tests) | \
 	sort -u | awk '/\.(c|h|cpp|hpp)$$/')
 
 .DEFAULT_GOAL := all
 
 .PHONY: help all configure build test debug release install package-test \
-	test-asan test-tsan coverage check format format-check clean
+	test-asan test-tsan coverage benchmark check format format-check clean
 
 help: ## Show the available targets and configuration variables
 	@awk 'BEGIN {FS = ":.*## "; print "Karu development targets:\n"} \
@@ -106,6 +107,15 @@ coverage: ## Write GCC line coverage reports to build-coverage
 		--xml "$(COVERAGE_BUILD)/coverage.xml" --xml-pretty \
 		--html-details "$(COVERAGE_BUILD)/coverage.html"
 
+benchmark: ## Run the coalescing planner benchmark
+	$(CMAKE) -S . -B "$(BENCHMARK_BUILD)" \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DKARU_BUILD_BENCHMARKS=ON \
+		-DKARU_WERROR="$(WERROR)" $(CMAKE_FLAGS)
+	$(CMAKE) --build "$(BENCHMARK_BUILD)" --config Release \
+		--target karu_coalescing_benchmark $(PARALLEL)
+	"$(BENCHMARK_BUILD)/benchmarks/karu_coalescing_benchmark"
+
 check: ## Run the complete local validation suite
 	$(MAKE) test
 	$(MAKE) package-test
@@ -123,4 +133,5 @@ format-check: ## Verify formatting of changed C and C++ sources
 	fi
 
 clean: ## Remove only Makefile-managed build directories
-	$(CMAKE) -E rm -rf build build-debug build-release build-asan build-tsan build-coverage
+	$(CMAKE) -E rm -rf build build-debug build-release build-asan build-tsan build-coverage \
+		build-benchmarks
