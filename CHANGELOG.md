@@ -44,6 +44,8 @@ Notable user-visible changes are recorded here.
   rule for `s3://data` cannot apply to `s3://data-private`.
 - AWS and Source `credential_process` helpers are terminated at
   `KARU_REQUEST_TIMEOUT` and cannot return unbounded output.
+- Concurrent credential lookups keep their shared refresh state alive until
+  every waiting caller has resumed.
 - Expired credentials are rejected instead of entering the cache.
 - HTTP-date values in `Retry-After` are honored by size probes.
 

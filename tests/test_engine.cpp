@@ -368,14 +368,17 @@ void test_transport_statuses() {
     scattered.locator = std::make_shared<karu::Locator>(must_resolve("https://example.test/body"));
     scattered.length = payload.size();
     scattered.scattered = true;
-    scattered.parts.push_back(
-        {.relative_offset = 0, .length = first_part.size(), .buffer = first_part.data()});
-    scattered.parts.push_back(
-        {.relative_offset = 0, .length = duplicate_part.size(), .buffer = duplicate_part.data()});
-    scattered.parts.push_back(
-        {.relative_offset = 4, .length = overlap_part.size(), .buffer = overlap_part.data()});
-    scattered.parts.push_back(
-        {.relative_offset = 18, .length = final_part.size(), .buffer = final_part.data()});
+    auto part = [](std::uint64_t offset, auto& buffer) {
+        karu::Part value;
+        value.relative_offset = offset;
+        value.length = buffer.size();
+        value.buffer = buffer.data();
+        return value;
+    };
+    scattered.parts.push_back(part(0, first_part));
+    scattered.parts.push_back(part(0, duplicate_part));
+    scattered.parts.push_back(part(4, overlap_part));
+    scattered.parts.push_back(part(18, final_part));
 
     OK(karu::transport::ensure_sink(scattered));
     OK(scattered.sink == nullptr);
@@ -445,7 +448,8 @@ void test_cpp_facade() {
         {&*object, 0, first, reinterpret_cast<void*>(1), {}},
         {&*object, 64, second, reinterpret_cast<void*>(2), {}},
     };
-    const karu::SubmitOptions submit_options{.coalesce_gap = 0};
+    karu::SubmitOptions submit_options;
+    submit_options.coalesce_gap = 0;
     auto batch = client->submit(reads, submit_options);
     OK(batch.has_value());
     int ready = 0;

@@ -46,6 +46,8 @@ Result run(const karu::Locator& object, const Pattern& pattern, const Policy& po
             .offset = static_cast<std::uint64_t>(index) * pattern.stride,
             .length = pattern.length,
             .buffer = &sink,
+            .tag = nullptr,
+            .if_match = {},
         };
     }
 
