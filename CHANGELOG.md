@@ -4,25 +4,14 @@ Notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-10
+
 ### Added
 
 - An optional planner benchmark records transfer counts, byte amplification and
   planning cost for contiguous and sparse range batches.
 - C and C++ callers can override coalescing for one submitted batch without
   rebuilding the client.
-
-### Changed
-
-- The C and C++ APIs now define which bytes may be inspected after a failed or
-  short read.
-- Merged HTTP ranges are scattered directly into their destination buffers;
-  gaps no longer allocate staging memory or add a second copy.
-- Local batches only merge ranges that overlap or touch.
-
-## [0.2.0] - 2026-09-10
-
-### Added
-
 - Karu sends `karu/<version>` as its default User-Agent. Set
   `KARU_HTTP_USER_AGENT` to replace it or to an empty value to omit it.
 - CI measures line coverage of the C++ core and checks exact AWS SigV4, GCS
@@ -32,6 +21,11 @@ Notable user-visible changes are recorded here.
 
 ### Changed
 
+- The C and C++ APIs now define which bytes may be inspected after a failed or
+  short read.
+- Merged HTTP ranges are scattered directly into their destination buffers;
+  gaps no longer allocate staging memory or add a second copy.
+- Local batches only merge ranges that overlap or touch.
 - HTTP and GCS configuration use Karu-owned names. `KARU_HTTP_*` replaces the
   old transport namespace, while GCS options consistently begin with `GCS_`.
 - URI paths, chaining and the C API remain compatible with 0.1.
