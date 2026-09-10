@@ -30,6 +30,28 @@ std::expected<ProviderCredentials, RequestError> load_credentials(Load&& load) n
     }
 }
 
+std::string credential_family(std::string_view source, karu_credentials_kind kind) {
+    std::string family(source);
+    family.push_back('\n');
+    family += std::to_string(static_cast<int>(kind));
+    family.push_back('\n');
+    return family;
+}
+
+std::string credential_key(std::string_view family, std::string_view scope) {
+    std::string key;
+    key.reserve(family.size() + scope.size());
+    key.append(family);
+    key.append(scope);
+    return key;
+}
+
+std::string native_credential_key(const ConfigSnapshot& config,
+                                  const backends::CloudProvider& provider, std::string_view path) {
+    return credential_key(credential_family("native", provider.credentials_kind),
+                          config.scope_key(path, provider.credential_options));
+}
+
 } // namespace
 
 CredentialCache::CredentialCache(Clock clock) : clock_(std::move(clock)) {}
@@ -64,7 +86,7 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
         return std::unexpected(RequestError{KARU_ERR_CREDENTIALS, {}});
 
     const std::int64_t checked_at = now();
-    const std::string family = "custom\n" + std::to_string(static_cast<int>(kind)) + "\n";
+    const std::string family = credential_family("custom", kind);
     const auto find_reusable = [&] {
         auto best = entries_.end();
         for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
@@ -82,7 +104,7 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
         return best;
     };
 
-    const std::string flight_key = family + std::string(path);
+    const std::string flight_key = credential_key(family, path);
     std::shared_ptr<Flight> flight;
     {
         std::unique_lock lock(mutex_);
@@ -123,7 +145,7 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
         if (refreshed && !refreshed->cache_prefix.empty() && !flight->invalidated) {
             try {
                 entries_.insert_or_assign(
-                    family + refreshed->cache_prefix,
+                    credential_key(family, refreshed->cache_prefix),
                     Entry{*refreshed, refresh_time(*refreshed, loaded_at, false)});
             } catch (...) {
                 // A cache insertion must not strand waiters or fail a usable credential load.
@@ -142,9 +164,7 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
 std::expected<ProviderCredentials, RequestError>
 CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvider& provider,
                         std::string_view path) {
-    const std::string key = "native\n" +
-                            std::to_string(static_cast<int>(provider.credentials_kind)) + "\n" +
-                            config.scope_key(path, provider.credential_options);
+    const std::string key = native_credential_key(config, provider, path);
     const std::int64_t checked_at = now();
     std::shared_ptr<Flight> flight;
     {
@@ -198,9 +218,7 @@ void CredentialCache::invalidate(const ConfigSnapshot& config,
                                  bool custom) {
     std::unique_lock lock(mutex_);
     if (!custom) {
-        const std::string key = "native\n" +
-                                std::to_string(static_cast<int>(provider.credentials_kind)) + "\n" +
-                                config.scope_key(path, provider.credential_options);
+        const std::string key = native_credential_key(config, provider, path);
         entries_.erase(key);
         if (const auto flight = flights_.find(key); flight != flights_.end()) {
             flight->second->invalidated = true;
@@ -209,9 +227,8 @@ void CredentialCache::invalidate(const ConfigSnapshot& config,
         return;
     }
 
-    const std::string family =
-        "custom\n" + std::to_string(static_cast<int>(provider.credentials_kind)) + "\n";
-    if (const auto flight = flights_.find(family + std::string(path)); flight != flights_.end()) {
+    const std::string family = credential_family("custom", provider.credentials_kind);
+    if (const auto flight = flights_.find(credential_key(family, path)); flight != flights_.end()) {
         flight->second->invalidated = true;
         flights_.erase(flight);
     }
