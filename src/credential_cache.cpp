@@ -158,10 +158,10 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
         const auto current = flights_.find(flight_key);
         if (current != flights_.end() && current->second == flight)
             flights_.erase(current);
-        // Waiters cannot release the last Flight until this lock is released.
+        // Copy the result before a waiter can release the last Flight.
         flight->ready.notify_all();
+        return *flight->result;
     }
-    return *flight->result;
 }
 
 std::expected<ProviderCredentials, RequestError>
@@ -212,8 +212,8 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
         if (current != flights_.end() && current->second == flight)
             flights_.erase(current);
         flight->ready.notify_all();
+        return *flight->result;
     }
-    return *flight->result;
 }
 
 void CredentialCache::invalidate(const ConfigSnapshot& config,
