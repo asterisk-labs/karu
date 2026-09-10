@@ -21,6 +21,11 @@ struct Failure {
 
 [[nodiscard]] bool ensure_sink(Transfer& transfer) noexcept;
 
+// Store one response-body chunk at the current transfer position. Merged HTTP
+// transfers write only the intersections requested by their parts; gaps are
+// consumed without being staged.
+void store_payload(Transfer& transfer, const void* data, std::size_t size) noexcept;
+
 [[nodiscard]] std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
                                                          const ClientOptions& options);
 

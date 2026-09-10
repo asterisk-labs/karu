@@ -19,6 +19,8 @@ struct ValidatedRequest {
 };
 
 bool same_resource(const Request& left, const Request& right) {
+    // Different preconditions must remain different HTTP requests even when
+    // they address the same object.
     return left.locator->resolved.backend == right.locator->resolved.backend &&
            left.locator->resolved.canonical_uri == right.locator->resolved.canonical_uri &&
            left.if_match == right.if_match;
@@ -143,6 +145,9 @@ TransferPlan plan_transfers(BatchCore& batch, std::span<const Request> requests,
         std::uint64_t last_byte = head.last_byte;
         std::uint64_t useful_bytes = head.request->length;
         std::size_t next = first + 1;
+        // A local pread gains no round-trip savings from reading through gaps.
+        const std::uint64_t coalesce_gap =
+            head.request->locator->resolved.backend == Backend::File ? 0 : options.coalesce_gap;
         while (options.coalesce_gap > 0 && next < valid.size()) {
             const auto& candidate = valid[next];
             if (!same_resource(*head.request, *candidate.request)) {
@@ -150,7 +155,7 @@ TransferPlan plan_transfers(BatchCore& batch, std::span<const Request> requests,
             }
             if (candidate.absolute_offset > last_byte) {
                 const std::uint64_t distance = candidate.absolute_offset - last_byte;
-                if (distance - 1 > options.coalesce_gap)
+                if (distance - 1 > coalesce_gap)
                     break;
             }
             const std::uint64_t merged_last = std::max(last_byte, candidate.last_byte);

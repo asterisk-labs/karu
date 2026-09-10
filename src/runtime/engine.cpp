@@ -165,14 +165,15 @@ void Engine::stop_workers() noexcept {
     }
 }
 
-std::unique_ptr<BatchCore> Engine::submit(std::span<const Request> requests, karu_status& status) {
+std::unique_ptr<BatchCore> Engine::submit(std::span<const Request> requests,
+                                          const ClientOptions& plan_options, karu_status& status) {
     auto batch = std::make_unique<BatchCore>();
     if (requests.empty()) {
         status = KARU_OK;
         return batch;
     }
 
-    TransferPlan plan = plan_transfers(*batch, requests, options_, status);
+    TransferPlan plan = plan_transfers(*batch, requests, plan_options, status);
     if (status != KARU_OK)
         return batch;
 
@@ -232,7 +233,7 @@ void Engine::deliver(Transfer& transfer, karu_status status, const std::string& 
             } else {
                 completion.got = part.length;
             }
-            if (completion.got > 0 && transfer.scattered) {
+            if (completion.got > 0 && !transfer.scratch.empty()) {
                 std::memcpy(part.buffer, transfer.scratch.data() + part.relative_offset,
                             static_cast<std::size_t>(completion.got));
             }
@@ -244,6 +245,8 @@ void Engine::deliver(Transfer& transfer, karu_status status, const std::string& 
 void Engine::finish_transfer(std::unique_ptr<Transfer> transfer, karu_status status,
                              std::string detail) {
     BatchCore* batch = transfer->batch;
+    // Publish completions before dropping the last live transfer. A waiter may
+    // destroy the batch as soon as transfer_finished() reaches zero.
     deliver(*transfer, status, detail);
     if (transfer->easy) {
         curl_easy_reset(transfer->easy.get());
@@ -398,6 +401,8 @@ void Engine::discard_cancelled_http() {
 }
 
 void Engine::io_loop() {
+    // pending_, retries_, active_, and easy_pool_ belong to this thread. Other
+    // threads hand work over through http_queue_.
     std::mt19937 random = retry_generator(this);
 
     while (!stop_.load(std::memory_order_acquire)) {
@@ -485,6 +490,7 @@ void Engine::io_loop() {
             if (!transfer->region_retried && !transfer->response_region.empty() &&
                 transfer->response_region != transfer->region_hint &&
                 transfer->locator->resolved.backend == Backend::S3) {
+                // The region is part of SigV4, so rebuild and sign the request.
                 transfer->region_hint = transfer->response_region;
                 transfer->batch->remember_region(transfer->locator->resolved.canonical_uri,
                                                  transfer->response_region);
@@ -497,6 +503,8 @@ void Engine::io_loop() {
 
             if (!transfer->credentials_retried &&
                 transport::detail::credentials_expired(*transfer)) {
+                // Authentication failures get one fresh lookup outside the
+                // ordinary retry budget.
                 request_builder_.invalidate_credentials(*transfer->locator);
                 transfer->credentials_retried = true;
                 transfer->credentials = {};
@@ -627,6 +635,8 @@ void Engine::file_loop() {
 }
 
 void Engine::credential_loop() {
+    // Profile helpers, metadata endpoints, and user callbacks may block. Keep
+    // them away from the curl event loop.
     while (true) {
         std::unique_ptr<Transfer> transfer;
         {
@@ -717,6 +727,8 @@ void Engine::cancel(BatchCore& batch) {
     cancellation_pending_.store(true, std::memory_order_release);
     curl_multi_wakeup(multi_.get());
 
+    // Caller-owned destinations are safe to release once every transfer has
+    // left its worker or the curl event loop.
     std::unique_lock lock(batch.mutex);
     batch.cv.wait(lock, [&batch] { return batch.live_transfers == 0; });
 }

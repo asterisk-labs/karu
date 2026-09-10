@@ -50,6 +50,44 @@ int main(void) {
     karu_batch* batch = NULL;
     if (karu_client_submit(client, &unbounded, 1, &batch) != KARU_ERR_INVALID || batch != NULL)
         return 17;
+
+    karu_submit_options options = KARU_SUBMIT_OPTIONS_INIT;
+    options.coalesce_gap = 0;
+    if (karu_client_submit_with(client, NULL, 0, &options, &batch) != KARU_OK || batch == NULL)
+        return 18;
+    karu_done done = {0};
+    if (karu_batch_next(batch, &done, 0) != KARU_END)
+        return 19;
+    karu_batch_free(batch);
+    batch = NULL;
+    if (karu_client_fetch_with(client, NULL, 0, &options) != KARU_OK)
+        return 20;
+
+    options.coalesce_limit = 0;
+    if (karu_client_submit_with(client, NULL, 0, &options, &batch) != KARU_ERR_INVALID ||
+        batch != NULL)
+        return 21;
+    options.coalesce_limit = KARU_INHERIT;
+    options.coalesce_parts = 0;
+    if (karu_client_submit_with(client, NULL, 0, &options, &batch) != KARU_ERR_INVALID ||
+        batch != NULL)
+        return 22;
+    options.coalesce_parts = KARU_INHERIT;
+    options.coalesce_amplification = 0;
+    if (karu_client_submit_with(client, NULL, 0, &options, &batch) != KARU_ERR_INVALID ||
+        batch != NULL)
+        return 23;
+    options.coalesce_amplification = KARU_INHERIT;
+    options.struct_size = offsetof(karu_submit_options, coalesce_limit);
+    if (karu_client_submit_with(client, NULL, 0, &options, &batch) != KARU_OK || batch == NULL)
+        return 24;
+    karu_batch_free(batch);
+    batch = NULL;
+    options.struct_size = 0;
+    if (karu_client_submit_with(client, NULL, 0, &options, &batch) != KARU_ERR_INVALID ||
+        batch != NULL)
+        return 25;
+
     karu_locator_free(locator);
     karu_free(NULL);
     karu_client_free(client);

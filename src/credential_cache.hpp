@@ -44,6 +44,7 @@ class CredentialCache {
     };
 
     struct Flight {
+        // Callers waiting on the same lookup share its result.
         std::condition_variable ready;
         bool done = false;
         bool invalidated = false;

@@ -12,11 +12,13 @@ import urllib.parse
 
 
 DATA = bytes((index * 31 + 7) & 0xFF for index in range(4096))
+LARGE_DATA = bytes((index * 31 + 7) & 0xFF for index in range(128 * 1024))
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     retries = 0
+    scatter_retries = 0
     large_error_retries = 0
     large_error_connection = None
     large_size_retries = 0
@@ -59,6 +61,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if path == "/retry" and Handler.retries == 0:
             Handler.retries += 1
+            self.reply(503, b"try again", Retry_After="0")
+            return
+        if path == "/scatter-retry" and Handler.scatter_retries == 0:
+            Handler.scatter_retries += 1
             self.reply(503, b"try again", Retry_After="0")
             return
         if path == "/retry-after-deadline":
@@ -175,6 +181,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/subfile-coalesced" and range_header != "bytes=176-343":
             self.reply(409, b"subfile requests were not coalesced")
             return
+        if path == "/submit-separate" and range_header not in ("bytes=0-23", "bytes=24-47"):
+            self.reply(409, b"submit override did not disable coalescing")
+            return
+        if path == "/scatter-chunks" and range_header != "bytes=1000-79999":
+            self.reply(409, b"scatter requests were not coalesced")
+            return
         if path == "/cancel-coalesced":
             Handler.cancel_range_ok = range_header == "bytes=576-799"
             Handler.cancel_started.set()
@@ -186,11 +198,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             time.sleep(4)
         first_text, last_text = range_header[6:].split("-", 1)
         first = int(first_text)
-        last = min(int(last_text), len(DATA) - 1)
-        if first >= len(DATA):
-            self.reply(416, Content_Range=f"bytes */{len(DATA)}")
+        source = LARGE_DATA if path == "/scatter-chunks" else DATA
+        last = min(int(last_text), len(source) - 1)
+        if first >= len(source):
+            self.reply(416, Content_Range=f"bytes */{len(source)}")
             return
-        body = DATA[first : last + 1]
+        body = source[first : last + 1]
         if path == "/truncated":
             self.send_response(206)
             self.send_header("Content-Length", str(len(body)))
@@ -204,10 +217,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         reported_last = reported_first + len(body) - 1
         if path == "/bad-range-end":
             reported_last += 1
+        if path == "/scatter-chunks":
+            self.send_response(206)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header(
+                "Content-Range", f"bytes {reported_first}-{reported_last}/{len(source)}"
+            )
+            self.end_headers()
+            at = 0
+            chunk_sizes = (1, 16383, 7, 32768)
+            chunk = 0
+            while at < len(body):
+                end = min(len(body), at + chunk_sizes[chunk % len(chunk_sizes)])
+                self.wfile.write(body[at:end])
+                self.wfile.flush()
+                at = end
+                chunk += 1
+            return
         self.reply(
             206,
             body,
-            Content_Range=f"bytes {reported_first}-{reported_last}/{len(DATA)}",
+            Content_Range=f"bytes {reported_first}-{reported_last}/{len(source)}",
         )
 
     def log_message(self, _format: str, *_args: object) -> None:

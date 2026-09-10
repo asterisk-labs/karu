@@ -40,6 +40,7 @@ class Engine {
     Engine& operator=(const Engine&) = delete;
 
     [[nodiscard]] std::unique_ptr<BatchCore> submit(std::span<const Request> requests,
+                                                    const ClientOptions& plan_options,
                                                     karu_status& status);
 
     void cancel(BatchCore& batch);

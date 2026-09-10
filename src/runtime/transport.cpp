@@ -19,6 +19,8 @@
 namespace karu::transport {
 namespace {
 
+// Finishing a small unwanted body keeps the connection reusable. Larger ones
+// are cut short rather than wasting bandwidth.
 constexpr std::uint64_t kDrainLimit = 256u << 10;
 
 Failure timeout_failure(std::string_view uri,
@@ -133,6 +135,7 @@ void capture_error_body(std::array<char, Capacity>& destination, std::size_t& us
 
 void reset_response(Transfer& transfer) noexcept {
     transfer.received = 0;
+    transfer.scatter_cursor = 0;
     transfer.skip = 0;
     transfer.body_length = -1;
     transfer.consume = 0;
@@ -213,10 +216,8 @@ std::size_t write_callback(char* data, std::size_t size, std::size_t count,
 
     const std::uint64_t room = transfer.length - transfer.received;
     const auto take = static_cast<std::size_t>(std::min<std::uint64_t>(room, remaining));
-    if (take > 0) {
-        std::memcpy(transfer.sink + transfer.received, data, take);
-        transfer.received += take;
-    }
+    if (take > 0)
+        store_payload(transfer, data, take);
 
     if (transfer.received == transfer.length) {
         transfer.satisfied = true;
@@ -241,6 +242,7 @@ std::size_t header_callback(char* data, std::size_t size, std::size_t count,
     auto& transfer = *static_cast<Transfer*>(userdata);
     const std::string_view line(data, *bytes);
 
+    // libcurl reports a new status line for redirects and interim responses.
     if (line.starts_with("HTTP/")) {
         reset_response(transfer);
     } else if (header_name_is(line, "content-range:")) {
@@ -456,6 +458,10 @@ bool ensure_sink(Transfer& transfer) noexcept {
         transfer.sink = static_cast<std::byte*>(transfer.parts.front().buffer);
         return true;
     }
+    // Curl can scatter each incoming chunk directly. pread needs one contiguous
+    // destination, so coalesced local reads use scratch space.
+    if (transfer.locator->resolved.backend != Backend::File)
+        return true;
     if (transfer.length > std::numeric_limits<std::size_t>::max())
         return false;
     try {
@@ -465,6 +471,43 @@ bool ensure_sink(Transfer& transfer) noexcept {
     }
     transfer.sink = transfer.scratch.data();
     return true;
+}
+
+void store_payload(Transfer& transfer, const void* data, std::size_t size) noexcept {
+    const auto* source = static_cast<const std::byte*>(data);
+    const std::uint64_t chunk_begin = transfer.received;
+    const std::uint64_t chunk_end = chunk_begin + size;
+
+    if (!transfer.scattered) {
+        std::memcpy(transfer.sink + static_cast<std::size_t>(chunk_begin), source, size);
+        transfer.received = chunk_end;
+        return;
+    }
+
+    // Parts may overlap. Advance only past parts that this chunk cannot touch.
+    while (transfer.scatter_cursor < transfer.parts.size()) {
+        const Part& part = transfer.parts[transfer.scatter_cursor];
+        if (part.relative_offset + part.length > chunk_begin)
+            break;
+        ++transfer.scatter_cursor;
+    }
+
+    for (std::size_t index = transfer.scatter_cursor; index < transfer.parts.size(); ++index) {
+        const Part& part = transfer.parts[index];
+        const std::uint64_t part_begin = part.relative_offset;
+        if (part_begin >= chunk_end)
+            break;
+        const std::uint64_t part_end = part_begin + part.length;
+        const std::uint64_t begin = std::max(chunk_begin, part_begin);
+        const std::uint64_t end = std::min(chunk_end, part_end);
+        if (begin >= end)
+            continue;
+        std::memcpy(static_cast<std::byte*>(part.buffer) +
+                        static_cast<std::size_t>(begin - part_begin),
+                    source + static_cast<std::size_t>(begin - chunk_begin),
+                    static_cast<std::size_t>(end - begin));
+    }
+    transfer.received = chunk_end;
 }
 
 std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
@@ -505,6 +548,8 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
 std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy, CURLSH* share,
                                               RequestBuilder& request_builder,
                                               const ClientOptions& options) {
+    // A one-byte GET is more dependable than HEAD across object stores; the
+    // total comes from Content-Range and no object metadata is retained.
     std::array<char, CURL_ERROR_SIZE> error_buffer{};
     SizeState state;
     state.easy = easy;

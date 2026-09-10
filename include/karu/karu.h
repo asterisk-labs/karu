@@ -20,6 +20,8 @@ extern "C" {
 // Returned by karu_locator_window_length() for an unbounded locator. This is
 // not a valid karu_req.length; range reads must always have a finite length.
 #define KARU_TO_END UINT64_MAX
+// Use the corresponding client setting in a per-batch options structure.
+#define KARU_INHERIT UINT64_MAX
 
 KARU_API int karu_api_version(void);
 KARU_API const char* karu_version_string(void);
@@ -144,6 +146,19 @@ KARU_API karu_status karu_client_size(karu_client* client, const karu_locator* l
 
 // Positional reads ---------------------------------------------------------
 
+// Per-batch planner overrides. Initialize struct_size to sizeof this struct.
+// Fields set to KARU_INHERIT use the corresponding client setting. A zero gap
+// disables coalescing for this batch.
+typedef struct {
+    size_t struct_size;
+    uint64_t coalesce_gap;
+    uint64_t coalesce_limit;
+    uint64_t coalesce_parts;
+    uint64_t coalesce_amplification;
+} karu_submit_options;
+#define KARU_SUBMIT_OPTIONS_INIT                                                                   \
+    { sizeof(karu_submit_options), KARU_INHERIT, KARU_INHERIT, KARU_INHERIT, KARU_INHERIT }
+
 typedef struct {
     const karu_locator* locator;
     uint64_t offset;
@@ -174,6 +189,11 @@ typedef struct karu_batch karu_batch;
 // buffers supplied by the caller must remain valid until the batch is freed.
 KARU_API karu_status karu_client_submit(karu_client* client, const karu_req* requests, size_t count,
                                         karu_batch** out_batch);
+// Submit with planner settings scoped to this batch. Fields not covered by
+// struct_size also retain the client setting.
+KARU_API karu_status karu_client_submit_with(karu_client* client, const karu_req* requests,
+                                             size_t count, const karu_submit_options* options,
+                                             karu_batch** out_batch);
 // Returns KARU_OK with one completion. Multiple threads may consume the same
 // batch. KARU_END and KARU_TIMEOUT leave out unchanged.
 KARU_API karu_status karu_batch_next(karu_batch* batch, karu_done* out, int timeout_ms);
@@ -183,6 +203,8 @@ KARU_API void karu_batch_free(karu_batch* batch);
 // Blocking batch read. Every request must provide a destination buffer. If the
 // call fails, the contents of every destination buffer are unspecified.
 KARU_API karu_status karu_client_fetch(karu_client* client, const karu_req* requests, size_t count);
+KARU_API karu_status karu_client_fetch_with(karu_client* client, const karu_req* requests,
+                                            size_t count, const karu_submit_options* options);
 
 #ifdef __cplusplus
 } // extern "C"

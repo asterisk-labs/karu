@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -159,6 +160,14 @@ struct Read {
     std::string_view if_match;
 };
 
+struct SubmitOptions {
+    // Unset values inherit the client's planner settings.
+    std::optional<std::uint64_t> coalesce_gap;
+    std::optional<std::uint64_t> coalesce_limit;
+    std::optional<std::uint64_t> coalesce_parts;
+    std::optional<std::uint64_t> coalesce_amplification;
+};
+
 enum class BatchState { ready, end, timeout };
 
 struct BatchEvent {
@@ -271,24 +280,28 @@ class Client {
         return result;
     }
 
-    [[nodiscard]] Result<void> fetch(std::span<const Read> reads) const {
+    [[nodiscard]] Result<void> fetch(std::span<const Read> reads,
+                                     const SubmitOptions& options = {}) const {
         auto requests = make_requests(reads);
         if (!requests)
             return std::unexpected(std::move(requests.error()));
-        const karu_status status =
-            karu_client_fetch(handle_.get(), requests->requests.data(), requests->requests.size());
+        const karu_submit_options native = make_options(options);
+        const karu_status status = karu_client_fetch_with(handle_.get(), requests->requests.data(),
+                                                          requests->requests.size(), &native);
         if (status != KARU_OK)
             return std::unexpected(current_error(status));
         return {};
     }
 
-    [[nodiscard]] Result<Batch> submit(std::span<const Read> reads) const {
+    [[nodiscard]] Result<Batch> submit(std::span<const Read> reads,
+                                       const SubmitOptions& options = {}) const {
         auto requests = make_requests(reads);
         if (!requests)
             return std::unexpected(std::move(requests.error()));
         karu_batch* raw = nullptr;
-        const karu_status status = karu_client_submit(handle_.get(), requests->requests.data(),
-                                                      requests->requests.size(), &raw);
+        const karu_submit_options native = make_options(options);
+        const karu_status status = karu_client_submit_with(
+            handle_.get(), requests->requests.data(), requests->requests.size(), &native, &raw);
         if (status != KARU_OK)
             return std::unexpected(current_error(status));
         return Batch(raw);
@@ -310,6 +323,16 @@ class Client {
         std::vector<std::string> conditions;
         std::vector<karu_req> requests;
     };
+
+    [[nodiscard]] static karu_submit_options make_options(const SubmitOptions& options) noexcept {
+        return karu_submit_options{
+            .struct_size = sizeof(karu_submit_options),
+            .coalesce_gap = options.coalesce_gap.value_or(KARU_INHERIT),
+            .coalesce_limit = options.coalesce_limit.value_or(KARU_INHERIT),
+            .coalesce_parts = options.coalesce_parts.value_or(KARU_INHERIT),
+            .coalesce_amplification = options.coalesce_amplification.value_or(KARU_INHERIT),
+        };
+    }
 
     [[nodiscard]] static Result<NativeReads> make_requests(std::span<const Read> reads) {
         NativeReads result;

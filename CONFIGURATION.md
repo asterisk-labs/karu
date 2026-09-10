@@ -43,6 +43,12 @@ for `SOURCE_ENDPOINT`. `CURL_CA_BUNDLE` and `SSL_CERT_FILE` are aliases for
 The coalescing ceilings split a sparse batch into bounded transfers. They do
 not persist object data or metadata beyond that batch.
 
+The C `karu_client_submit_with()` and `karu_client_fetch_with()` functions can
+override these four coalescing values for one batch. The C++ `SubmitOptions`
+type provides the same control. Omitted values inherit the client settings.
+Local files only merge overlapping or contiguous ranges; a configured gap is
+used only for remote reads.
+
 ## AWS S3
 
 | Option | Purpose |

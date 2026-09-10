@@ -88,6 +88,8 @@ RequestBuilder::materialize(const Locator& locator, const ResolvedCredentials& c
     if (provider == nullptr)
         return std::unexpected(RequestError{KARU_ERR_UNSUPPORTED, "unsupported request backend"});
 
+    // The signature must see the final range and routing region. Retries call
+    // materialize again after either one changes.
     backends::RequestContext request{config_,
                                      object,
                                      credentials.value ? &*credentials.value : nullptr,

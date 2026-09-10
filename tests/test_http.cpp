@@ -51,6 +51,18 @@ void check_bytes(std::span<const unsigned char> bytes, std::size_t offset, const
     }
 }
 
+int drain_success(karu_batch* batch, const char* message) {
+    int completed = 0;
+    for (;;) {
+        karu_done done{};
+        const karu_status status = karu_batch_next(batch, &done, -1);
+        if (status == KARU_END)
+            return completed;
+        check(status == KARU_OK && done.status == KARU_OK, message);
+        ++completed;
+    }
+}
+
 struct RefreshState {
     karu_credentials_kind kind;
     const char* cache_prefix;
@@ -540,14 +552,43 @@ int main(int argc, char** argv) {
 
     karu_batch_free(batch);
 
+    karu_locator* separate_object = nullptr;
+    check(karu_resolve((base + "/submit-separate").c_str(), &separate_object) == KARU_OK,
+          "resolve per-submit fixture");
+    std::array<unsigned char, 24> separate_first{};
+    std::array<unsigned char, 24> separate_second{};
+    const std::array<karu_req, 2> separate_reads{{
+        {separate_object, 0, separate_first.size(), separate_first.data(), nullptr, nullptr},
+        {separate_object, separate_first.size(), separate_second.size(), separate_second.data(),
+         nullptr, nullptr},
+    }};
+    const karu_submit_options separate_options{sizeof(karu_submit_options), 0, KARU_INHERIT,
+                                               KARU_INHERIT, KARU_INHERIT};
+    batch = nullptr;
+    check(karu_client_submit_with(client, separate_reads.data(), separate_reads.size(),
+                                  &separate_options, &batch) == KARU_OK,
+          "disable coalescing for one submit");
+    check(drain_success(batch, "separate range completion") == 2, "both separate ranges complete");
+    check_bytes(separate_first, 0, "first separate contents");
+    check_bytes(separate_second, separate_first.size(), "second separate contents");
+    karu_batch_free(batch);
+
+    separate_first.fill(0);
+    const karu_req separate_fetch{separate_object,       0,       separate_first.size(),
+                                  separate_first.data(), nullptr, nullptr};
+    check(karu_client_fetch_with(client, &separate_fetch, 1, &separate_options) == KARU_OK,
+          "fetch with per-call options");
+    check_bytes(separate_first, 0, "per-call fetch contents");
+    karu_locator_free(separate_object);
+
     // Different subfile locators over one outer object must share the same
     // physical range plan. Submit them in reverse physical order so tags, not
     // completion order, are what associate each result with its caller.
     karu_config* window_config = nullptr;
     karu_client* window_client = nullptr;
     check(karu_config_create_empty(&window_config) == KARU_OK, "create subfile config");
-    check(karu_config_set_option(window_config, "KARU_COALESCE_GAP", "256") == KARU_OK,
-          "set subfile coalescing");
+    check(karu_config_set_option(window_config, "KARU_COALESCE_GAP", "0") == KARU_OK,
+          "disable client-wide subfile coalescing");
     check(karu_config_set_option(window_config, "KARU_CONCURRENCY", "2") == KARU_OK,
           "set subfile concurrency");
     check(karu_config_set_option(window_config, "KARU_MAX_ATTEMPTS", "1") == KARU_OK,
@@ -570,10 +611,12 @@ int main(int argc, char** argv) {
         {earlier, 76, earlier_bytes.size(), earlier_bytes.data(), reinterpret_cast<void*>(1),
          nullptr},
     }};
+    const karu_submit_options window_options{sizeof(karu_submit_options), 256, KARU_INHERIT,
+                                             KARU_INHERIT, KARU_INHERIT};
     batch = nullptr;
-    check(karu_client_submit(window_client, window_reads.data(), window_reads.size(), &batch) ==
-              KARU_OK,
-          "submit cross-subfile batch");
+    check(karu_client_submit_with(window_client, window_reads.data(), window_reads.size(),
+                                  &window_options, &batch) == KARU_OK,
+          "submit cross-subfile batch with local planner options");
     bool saw_earlier = false;
     bool saw_later = false;
     while (batch != nullptr) {
@@ -596,6 +639,107 @@ int main(int argc, char** argv) {
     karu_locator_free(earlier);
     karu_locator_free(later);
 
+    // One response is delivered in uneven chunks and must populate every
+    // requested intersection, including duplicate and overlapping ranges,
+    // without retaining the five-kilobyte hole.
+    karu_locator* scatter_object = nullptr;
+    check(karu_resolve((base + "/scatter-chunks").c_str(), &scatter_object) == KARU_OK,
+          "resolve scatter fixture");
+    std::array<unsigned char, 40000> scatter_first{};
+    std::array<unsigned char, 40000> scatter_duplicate{};
+    std::array<unsigned char, 35000> scatter_overlap{};
+    std::array<unsigned char, 20000> scatter_final{};
+    const std::array<karu_req, 4> scatter_reads{{
+        {scatter_object, 1000, scatter_first.size(), scatter_first.data(), nullptr, nullptr},
+        {scatter_object, 1000, scatter_duplicate.size(), scatter_duplicate.data(), nullptr,
+         nullptr},
+        {scatter_object, 20000, scatter_overlap.size(), scatter_overlap.data(), nullptr, nullptr},
+        {scatter_object, 60000, scatter_final.size(), scatter_final.data(), nullptr, nullptr},
+    }};
+    const karu_submit_options scatter_options{sizeof(karu_submit_options), 8192, KARU_INHERIT,
+                                              KARU_INHERIT, KARU_INHERIT};
+    batch = nullptr;
+    check(karu_client_submit_with(window_client, scatter_reads.data(), scatter_reads.size(),
+                                  &scatter_options, &batch) == KARU_OK,
+          "submit scattered range shapes");
+    check(drain_success(batch, "scattered range completion") == 4, "all scattered ranges complete");
+    check_bytes(scatter_first, 1000, "first scattered contents");
+    check_bytes(scatter_duplicate, 1000, "duplicate scattered contents");
+    check_bytes(scatter_overlap, 20000, "overlapping scattered contents");
+    check_bytes(scatter_final, 60000, "final scattered contents");
+    karu_batch_free(batch);
+    karu_locator_free(scatter_object);
+
+    karu_locator* ignored_scatter = nullptr;
+    check(karu_resolve((base + "/ignore-range").c_str(), &ignored_scatter) == KARU_OK,
+          "resolve ignored Range scatter fixture");
+    std::array<unsigned char, 24> ignored_first{};
+    std::array<unsigned char, 24> ignored_second{};
+    const std::array<karu_req, 2> ignored_reads{{
+        {ignored_scatter, 100, ignored_first.size(), ignored_first.data(), nullptr, nullptr},
+        {ignored_scatter, 200, ignored_second.size(), ignored_second.data(), nullptr, nullptr},
+    }};
+    batch = nullptr;
+    check(karu_client_submit_with(window_client, ignored_reads.data(), ignored_reads.size(),
+                                  &scatter_options, &batch) == KARU_OK,
+          "submit scattered ignored Range fallback");
+    check(drain_success(batch, "scattered ignored Range completion") == 2,
+          "both ignored Range parts complete");
+    check_bytes(ignored_first, 100, "first ignored Range part");
+    check_bytes(ignored_second, 200, "second ignored Range part");
+    karu_batch_free(batch);
+    karu_locator_free(ignored_scatter);
+
+    karu_locator* retry_scatter = nullptr;
+    check(karu_resolve((base + "/scatter-retry").c_str(), &retry_scatter) == KARU_OK,
+          "resolve scatter retry fixture");
+    std::array<unsigned char, 20> retry_first{};
+    std::array<unsigned char, 20> retry_second{};
+    const std::array<karu_req, 2> retry_reads{{
+        {retry_scatter, 300, retry_first.size(), retry_first.data(), nullptr, nullptr},
+        {retry_scatter, 360, retry_second.size(), retry_second.data(), nullptr, nullptr},
+    }};
+    batch = nullptr;
+    check(karu_client_submit_with(client, retry_reads.data(), retry_reads.size(), &scatter_options,
+                                  &batch) == KARU_OK,
+          "submit scattered retry");
+    check(drain_success(batch, "scattered retry completion") == 2, "both retry parts complete");
+    check_bytes(retry_first, 300, "first retry part");
+    check_bytes(retry_second, 360, "second retry part");
+    karu_batch_free(batch);
+    karu_locator_free(retry_scatter);
+
+    std::array<unsigned char, 16> short_first{};
+    std::array<unsigned char, 16> short_second{};
+    const std::array<karu_req, 2> short_reads{{
+        {object, 4080, short_first.size(), short_first.data(), reinterpret_cast<void*>(1), nullptr},
+        {object, 4090, short_second.size(), short_second.data(), reinterpret_cast<void*>(2),
+         nullptr},
+    }};
+    batch = nullptr;
+    check(karu_client_submit_with(window_client, short_reads.data(), short_reads.size(),
+                                  &scatter_options, &batch) == KARU_OK,
+          "submit scattered short read");
+    bool short_first_ok = false;
+    bool short_second_clipped = false;
+    for (;;) {
+        karu_done done{};
+        const karu_status status = karu_batch_next(batch, &done, -1);
+        if (status == KARU_END)
+            break;
+        check(status == KARU_OK, "receive scattered short completion");
+        if (done.tag == reinterpret_cast<void*>(1)) {
+            short_first_ok = done.status == KARU_OK && done.got == short_first.size();
+        } else if (done.tag == reinterpret_cast<void*>(2)) {
+            short_second_clipped = done.status == KARU_ERR_RANGE && done.got == 6;
+        }
+    }
+    check(short_first_ok, "complete part before object end");
+    check(short_second_clipped, "partial part reports readable prefix");
+    check_bytes(short_first, 4080, "complete short-read part contents");
+    check_bytes(std::span(short_second).first(6), 4090, "partial short-read part contents");
+    karu_batch_free(batch);
+
     // Prove cancellation while one coalesced HTTP transfer is active. The
     // loopback server exposes readiness only after seeing the expected merged
     // range, then deliberately holds that response open for four seconds.
@@ -611,8 +755,8 @@ int main(int argc, char** argv) {
         {cancel_earlier, 64, 32, nullptr, reinterpret_cast<void*>(1), nullptr},
     }};
     batch = nullptr;
-    check(karu_client_submit(window_client, cancel_reads.data(), cancel_reads.size(), &batch) ==
-              KARU_OK,
+    check(karu_client_submit_with(window_client, cancel_reads.data(), cancel_reads.size(),
+                                  &window_options, &batch) == KARU_OK,
           "submit cancellable coalesced batch");
 
     bool active = false;

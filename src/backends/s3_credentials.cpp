@@ -88,6 +88,8 @@ aws_web_identity(const std::string& role, const std::string& token_file, std::st
 
 std::expected<ProviderCredentials, RequestError> load_aws_credentials(const ConfigSnapshot& config,
                                                                       std::string_view path) {
+    // Keep this order in sync with CONFIGURATION.md: explicit values, profile
+    // or web identity, container credentials, then instance metadata.
     ProviderCredentials direct;
     direct.access_key_id = config.option(path, "AWS_ACCESS_KEY_ID");
     direct.secret_access_key = config.option(path, "AWS_SECRET_ACCESS_KEY");

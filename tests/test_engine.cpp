@@ -298,6 +298,29 @@ void test_planner_scope() {
         fetched += transfer->length;
     const std::uint64_t requested = request_count * request_length;
     OK(fetched <= requested * karu::ClientOptions{}.coalesce_amplification);
+
+    // Local batches may share one read only when their ranges touch. Reading
+    // a local gap provides no network round-trip to amortize.
+    karu::Locator file{must_resolve(fixture_path)};
+    const karu::Request local_sparse[] = {
+        {&file, 0, first.size(), first.data(), nullptr, {}},
+        {&file, 64, second.size(), second.data(), nullptr, {}},
+    };
+    options = {};
+    karu::BatchCore local_sparse_batch;
+    auto local_separate = karu::plan_transfers(local_sparse_batch, local_sparse, options, status);
+    EQ(status, KARU_OK);
+    EQ(local_separate.transfers.size(), 2u);
+
+    const karu::Request local_contiguous[] = {
+        {&file, 0, first.size(), first.data(), nullptr, {}},
+        {&file, first.size(), second.size(), second.data(), nullptr, {}},
+    };
+    karu::BatchCore local_contiguous_batch;
+    auto local_together =
+        karu::plan_transfers(local_contiguous_batch, local_contiguous, options, status);
+    EQ(status, KARU_OK);
+    EQ(local_together.transfers.size(), 1u);
 }
 
 void test_transport_statuses() {
@@ -332,6 +355,50 @@ void test_transport_statuses() {
     EQ(karu::transport::detail::retry_after_seconds("Wed, 21 Oct 2015 07:28:00 GMT", 1'445'412'420),
        60);
     EQ(karu::transport::detail::retry_after_seconds("invalid", 0), 0);
+
+    std::array<std::byte, 24> payload{};
+    std::array<std::byte, 6> first_part{};
+    std::array<std::byte, 6> duplicate_part{};
+    std::array<std::byte, 8> overlap_part{};
+    std::array<std::byte, 6> final_part{};
+    for (std::size_t index = 0; index < payload.size(); ++index)
+        payload[index] = static_cast<std::byte>(index);
+
+    karu::Transfer scattered;
+    scattered.locator = std::make_shared<karu::Locator>(must_resolve("https://example.test/body"));
+    scattered.length = payload.size();
+    scattered.scattered = true;
+    scattered.parts.push_back(
+        {.relative_offset = 0, .length = first_part.size(), .buffer = first_part.data()});
+    scattered.parts.push_back(
+        {.relative_offset = 0, .length = duplicate_part.size(), .buffer = duplicate_part.data()});
+    scattered.parts.push_back(
+        {.relative_offset = 4, .length = overlap_part.size(), .buffer = overlap_part.data()});
+    scattered.parts.push_back(
+        {.relative_offset = 18, .length = final_part.size(), .buffer = final_part.data()});
+
+    OK(karu::transport::ensure_sink(scattered));
+    OK(scattered.sink == nullptr);
+    OK(scattered.scratch.empty());
+    karu::transport::store_payload(scattered, payload.data(), 3);
+    karu::transport::store_payload(scattered, payload.data() + 3, 8);
+    karu::transport::store_payload(scattered, payload.data() + 11, 13);
+    EQ(scattered.received, payload.size());
+    OK(scattered.scratch.empty());
+    OK(std::memcmp(first_part.data(), payload.data(), first_part.size()) == 0);
+    OK(std::memcmp(duplicate_part.data(), payload.data(), duplicate_part.size()) == 0);
+    OK(std::memcmp(overlap_part.data(), payload.data() + 4, overlap_part.size()) == 0);
+    OK(std::memcmp(final_part.data(), payload.data() + 18, final_part.size()) == 0);
+
+    for (std::size_t index = 0; index < payload.size(); ++index)
+        payload[index] = static_cast<std::byte>(payload.size() - index);
+    scattered.received = 0;
+    scattered.scatter_cursor = 0;
+    karu::transport::store_payload(scattered, payload.data(), payload.size());
+    OK(std::memcmp(first_part.data(), payload.data(), first_part.size()) == 0);
+    OK(std::memcmp(duplicate_part.data(), payload.data(), duplicate_part.size()) == 0);
+    OK(std::memcmp(overlap_part.data(), payload.data() + 4, overlap_part.size()) == 0);
+    OK(std::memcmp(final_part.data(), payload.data() + 18, final_part.size()) == 0);
 }
 
 void test_cpp_facade() {
@@ -378,7 +445,8 @@ void test_cpp_facade() {
         {&*object, 0, first, reinterpret_cast<void*>(1), {}},
         {&*object, 64, second, reinterpret_cast<void*>(2), {}},
     };
-    auto batch = client->submit(reads);
+    const karu::SubmitOptions submit_options{.coalesce_gap = 0};
+    auto batch = client->submit(reads, submit_options);
     OK(batch.has_value());
     int ready = 0;
     while (batch) {

@@ -202,6 +202,8 @@ std::string encode_path(std::string_view path) {
 
 std::expected<void, ResolveError> apply_window(Resolved& resolved, std::uint64_t offset,
                                                std::uint64_t length) {
+    // Nested subfiles are clipped to the parent window, then expressed as one
+    // offset into the terminal object.
     if (resolved.window_offset > std::numeric_limits<std::uint64_t>::max() - offset)
         return std::unexpected("window offset overflows");
     std::uint64_t composed = length;

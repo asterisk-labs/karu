@@ -301,6 +301,8 @@ std::shared_ptr<CredentialCallback> ConfigSnapshot::provider(karu_credentials_ki
 
 std::string ConfigSnapshot::scope_key(std::string_view path,
                                       std::span<const std::string_view> names) const {
+    // A client owns one immutable snapshot, so the supplying layer and path
+    // prefix are enough to identify a credential scope without copying secrets.
     const std::string canonical_path = canonical_vsi_path(path);
     std::string result;
     for (std::string_view raw_name : names) {

@@ -53,6 +53,7 @@ struct Transfer {
     bool scattered = false;
     std::byte* sink = nullptr;
     std::vector<std::byte> scratch;
+    std::size_t scatter_cursor = 0;
 
     // Rebuilt for every attempt after the byte range is known. This keeps
     // renewable credentials and signatures out of the locator.

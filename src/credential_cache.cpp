@@ -104,6 +104,8 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
         return best;
     };
 
+    // The callback chooses its cache scope, so the first load can only be
+    // keyed by the exact path.
     const std::string flight_key = credential_key(family, path);
     std::shared_ptr<Flight> flight;
     {
@@ -217,6 +219,8 @@ void CredentialCache::invalidate(const ConfigSnapshot& config,
                                  const backends::CloudProvider& provider, std::string_view path,
                                  bool custom) {
     std::unique_lock lock(mutex_);
+    // Mark an in-flight lookup too, otherwise its late result could refill the
+    // entry rejected by the server.
     if (!custom) {
         const std::string key = native_credential_key(config, provider, path);
         entries_.erase(key);

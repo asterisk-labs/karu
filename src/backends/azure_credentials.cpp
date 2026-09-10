@@ -16,6 +16,8 @@ namespace karu::backends {
 
 std::expected<ProviderCredentials, RequestError>
 load_azure_credentials(const ConfigSnapshot& config, std::string_view path) {
+    // Prefer storage credentials, then service-principal or workload identity,
+    // App Service, and finally managed identity from IMDS.
     ProviderCredentials direct;
     direct.account_name = config.option(path, "AZURE_STORAGE_ACCOUNT");
     direct.secret_access_key = config.option(path, "AZURE_STORAGE_ACCESS_KEY");

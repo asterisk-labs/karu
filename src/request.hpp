@@ -20,6 +20,8 @@ enum class HttpVersion {
 
 struct HttpRequestOptions {
     HttpVersion version = HttpVersion::Http1_1;
+    // Cloud backends disable redirects when credentials are bound to the
+    // original request or URL.
     bool follow_redirects = true;
     std::string ca_bundle;
     std::string ca_path;

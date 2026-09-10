@@ -145,6 +145,8 @@ run_command(std::string_view command, std::size_t output_limit, std::chrono::mil
     Handle process(process_info.hProcess);
     Handle thread(process_info.hThread);
 
+    // Best effort: a job lets timeout cleanup include helpers spawned by the
+    // command. The fallback still terminates the direct child.
     Handle job(CreateJobObjectW(nullptr, nullptr));
     bool assigned_to_job = false;
     if (job.get() != nullptr) {

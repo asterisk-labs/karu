@@ -1,9 +1,8 @@
-#include <karu/karu.hpp>
-
 #include <array>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <karu/karu.hpp>
 
 int main() {
     auto config = karu::Config::empty();
@@ -33,8 +32,12 @@ int main() {
     std::filesystem::remove(path, ignored);
     if (!bytes || bytes->size() != 3)
         return 5;
+    const karu::SubmitOptions options{.coalesce_gap = 0};
+    const std::span<const karu::Read> no_reads;
+    if (!client->fetch(no_reads, options))
+        return 6;
     return (*bytes)[0] == std::byte{30} && (*bytes)[1] == std::byte{40} &&
                    (*bytes)[2] == std::byte{50}
                ? 0
-               : 6;
+               : 7;
 }

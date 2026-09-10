@@ -242,6 +242,8 @@ gcs_external_account(std::string_view json, const ConfigSnapshot& config, std::s
 
 std::expected<ProviderCredentials, RequestError> load_gcs_credentials(const ConfigSnapshot& config,
                                                                       std::string_view path) {
+    // Explicit tokens and keys win, followed by ADC, service-account values,
+    // and finally the metadata service.
     ProviderCredentials direct;
     direct.bearer_token = config.option(path, "GCS_ACCESS_TOKEN");
     direct.access_key_id = config.option(path, "GCS_HMAC_ACCESS_KEY_ID");

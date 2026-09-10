@@ -10,6 +10,7 @@
 #include "uri.hpp"
 
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -66,6 +67,126 @@ std::vector<karu::Request> convert_requests(const karu_req* requests, std::size_
                                           request.if_match == nullptr ? "" : request.if_match});
     }
     return converted;
+}
+
+bool submit_options(const karu::ClientOptions& defaults, const karu_submit_options* overrides,
+                    std::string_view call, karu::ClientOptions& result) {
+    result = defaults;
+    if (overrides == nullptr)
+        return true;
+
+    constexpr std::size_t minimum_size =
+        offsetof(karu_submit_options, coalesce_gap) + sizeof(std::uint64_t);
+    if (overrides->struct_size < minimum_size) {
+        karu::set_error(karu::concat(call, ": submit options structure is too small"));
+        return false;
+    }
+
+    const auto available = [&](std::size_t offset, std::size_t size) {
+        return overrides->struct_size >= offset + size;
+    };
+    const auto inherited = [](std::uint64_t value) { return value == KARU_INHERIT; };
+
+    if (!inherited(overrides->coalesce_gap))
+        result.coalesce_gap = overrides->coalesce_gap;
+
+    if (available(offsetof(karu_submit_options, coalesce_limit),
+                  sizeof(overrides->coalesce_limit)) &&
+        !inherited(overrides->coalesce_limit)) {
+        if (overrides->coalesce_limit == 0) {
+            karu::set_error(karu::concat(call, ": coalesce_limit must be at least 1"));
+            return false;
+        }
+        result.coalesce_limit = overrides->coalesce_limit;
+    }
+
+    if (available(offsetof(karu_submit_options, coalesce_parts),
+                  sizeof(overrides->coalesce_parts)) &&
+        !inherited(overrides->coalesce_parts)) {
+        if (overrides->coalesce_parts == 0 ||
+            overrides->coalesce_parts > std::numeric_limits<std::size_t>::max()) {
+            karu::set_error(karu::concat(call, ": coalesce_parts is outside the supported range"));
+            return false;
+        }
+        result.coalesce_parts = static_cast<std::size_t>(overrides->coalesce_parts);
+    }
+
+    if (available(offsetof(karu_submit_options, coalesce_amplification),
+                  sizeof(overrides->coalesce_amplification)) &&
+        !inherited(overrides->coalesce_amplification)) {
+        if (overrides->coalesce_amplification == 0) {
+            karu::set_error(karu::concat(call, ": coalesce_amplification must be at least 1"));
+            return false;
+        }
+        result.coalesce_amplification = overrides->coalesce_amplification;
+    }
+    return true;
+}
+
+karu_status client_submit(karu_client* client, const karu_req* requests, std::size_t count,
+                          const karu_submit_options* options, karu_batch** out_batch,
+                          std::string_view call) {
+    if (client == nullptr || out_batch == nullptr || (count > 0 && requests == nullptr)) {
+        karu::set_error(karu::concat(call, ": null argument"));
+        return KARU_ERR_INVALID;
+    }
+    *out_batch = nullptr;
+
+    const auto converted = convert_requests(requests, count, call);
+    if (converted.size() != count)
+        return KARU_ERR_INVALID;
+    karu::ClientOptions plan_options;
+    if (!submit_options(client->config.client_options(), options, call, plan_options))
+        return KARU_ERR_INVALID;
+
+    auto engine = client->acquire_engine();
+    karu_status status = KARU_OK;
+    auto batch = engine->submit(converted, plan_options, status);
+    if (status != KARU_OK)
+        return status;
+    batch->owner = std::move(engine);
+    *out_batch = batch.release();
+    return KARU_OK;
+}
+
+karu_status client_fetch(karu_client* client, const karu_req* requests, std::size_t count,
+                         const karu_submit_options* options, std::string_view call) {
+    if (client == nullptr || (count > 0 && requests == nullptr)) {
+        karu::set_error(karu::concat(call, ": null argument"));
+        return KARU_ERR_INVALID;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        if (requests[index].buffer == nullptr) {
+            karu::set_error(karu::concat(call, ": request ", index, " has no destination buffer"));
+            return KARU_ERR_INVALID;
+        }
+    }
+
+    karu_batch* submitted = nullptr;
+    const karu_status status = client_submit(client, requests, count, options, &submitted, call);
+    if (status != KARU_OK)
+        return status;
+    const std::unique_ptr<karu_batch, decltype(&karu_batch_free)> batch(submitted, karu_batch_free);
+
+    karu_status first_failure = KARU_OK;
+    std::string first_detail;
+    for (;;) {
+        karu::Completion completion;
+        const karu_status step = batch->next(completion, -1);
+        if (step == KARU_END)
+            break;
+        if (step != KARU_OK) {
+            first_failure = step;
+            break;
+        }
+        if (first_failure == KARU_OK && completion.status != KARU_OK) {
+            first_failure = completion.status;
+            first_detail = completion.detail;
+        }
+    }
+    if (!first_detail.empty())
+        karu::set_error(first_detail);
+    return first_failure;
 }
 
 } // namespace
@@ -343,25 +464,21 @@ karu_status karu_client_size(karu_client* client, const karu_locator* locator, u
 karu_status karu_client_submit(karu_client* client, const karu_req* requests, size_t count,
                                karu_batch** out_batch) {
     karu::clear_error();
-    if (client == nullptr || out_batch == nullptr || (count > 0 && requests == nullptr)) {
-        karu::set_error("karu_client_submit: null argument");
-        return KARU_ERR_INVALID;
-    }
-    *out_batch = nullptr;
     try {
-        const auto converted = convert_requests(requests, count, "karu_client_submit");
-        if (converted.size() != count)
-            return KARU_ERR_INVALID;
-        auto engine = client->acquire_engine();
-        karu_status status = KARU_OK;
-        auto batch = engine->submit(converted, status);
-        if (status != KARU_OK)
-            return status;
-        batch->owner = std::move(engine);
-        *out_batch = batch.release();
-        return KARU_OK;
+        return client_submit(client, requests, count, nullptr, out_batch, "karu_client_submit");
     } catch (...) {
         return exception_status("karu_client_submit");
+    }
+}
+
+karu_status karu_client_submit_with(karu_client* client, const karu_req* requests, size_t count,
+                                    const karu_submit_options* options, karu_batch** out_batch) {
+    karu::clear_error();
+    try {
+        return client_submit(client, requests, count, options, out_batch,
+                             "karu_client_submit_with");
+    } catch (...) {
+        return exception_status("karu_client_submit_with");
     }
 }
 
@@ -399,49 +516,20 @@ void karu_batch_free(karu_batch* batch) {
 
 karu_status karu_client_fetch(karu_client* client, const karu_req* requests, size_t count) {
     karu::clear_error();
-    if (client == nullptr || (count > 0 && requests == nullptr)) {
-        karu::set_error("karu_client_fetch: null argument");
-        return KARU_ERR_INVALID;
-    }
     try {
-        for (std::size_t index = 0; index < count; ++index) {
-            if (requests[index].buffer == nullptr) {
-                karu::set_error(karu::concat("karu_client_fetch: request ", index,
-                                             " has no destination buffer"));
-                return KARU_ERR_INVALID;
-            }
-        }
-        const auto converted = convert_requests(requests, count, "karu_client_fetch");
-        if (converted.size() != count)
-            return KARU_ERR_INVALID;
-        auto engine = client->acquire_engine();
-        karu_status status = KARU_OK;
-        auto batch = engine->submit(converted, status);
-        if (status != KARU_OK)
-            return status;
-
-        karu_status first_failure = KARU_OK;
-        std::string first_detail;
-        for (;;) {
-            karu::Completion completion;
-            const karu_status step = batch->next(completion, -1);
-            if (step == KARU_END)
-                break;
-            if (step != KARU_OK) {
-                first_failure = step;
-                break;
-            }
-            if (first_failure == KARU_OK && completion.status != KARU_OK) {
-                first_failure = completion.status;
-                first_detail = completion.detail;
-            }
-        }
-        engine->cancel(*batch);
-        if (!first_detail.empty())
-            karu::set_error(first_detail);
-        return first_failure;
+        return client_fetch(client, requests, count, nullptr, "karu_client_fetch");
     } catch (...) {
         return exception_status("karu_client_fetch");
+    }
+}
+
+karu_status karu_client_fetch_with(karu_client* client, const karu_req* requests, size_t count,
+                                   const karu_submit_options* options) {
+    karu::clear_error();
+    try {
+        return client_fetch(client, requests, count, options, "karu_client_fetch_with");
+    } catch (...) {
+        return exception_status("karu_client_fetch_with");
     }
 }
 
