@@ -3,6 +3,8 @@
 #include "backends/contract.hpp"
 #include "backends/credentials.hpp"
 
+#include <ctime>
+
 namespace karu {
 namespace {
 
@@ -86,9 +88,13 @@ RequestBuilder::materialize(const Locator& locator, const ResolvedCredentials& c
     if (provider == nullptr)
         return std::unexpected(RequestError{KARU_ERR_UNSUPPORTED, "unsupported request backend"});
 
-    backends::RequestContext request{
-        config_, object,      credentials.value ? &*credentials.value : nullptr,
-        range,   region_hint, if_match};
+    backends::RequestContext request{config_,
+                                     object,
+                                     credentials.value ? &*credentials.value : nullptr,
+                                     range,
+                                     region_hint,
+                                     if_match,
+                                     std::time(nullptr)};
     auto prepared = provider->prepare_request(request);
     if (!prepared)
         return std::unexpected(prepared.error());

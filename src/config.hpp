@@ -122,6 +122,7 @@ class ConfigSnapshot {
 
 [[nodiscard]] std::string canonical_option_name(std::string_view name);
 [[nodiscard]] std::string canonical_vsi_path(std::string_view path);
+[[nodiscard]] bool path_prefix_matches(std::string_view path, std::string_view prefix) noexcept;
 [[nodiscard]] bool option_is_true(std::string_view value) noexcept;
 
 } // namespace karu

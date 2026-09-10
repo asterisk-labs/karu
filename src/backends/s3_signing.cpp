@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <ctime>
 #include <openssl/sha.h>
 #include <ranges>
 #include <span>
@@ -58,10 +57,9 @@ bool valid_aws_region(std::string_view region) noexcept {
     });
 }
 
-std::expected<PreparedRequest, RequestError> prepare_s3_get(const S3GetRequest& target,
-                                                            const ProviderCredentials* credentials,
-                                                            std::string_view range,
-                                                            std::string_view if_match) {
+std::expected<PreparedRequest, RequestError>
+prepare_s3_get(const S3GetRequest& target, const ProviderCredentials* credentials,
+               std::string_view range, std::string_view if_match, std::time_t signing_time) {
     auto endpoint = split_url(target.endpoint);
     if (!endpoint)
         return std::unexpected(endpoint.error());
@@ -82,8 +80,7 @@ std::expected<PreparedRequest, RequestError> prepare_s3_get(const S3GetRequest& 
     auto url_parts = split_url(url);
     if (!url_parts)
         return std::unexpected(url_parts.error());
-    const std::time_t now = std::time(nullptr);
-    const std::string timestamp = date_utc(now, "%Y%m%dT%H%M%SZ");
+    const std::string timestamp = date_utc(signing_time, "%Y%m%dT%H%M%SZ");
     const std::string date = timestamp.substr(0, 8);
     const std::string payload = "UNSIGNED-PAYLOAD";
 

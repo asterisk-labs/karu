@@ -132,7 +132,8 @@ std::expected<ProviderCredentials, RequestError> load_aws_credentials(const Conf
                          "AWS chained AssumeRole profiles require a custom credential provider; "
                          "credential_process and web identity profiles are supported natively"});
     }
-    auto profile_credentials = credentials_from_aws_profile(*loaded_profile, "AWS");
+    auto profile_credentials = credentials_from_aws_profile(
+        *loaded_profile, "AWS", config.client_options().request_timeout_seconds);
     if (!profile_credentials)
         return std::unexpected(profile_credentials.error());
     if (!profile_credentials->access_key_id.empty())

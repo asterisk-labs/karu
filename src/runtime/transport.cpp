@@ -75,14 +75,6 @@ std::string_view header_value(std::string_view line, std::string_view name) noex
     return value;
 }
 
-std::time_t parse_http_date(std::string_view value) noexcept {
-    std::array<char, 128> copy{};
-    if (value.size() >= copy.size())
-        return static_cast<std::time_t>(-1);
-    std::memcpy(copy.data(), value.data(), value.size());
-    return curl_getdate(copy.data(), nullptr);
-}
-
 bool parse_u64(std::string_view text, std::uint64_t& value) noexcept {
     const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
     return result.ec == std::errc{} && result.ptr == text.data() + text.size();
@@ -137,6 +129,28 @@ void capture_error_body(std::array<char, Capacity>& destination, std::size_t& us
         std::memcpy(destination.data() + used, data, take);
         used += take;
     }
+}
+
+void reset_response(Transfer& transfer) noexcept {
+    transfer.received = 0;
+    transfer.skip = 0;
+    transfer.body_length = -1;
+    transfer.consume = 0;
+    transfer.satisfied = false;
+    transfer.checked_status = false;
+    transfer.http_status = 0;
+    transfer.content_range_seen = false;
+    transfer.content_range_valid = false;
+    transfer.content_range_matches = false;
+    transfer.content_range_start = 0;
+    transfer.content_range_end = 0;
+    transfer.content_range_total = 0;
+    transfer.content_range_has_total = false;
+    transfer.range_fallback_rejected = false;
+    transfer.response_region.clear();
+    transfer.retry_after = 0;
+    transfer.error_body_size = 0;
+    transfer.error_body_received = 0;
 }
 
 std::size_t write_callback(char* data, std::size_t size, std::size_t count,
@@ -228,22 +242,7 @@ std::size_t header_callback(char* data, std::size_t size, std::size_t count,
     const std::string_view line(data, *bytes);
 
     if (line.starts_with("HTTP/")) {
-        transfer.received = 0;
-        transfer.skip = 0;
-        transfer.body_length = -1;
-        transfer.consume = 0;
-        transfer.satisfied = false;
-        transfer.checked_status = false;
-        transfer.http_status = 0;
-        transfer.content_range_seen = false;
-        transfer.content_range_valid = false;
-        transfer.content_range_matches = false;
-        transfer.content_range_has_total = false;
-        transfer.range_fallback_rejected = false;
-        transfer.response_region.clear();
-        transfer.retry_after = 0;
-        transfer.error_body_size = 0;
-        transfer.error_body_received = 0;
+        reset_response(transfer);
     } else if (header_name_is(line, "content-range:")) {
         transfer.content_range_seen = true;
         transfer.content_range_valid =
@@ -255,19 +254,8 @@ std::size_t header_callback(char* data, std::size_t size, std::size_t count,
     } else if (header_name_is(line, "x-amz-bucket-region:")) {
         transfer.response_region = std::string(header_value(line, "x-amz-bucket-region:"));
     } else if (header_name_is(line, "retry-after:")) {
-        const std::string_view value = header_value(line, "retry-after:");
-        int seconds = 0;
-        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), seconds);
-        if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size()) {
-            transfer.retry_after = seconds;
-        } else {
-            const std::time_t when = parse_http_date(value);
-            const std::time_t now = std::time(nullptr);
-            if (when != static_cast<std::time_t>(-1) && when > now &&
-                when - now <= std::numeric_limits<int>::max()) {
-                transfer.retry_after = static_cast<int>(when - now);
-            }
-        }
+        transfer.retry_after =
+            detail::retry_after_seconds(header_value(line, "retry-after:"), std::time(nullptr));
     }
     return *bytes;
 }
@@ -376,6 +364,20 @@ struct SizeState {
     std::uint64_t error_body_received = 0;
 };
 
+void reset_response(SizeState& state) noexcept {
+    state.total = 0;
+    state.body_received = 0;
+    state.have_total = false;
+    state.cut_short = false;
+    state.body_exceeded_range = false;
+    state.content_range_valid = false;
+    state.unsatisfied_content_range_valid = false;
+    state.retry_after = 0;
+    state.response_region.clear();
+    state.error_body_size = 0;
+    state.error_body_received = 0;
+}
+
 std::size_t size_body_callback(char* data, std::size_t size, std::size_t count,
                                void* userdata) noexcept {
     const auto bytes = callback_size(size, count);
@@ -414,17 +416,7 @@ std::size_t size_header_callback(char* data, std::size_t size, std::size_t count
     const std::string_view line(data, *bytes);
 
     if (line.starts_with("HTTP/")) {
-        state.total = 0;
-        state.body_received = 0;
-        state.have_total = false;
-        state.cut_short = false;
-        state.body_exceeded_range = false;
-        state.content_range_valid = false;
-        state.unsatisfied_content_range_valid = false;
-        state.retry_after = 0;
-        state.response_region.clear();
-        state.error_body_size = 0;
-        state.error_body_received = 0;
+        reset_response(state);
     } else if (header_name_is(line, "content-range:")) {
         const std::string_view value = header_value(line, "content-range:");
         std::uint64_t first = 0;
@@ -449,12 +441,8 @@ std::size_t size_header_callback(char* data, std::size_t size, std::size_t count
     } else if (header_name_is(line, "x-amz-bucket-region:")) {
         state.response_region = std::string(header_value(line, "x-amz-bucket-region:"));
     } else if (header_name_is(line, "retry-after:")) {
-        const auto value = header_value(line, "retry-after:");
-        int seconds = 0;
-        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), seconds);
-        if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size()) {
-            state.retry_after = seconds;
-        }
+        state.retry_after =
+            detail::retry_after_seconds(header_value(line, "retry-after:"), std::time(nullptr));
     }
     return *bytes;
 }
@@ -483,26 +471,8 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
                                            const ClientOptions& options) {
     if (!transfer.http || !transfer.http_buffers)
         return std::unexpected("HTTP transfer state is not initialized");
-    transfer.received = 0;
-    transfer.skip = 0;
-    transfer.body_length = -1;
-    transfer.consume = 0;
-    transfer.satisfied = false;
-    transfer.checked_status = false;
-    transfer.http_status = 0;
-    transfer.content_range_seen = false;
-    transfer.content_range_valid = false;
-    transfer.content_range_matches = false;
-    transfer.content_range_start = 0;
-    transfer.content_range_end = 0;
-    transfer.content_range_total = 0;
-    transfer.content_range_has_total = false;
+    reset_response(transfer);
     transfer.range_fallback_limit = options.range_fallback_limit;
-    transfer.range_fallback_rejected = false;
-    transfer.response_region.clear();
-    transfer.retry_after = 0;
-    transfer.error_body_size = 0;
-    transfer.error_body_received = 0;
     transfer.http_buffers->error[0] = '\0';
 
     auto headers = build_headers(transfer.request_headers, transfer.request_range);
@@ -671,11 +641,7 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
             http_status == 400 && error_body.find("RequestTimeout") != std::string_view::npos;
         if (attempt < options.max_attempts &&
             (detail::transient(code, http_status) || request_timeout)) {
-            const int base = 100 << std::min(attempt, 6);
-            std::uniform_int_distribution<int> jitter(0, base);
-            const int delay = state.retry_after > 0 ? std::min(state.retry_after, 60) * 1000
-                                                    : base + jitter(random);
-            const auto wait = std::chrono::milliseconds(delay);
+            const auto wait = detail::retry_delay(attempt, state.retry_after, random);
             if (!deadline.can_wait_for(wait))
                 return std::unexpected(timeout_failure(
                     request->url, "request timeout leaves no time for another attempt"));

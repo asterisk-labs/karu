@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import email.utils
 import http.server
 import subprocess
 import sys
@@ -24,6 +25,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     region_retries = 0
     late_region_retries = 0
     same_region_requests = 0
+    retry_date_requests = 0
     cancel_started = threading.Event()
     cancel_range_ok = False
 
@@ -46,11 +48,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self.reply(206, DATA[:1], Content_Range=f"bytes 0-0/{len(DATA)}")
             return
-        if path == "/missing":
+        if path.endswith("/missing"):
             self.reply(404, b"missing")
             return
         if path == "/unauthorized":
             self.reply(401, b"unauthorized")
+            return
+        if path == "/user-agent" and not self.headers.get("User-Agent", "").startswith("karu/"):
+            self.reply(400, b"missing karu user agent")
             return
         if path == "/retry" and Handler.retries == 0:
             Handler.retries += 1
@@ -58,6 +63,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if path == "/retry-after-deadline":
             self.reply(503, b"try later", Retry_After="60")
+            return
+        if path == "/retry-date-deadline" and Handler.retry_date_requests == 0:
+            Handler.retry_date_requests += 1
+            retry_at = email.utils.formatdate(time.time() + 60, usegmt=True)
+            self.reply(503, b"try later", Retry_After=retry_at)
             return
         if path == "/large-error-retry":
             if Handler.large_error_retries == 0:
@@ -114,10 +124,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply(403, b"forbidden", X_Amz_Bucket_Region="us-east-1")
             return
         if path == "/bucket/credential-refresh":
+            authorization = self.headers.get("Authorization", "")
+            if authorization.startswith("Bearer "):
+                current = authorization.removeprefix("Bearer ")
+            else:
+                current = self.headers.get("x-amz-security-token")
+            if current != "fresh":
+                if authorization.startswith("AWS4-HMAC-SHA256 "):
+                    self.reply(403, b"<Error><Code>ExpiredToken</Code></Error>")
+                else:
+                    self.reply(401, b"expired")
+                return
+        if path == "/container/credential-refresh":
             if self.headers.get("Authorization") != "Bearer fresh":
                 self.reply(401, b"expired")
                 return
-        if path == "/precondition" and self.headers.get("If-Match") != '"v1"':
+        if path == "/account/product/credential-refresh":
+            if self.headers.get("x-amz-security-token") != "fresh":
+                self.reply(401, b"expired")
+                return
+        if path.endswith("/precondition") and self.headers.get("If-Match") != '"v1"':
             self.reply(412, b"changed")
             return
         if path == "/ignore-range":

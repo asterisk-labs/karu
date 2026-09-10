@@ -3,11 +3,16 @@
 #include "../text.hpp"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cstring>
+#include <limits>
 
 namespace karu::transport {
 namespace detail {
 
 constexpr std::size_t kErrorSummaryLimit = 200;
+constexpr int kMaximumRetryAfterSeconds = 60;
 
 std::string summarize(std::string_view body) {
     std::string result;
@@ -86,6 +91,37 @@ bool credentials_expired(const Transfer& transfer) noexcept {
     return credentials_expired(
         transfer.locator->resolved.backend, transfer.http_status,
         std::string_view(transfer.http_buffers->error_body.data(), transfer.error_body_size));
+}
+
+int retry_after_seconds(std::string_view value, std::time_t now) noexcept {
+    std::int64_t seconds = 0;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), seconds);
+    if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size()) {
+        if (seconds <= 0)
+            return 0;
+        return static_cast<int>(std::min<std::int64_t>(seconds, std::numeric_limits<int>::max()));
+    }
+
+    std::array<char, 128> copy{};
+    if (value.size() >= copy.size())
+        return 0;
+    std::memcpy(copy.data(), value.data(), value.size());
+    const std::time_t when = curl_getdate(copy.data(), nullptr);
+    if (when == static_cast<std::time_t>(-1) || when <= now)
+        return 0;
+    const auto delay = static_cast<std::int64_t>(when - now);
+    return static_cast<int>(std::min<std::int64_t>(delay, std::numeric_limits<int>::max()));
+}
+
+std::chrono::milliseconds retry_delay(int attempt, int retry_after, std::mt19937& random) {
+    const int requested = std::clamp(retry_after, 0, kMaximumRetryAfterSeconds);
+    if (requested > 0) {
+        std::uniform_int_distribution<int> jitter(0, 1000);
+        return std::chrono::seconds(requested) + std::chrono::milliseconds(jitter(random));
+    }
+    const int base = 100 << std::clamp(attempt, 0, 6);
+    std::uniform_int_distribution<int> jitter(0, base);
+    return std::chrono::milliseconds(base + jitter(random));
 }
 
 } // namespace detail

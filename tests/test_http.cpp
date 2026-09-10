@@ -52,6 +52,8 @@ void check_bytes(std::span<const unsigned char> bytes, std::size_t offset, const
 }
 
 struct RefreshState {
+    karu_credentials_kind kind;
+    const char* cache_prefix;
     int calls = 0;
 };
 
@@ -64,11 +66,18 @@ karu_status refresh_credentials(void* data, karu_credentials_kind kind, const ch
                                 karu_credentials* out) {
     auto& state = *static_cast<RefreshState*>(data);
     ++state.calls;
-    if (kind != KARU_CREDENTIALS_GCS)
+    if (kind != state.kind)
         return KARU_ERR_CREDENTIALS;
     *out = karu_credentials{};
-    out->bearer_token = state.calls == 1 ? "stale" : "fresh";
-    out->cache_prefix = "/vsigs/bucket/";
+    const char* token = state.calls == 1 ? "stale" : "fresh";
+    if (kind == KARU_CREDENTIALS_GCS || kind == KARU_CREDENTIALS_AZURE) {
+        out->bearer_token = token;
+    } else {
+        out->access_key_id = "access";
+        out->secret_access_key = "secret";
+        out->session_token = token;
+    }
+    out->cache_prefix = state.cache_prefix;
     out->expires_at = static_cast<std::int64_t>(std::time(nullptr)) + 3600;
     return KARU_OK;
 }
@@ -108,6 +117,10 @@ int main(int argc, char** argv) {
     std::array<unsigned char, 333> range{};
     check(fetch(client, base + "/object", 127, range) == KARU_OK, "206 range read");
     check_bytes(range, 127, "206 range contents");
+
+    std::array<unsigned char, 1> user_agent_byte{};
+    check(fetch(client, base + "/user-agent", 0, user_agent_byte) == KARU_OK,
+          "default User-Agent reaches the server");
 
     karu_locator* object = nullptr;
     check(karu_resolve((base + "/object").c_str(), &object) == KARU_OK, "resolve object");
@@ -246,6 +259,13 @@ int main(int argc, char** argv) {
     check(elapsed < std::chrono::seconds(2), "size retry deadline fails promptly");
     karu_locator_free(retrying_size);
 
+    karu_locator* dated_retry = nullptr;
+    check(karu_resolve((base + "/retry-date-deadline").c_str(), &dated_retry) == KARU_OK,
+          "resolve dated retry endpoint");
+    check(karu_client_size(timeout_client, dated_retry, &size) == KARU_TIMEOUT,
+          "size honors an HTTP-date Retry-After");
+    karu_locator_free(dated_retry);
+
     started = std::chrono::steady_clock::now();
     check(fetch(timeout_client, base + "/slow", 0, small) == KARU_TIMEOUT,
           "active read respects request timeout");
@@ -269,6 +289,58 @@ int main(int argc, char** argv) {
     check(fetch(client, base + "/precondition", 0, small, "\"wrong\"") == KARU_ERR_PRECONDITION,
           "412 mapping");
     check(fetch(client, base + "/precondition", 0, small, "\"v1\"") == KARU_OK, "matching ETag");
+
+    struct BackendCase {
+        const char* root;
+        const char* endpoint;
+        const char* no_sign;
+    };
+    const std::array backend_cases{
+        BackendCase{"s3://bucket", "AWS_S3_ENDPOINT", "AWS_NO_SIGN_REQUEST"},
+        BackendCase{"gs://bucket", "GCS_ENDPOINT", "GCS_NO_SIGN_REQUEST"},
+        BackendCase{"az://container", "AZURE_STORAGE_ENDPOINT", "AZURE_NO_SIGN_REQUEST"},
+        BackendCase{"hf://datasets/org/repo", "HF_ENDPOINT", nullptr},
+        BackendCase{"source://account/product", "SOURCE_ENDPOINT", nullptr},
+    };
+    for (const BackendCase& backend : backend_cases) {
+        karu_config* backend_config = nullptr;
+        karu_client* backend_client = nullptr;
+        check(karu_config_create_empty(&backend_config) == KARU_OK, "create backend config");
+        check(karu_config_set_option(backend_config, backend.endpoint, base.c_str()) == KARU_OK,
+              "set backend endpoint");
+        if (backend.no_sign != nullptr) {
+            check(karu_config_set_option(backend_config, backend.no_sign, "YES") == KARU_OK,
+                  "set anonymous backend");
+        }
+        check(karu_client_create(backend_config, &backend_client) == KARU_OK,
+              "create backend client");
+        karu_config_free(backend_config);
+
+        const std::string root = backend.root;
+        std::array<unsigned char, 37> backend_bytes{};
+        check(fetch(backend_client, root + "/object", 111, backend_bytes) == KARU_OK,
+              "backend range read");
+        check_bytes(backend_bytes, 111, "backend range contents");
+
+        karu_locator* backend_object = nullptr;
+        check(karu_resolve((root + "/object").c_str(), &backend_object) == KARU_OK,
+              "resolve backend object");
+        std::uint64_t backend_size = 0;
+        check(karu_client_size(backend_client, backend_object, &backend_size) == KARU_OK &&
+                  backend_size == 4096,
+              "backend size probe");
+        karu_locator_free(backend_object);
+
+        check(fetch(backend_client, root + "/missing", 0, backend_bytes) == KARU_ERR_NOT_FOUND,
+              "backend 404 mapping");
+        check(fetch(backend_client, root + "/precondition", 0, backend_bytes, "\"wrong\"") ==
+                  KARU_ERR_PRECONDITION,
+              "backend precondition failure");
+        check(fetch(backend_client, root + "/precondition", 0, backend_bytes, "\"v1\"") == KARU_OK,
+              "backend matching precondition");
+        karu_client_free(backend_client);
+    }
+
     const karu_status bad_start = fetch(client, base + "/bad-range", 10, small);
     const std::string bad_start_detail = karu_last_error();
     check(bad_start == KARU_ERR_HTTP, "invalid Content-Range");
@@ -319,22 +391,40 @@ int main(int argc, char** argv) {
     karu_client_free(signed_client);
     karu_config_free(signed_config);
 
-    karu_config* refresh_config = nullptr;
-    karu_client* refresh_client = nullptr;
-    RefreshState refresh_state;
-    check(karu_config_create_empty(&refresh_config) == KARU_OK, "create refresh config");
-    check(karu_config_set_option(refresh_config, "GCS_ENDPOINT", base.c_str()) == KARU_OK,
-          "set refresh endpoint");
-    check(karu_config_set_credentials_provider(refresh_config, KARU_CREDENTIALS_GCS,
-                                               refresh_credentials, &refresh_state,
-                                               nullptr) == KARU_OK,
-          "set refresh provider");
-    check(karu_client_create(refresh_config, &refresh_client) == KARU_OK, "create refresh client");
-    check(fetch(refresh_client, "gs://bucket/credential-refresh", 0, small) == KARU_OK,
-          "expired credentials refreshed once");
-    check(refresh_state.calls == 2, "credential provider called twice");
-    karu_client_free(refresh_client);
-    karu_config_free(refresh_config);
+    struct RefreshCase {
+        const char* root;
+        const char* endpoint;
+        karu_credentials_kind kind;
+        const char* cache_prefix;
+    };
+    const std::array refresh_cases{
+        RefreshCase{"s3://bucket", "AWS_S3_ENDPOINT", KARU_CREDENTIALS_AWS, "/vsis3/bucket/"},
+        RefreshCase{"gs://bucket", "GCS_ENDPOINT", KARU_CREDENTIALS_GCS, "/vsigs/bucket/"},
+        RefreshCase{"az://container", "AZURE_STORAGE_ENDPOINT", KARU_CREDENTIALS_AZURE,
+                    "/vsiaz/container/"},
+        RefreshCase{"source://account/product", "SOURCE_ENDPOINT", KARU_CREDENTIALS_SOURCE,
+                    "/vsisource/account/product/"},
+    };
+    for (const RefreshCase& backend : refresh_cases) {
+        karu_config* refresh_config = nullptr;
+        karu_client* refresh_client = nullptr;
+        RefreshState refresh_state{backend.kind, backend.cache_prefix};
+        check(karu_config_create_empty(&refresh_config) == KARU_OK, "create refresh config");
+        check(karu_config_set_option(refresh_config, backend.endpoint, base.c_str()) == KARU_OK,
+              "set refresh endpoint");
+        check(karu_config_set_credentials_provider(refresh_config, backend.kind,
+                                                   refresh_credentials, &refresh_state,
+                                                   nullptr) == KARU_OK,
+              "set refresh provider");
+        check(karu_client_create(refresh_config, &refresh_client) == KARU_OK,
+              "create refresh client");
+        check(fetch(refresh_client, std::string(backend.root) + "/credential-refresh", 0, small) ==
+                  KARU_OK,
+              "expired credentials refreshed once");
+        check(refresh_state.calls == 2, "credential provider called twice");
+        karu_client_free(refresh_client);
+        karu_config_free(refresh_config);
+    }
 
     karu_config* slow_credentials_config = nullptr;
     karu_client* slow_credentials_client = nullptr;

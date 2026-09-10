@@ -27,10 +27,9 @@ constexpr std::array<std::string_view, 14> CREDENTIAL_OPTIONS{"GCS_HMAC_ACCESS_K
                                                               "GCS_METADATA_DISABLED",
                                                               "GCS_METADATA_ENDPOINT"};
 
-std::expected<PreparedRequest, RequestError> prepare_gcs(const ConfigSnapshot& config,
-                                                         const Resolved& object,
-                                                         const ProviderCredentials* custom,
-                                                         std::string_view if_match) {
+std::expected<PreparedRequest, RequestError>
+prepare_gcs(const ConfigSnapshot& config, const Resolved& object, const ProviderCredentials* custom,
+            std::string_view if_match, std::time_t signing_time) {
     const std::string& path = object.canonical_uri;
     std::string endpoint = config.option(path, "GCS_ENDPOINT", "https://storage.googleapis.com");
     auto normalized_endpoint = http_endpoint(std::move(endpoint), "GCS_ENDPOINT");
@@ -68,7 +67,7 @@ std::expected<PreparedRequest, RequestError> prepare_gcs(const ConfigSnapshot& c
         return request;
     }
     if (!credentials.access_key_id.empty() && !credentials.secret_access_key.empty()) {
-        const std::string date = rfc7231_date(std::time(nullptr));
+        const std::string date = rfc7231_date(signing_time);
         const std::string canonical_headers =
             user_project.empty() ? "" : "x-goog-user-project:" + user_project + "\n";
         const std::string canonical = "GET\n\n\n" + date + "\n" + canonical_headers + "/" +
@@ -103,9 +102,9 @@ const CloudProvider& gcs_provider() noexcept {
                                         CREDENTIAL_OPTIONS,
                                         load_gcs_credentials,
                                         [](const RequestContext& request) {
-                                            return prepare_gcs(request.config, request.object,
-                                                               request.credentials,
-                                                               request.if_match);
+                                            return prepare_gcs(
+                                                request.config, request.object, request.credentials,
+                                                request.if_match, request.signing_time);
                                         }};
     return provider;
 }

@@ -73,11 +73,10 @@ std::expected<std::vector<unsigned char>, RequestError> decode_base64(std::strin
     return result;
 }
 
-std::expected<PreparedRequest, RequestError> prepare_azure(const ConfigSnapshot& config,
-                                                           const Resolved& object,
-                                                           const ProviderCredentials* custom,
-                                                           std::string_view range,
-                                                           std::string_view if_match) {
+std::expected<PreparedRequest, RequestError>
+prepare_azure(const ConfigSnapshot& config, const Resolved& object,
+              const ProviderCredentials* custom, std::string_view range, std::string_view if_match,
+              std::time_t signing_time) {
     const std::string& path = object.canonical_uri;
     const auto connection =
         parse_connection_string(config.option(path, "AZURE_STORAGE_CONNECTION_STRING"));
@@ -177,7 +176,7 @@ std::expected<PreparedRequest, RequestError> prepare_azure(const ConfigSnapshot&
     auto decoded_key = decode_base64(credentials.secret_access_key, "AZURE_STORAGE_ACCESS_KEY");
     if (!decoded_key)
         return std::unexpected(decoded_key.error());
-    const std::string date = rfc7231_date(std::time(nullptr));
+    const std::string date = rfc7231_date(signing_time);
     const std::string canonical_headers = "x-ms-date:" + date + "\nx-ms-version:2023-11-03\n";
     auto url_parts = split_url(url);
     if (!url_parts)
@@ -206,17 +205,17 @@ std::expected<PreparedRequest, RequestError> prepare_azure(const ConfigSnapshot&
 } // namespace
 
 const CloudProvider& azure_provider() noexcept {
-    static const CloudProvider provider{Backend::Azure,
-                                        KARU_CREDENTIALS_AZURE,
-                                        "AZURE_NO_SIGN_REQUEST",
-                                        false,
-                                        CREDENTIAL_OPTIONS,
-                                        load_azure_credentials,
-                                        [](const RequestContext& request) {
-                                            return prepare_azure(request.config, request.object,
-                                                                 request.credentials, request.range,
-                                                                 request.if_match);
-                                        }};
+    static const CloudProvider provider{
+        Backend::Azure,
+        KARU_CREDENTIALS_AZURE,
+        "AZURE_NO_SIGN_REQUEST",
+        false,
+        CREDENTIAL_OPTIONS,
+        load_azure_credentials,
+        [](const RequestContext& request) {
+            return prepare_azure(request.config, request.object, request.credentials, request.range,
+                                 request.if_match, request.signing_time);
+        }};
     return provider;
 }
 

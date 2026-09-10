@@ -1,3 +1,4 @@
+#include "backends/contract.hpp"
 #include "locator.hpp"
 #include "test_support.hpp"
 
@@ -18,6 +19,21 @@ void test_azure_request() {
         EQS(azure_request->range, "bytes=3-9");
         OK(header(*azure_request, "Authorization").starts_with("SharedKey account:"));
         OK(!header(*azure_request, "x-ms-date").empty());
+    }
+
+    const ConfigSnapshot exact_config = must_freeze(azure_builder);
+    const Resolved exact_object = must_resolve("az://container/a b");
+    ProviderCredentials exact_credentials;
+    exact_credentials.account_name = "account";
+    exact_credentials.secret_access_key = "a2V5";
+    const backends::RequestContext exact_context{
+        exact_config, exact_object, &exact_credentials, "bytes=3-9", {}, "\"etag\"", 1'440'938'160};
+    auto exact_request = backends::azure_provider().prepare_request(exact_context);
+    OK(exact_request.has_value());
+    if (exact_request) {
+        EQS(header(*exact_request, "x-ms-date"), "Sun, 30 Aug 2015 12:36:00 GMT");
+        EQS(header(*exact_request, "Authorization"),
+            "SharedKey account:ATPHSo27zQ9aJ7DUXth+r77/Cii4diPaL3gbBGTR2JE=");
     }
 
     karu::ConfigBuilder anonymous_azure_builder(false);

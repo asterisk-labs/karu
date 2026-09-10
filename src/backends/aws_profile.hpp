@@ -24,7 +24,8 @@ read_aws_profile(const ConfigSnapshot& config, std::string_view path, std::strin
                  std::string_view label);
 
 [[nodiscard]] std::expected<ProviderCredentials, RequestError>
-credentials_from_aws_profile(const AwsProfile& profile, std::string_view label);
+credentials_from_aws_profile(const AwsProfile& profile, std::string_view label,
+                             long timeout_seconds);
 
 [[nodiscard]] ProviderCredentials aws_json_credentials(std::string_view json);
 

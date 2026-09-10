@@ -30,7 +30,8 @@ load_source_credentials(const ConfigSnapshot& config, std::string_view path) {
                                                    profile_name + "' was not found"});
     }
 
-    auto credentials = credentials_from_aws_profile(*profile, "Source");
+    auto credentials = credentials_from_aws_profile(
+        *profile, "Source", config.client_options().request_timeout_seconds);
     if (!credentials)
         return std::unexpected(credentials.error());
     if (credentials->access_key_id.empty() || credentials->secret_access_key.empty()) {

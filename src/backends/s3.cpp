@@ -83,7 +83,8 @@ std::expected<PreparedRequest, RequestError> prepare_aws(const RequestContext& r
                               .region = region,
                               .virtual_hosting = virtual_hosting,
                               .request_payer = request_payer};
-    auto prepared = prepare_s3_get(target, credentials, request.range, request.if_match);
+    auto prepared =
+        prepare_s3_get(target, credentials, request.range, request.if_match, request.signing_time);
     if (prepared)
         prepared->routing_region = region;
     return prepared;

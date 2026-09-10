@@ -293,6 +293,10 @@ void test_transport_statuses() {
     OK(karu::transport::detail::credentials_expired(transfer));
     EQS(karu::transport::detail::s3_region("<Error><Region>eu-west-1</Region></Error>"),
         "eu-west-1");
+    EQ(karu::transport::detail::retry_after_seconds("17", 0), 17);
+    EQ(karu::transport::detail::retry_after_seconds("Wed, 21 Oct 2015 07:28:00 GMT", 1'445'412'420),
+       60);
+    EQ(karu::transport::detail::retry_after_seconds("invalid", 0), 0);
 }
 
 void test_cpp_facade() {

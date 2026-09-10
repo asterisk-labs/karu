@@ -3,6 +3,9 @@
 
 #include "transport.hpp"
 
+#include <chrono>
+#include <ctime>
+#include <random>
 #include <string>
 #include <string_view>
 
@@ -15,6 +18,9 @@ namespace karu::transport::detail {
 [[nodiscard]] bool credentials_expired(Backend backend, long status,
                                        std::string_view body) noexcept;
 [[nodiscard]] bool credentials_expired(const Transfer& transfer) noexcept;
+[[nodiscard]] int retry_after_seconds(std::string_view value, std::time_t now) noexcept;
+[[nodiscard]] std::chrono::milliseconds retry_delay(int attempt, int retry_after,
+                                                    std::mt19937& random);
 
 } // namespace karu::transport::detail
 

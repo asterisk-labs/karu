@@ -42,7 +42,8 @@ std::expected<PreparedRequest, RequestError> prepare_source(const RequestContext
                               .region = region,
                               .virtual_hosting = false,
                               .request_payer = {}};
-    return prepare_s3_get(target, request.credentials, request.range, request.if_match);
+    return prepare_s3_get(target, request.credentials, request.range, request.if_match,
+                          request.signing_time);
 }
 
 } // namespace

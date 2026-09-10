@@ -24,7 +24,6 @@ using SteadyClock = std::chrono::steady_clock;
 
 constexpr int kFileWorkers = 4;
 constexpr int kCredentialWorkers = 4;
-constexpr int kMaximumRetryAfterSeconds = 60;
 
 CURLcode initialize_curl() {
     static std::once_flag initialized;
@@ -65,17 +64,6 @@ template <typename Value> void require_multi_option(CURLM* multi, CURLMoption op
     const CURLMcode result = curl_multi_setopt(multi, option, value);
     if (result != CURLM_OK)
         throw std::runtime_error(curl_multi_strerror(result));
-}
-
-std::chrono::milliseconds retry_delay(const Transfer& transfer, std::mt19937& random) {
-    const int requested = std::clamp(transfer.retry_after, 0, kMaximumRetryAfterSeconds);
-    if (requested > 0) {
-        std::uniform_int_distribution<int> jitter(0, 1000);
-        return std::chrono::seconds(requested) + std::chrono::milliseconds(jitter(random));
-    }
-    const int base = 100 << std::min(transfer.attempt, 6);
-    std::uniform_int_distribution<int> jitter(0, base);
-    return std::chrono::milliseconds(base + jitter(random));
 }
 
 std::mt19937 retry_generator(const void* identity) {
@@ -526,7 +514,8 @@ void Engine::io_loop() {
             if (transfer->attempt + 1 < options_.max_attempts &&
                 transport::retryable(*transfer, result)) {
                 ++transfer->attempt;
-                const auto delay = retry_delay(*transfer, random);
+                const auto delay = transport::detail::retry_delay(transfer->attempt,
+                                                                  transfer->retry_after, random);
                 if (!transfer->deadline.can_wait_for(delay)) {
                     const std::string detail = timeout_detail(
                         *transfer, "request timeout leaves no time for another attempt");

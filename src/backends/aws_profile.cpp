@@ -1,40 +1,37 @@
 #include "aws_profile.hpp"
 
-#include <array>
-#include <cstdio>
+#include "../process.hpp"
+
+#include <chrono>
 
 namespace karu::backends {
 namespace {
 
-std::expected<std::string, RequestError> run_credential_process(const std::string& command,
-                                                                std::string_view label) {
-#ifdef _WIN32
-    FILE* raw = _popen(command.c_str(), "r");
-#else
-    FILE* raw = popen(command.c_str(), "r");
-#endif
-    if (raw == nullptr) {
+std::expected<std::string, RequestError>
+run_credential_process(const std::string& command, std::string_view label, long timeout_seconds) {
+    constexpr std::size_t output_limit = 1u << 20;
+    const auto timeout = std::chrono::seconds(timeout_seconds);
+    auto command_result = os::run_command(command, output_limit, timeout);
+    if (!command_result) {
         return std::unexpected(RequestError{
-            KARU_ERR_CREDENTIALS, std::string(label) + " credential_process could not start"});
+            KARU_ERR_CREDENTIALS, std::string(label) + " credential_process could not start: " +
+                                      command_result.error().message()});
     }
-    std::string output;
-    std::array<char, 4096> buffer{};
-    while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), raw) != nullptr) {
-        output += buffer.data();
-        if (output.size() > (1u << 20))
-            break;
-    }
-#ifdef _WIN32
-    const int status = _pclose(raw);
-#else
-    const int status = pclose(raw);
-#endif
-    if (status != 0 || output.size() > (1u << 20)) {
+    if (command_result->timed_out) {
         return std::unexpected(RequestError{
-            KARU_ERR_CREDENTIALS,
-            std::string(label) + " credential_process failed or returned too much data"});
+            KARU_TIMEOUT, std::string(label) + " credential_process exceeded the request timeout"});
     }
-    return output;
+    if (command_result->output_limit_exceeded) {
+        return std::unexpected(
+            RequestError{KARU_ERR_CREDENTIALS,
+                         std::string(label) + " credential_process returned more than 1 MiB"});
+    }
+    if (command_result->exit_code != 0) {
+        return std::unexpected(RequestError{
+            KARU_ERR_CREDENTIALS, std::string(label) + " credential_process exited with status " +
+                                      std::to_string(command_result->exit_code)});
+    }
+    return std::move(command_result->output);
 }
 
 } // namespace
@@ -110,7 +107,8 @@ ProviderCredentials aws_json_credentials(std::string_view json) {
 }
 
 std::expected<ProviderCredentials, RequestError>
-credentials_from_aws_profile(const AwsProfile& profile, std::string_view label) {
+credentials_from_aws_profile(const AwsProfile& profile, std::string_view label,
+                             long timeout_seconds) {
     if (!profile.value("sso_session").empty() || !profile.value("sso_start_url").empty()) {
         return std::unexpected(
             RequestError{KARU_ERR_CREDENTIALS,
@@ -124,7 +122,7 @@ credentials_from_aws_profile(const AwsProfile& profile, std::string_view label) 
             std::string(label) + " AssumeRole profiles require a custom credential provider"});
     }
     if (const std::string command = profile.value("credential_process"); !command.empty()) {
-        auto output = run_credential_process(command, label);
+        auto output = run_credential_process(command, label, timeout_seconds);
         if (!output)
             return std::unexpected(output.error());
         ProviderCredentials result = aws_json_credentials(*output);

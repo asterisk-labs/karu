@@ -86,6 +86,12 @@ void test_config_precedence() {
     EQS(snapshot.option("/vsis3/b/k", "AWS_S3_ENDPOINT"), "explicit.test");
     EQS(snapshot.option("/vsis3/a/public/k", "AWS_S3_ENDPOINT"), "bucket.test");
     EQS(snapshot.option("s3://a/private/x", "AWS_S3_ENDPOINT"), "private.test");
+    EQS(snapshot.option("s3://ab/private/x", "AWS_S3_ENDPOINT"), "explicit.test");
+
+    OK(builder.set_path("s3://a/private", "AWS_REGION", "ap-south-1"));
+    snapshot = must_freeze(builder);
+    EQS(snapshot.option("s3://a/private/x", "AWS_REGION"), "ap-south-1");
+    EQS(snapshot.option("s3://a/private-copy/x", "AWS_REGION"), "");
 
     OK(builder.set("SOURCE_PROXY_URL", "https://proxy.source.test"));
     OK(builder.set_path("source://account/product/", "SOURCE_ENDPOINT",
@@ -129,6 +135,17 @@ void test_config_precedence() {
         EQS(http_request->http.proxy, "http://proxy.example.test:8080");
         EQS(http_request->http.user_agent, "karu-test");
     }
+
+    RequestBuilder default_http_builder(must_freeze(ConfigBuilder(false)));
+    auto default_http =
+        default_http_builder.prepare(Locator{must_resolve("https://example.test/object")}, 0, 1);
+    OK(default_http.has_value());
+    if (default_http)
+        OK(default_http->http.user_agent.starts_with("karu/"));
+
+    ConfigBuilder no_user_agent(false);
+    OK(no_user_agent.set("KARU_HTTP_USER_AGENT", ""));
+    EQS(must_freeze(no_user_agent).http_options("https://example.test").user_agent, "");
 
 #ifdef __linux__
     {

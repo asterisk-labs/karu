@@ -165,6 +165,12 @@ std::string canonical_vsi_path(std::string_view path) {
     return std::string(path);
 }
 
+bool path_prefix_matches(std::string_view path, std::string_view prefix) noexcept {
+    if (!path.starts_with(prefix))
+        return false;
+    return path.size() == prefix.size() || prefix.ends_with('/') || path[prefix.size()] == '/';
+}
+
 bool option_is_true(std::string_view value) noexcept {
     auto equals = [&](std::string_view expected) {
         return value.size() == expected.size() &&
@@ -266,7 +272,7 @@ std::string ConfigSnapshot::option(std::string_view path, std::string_view name,
     const std::string canonical_path = canonical_vsi_path(path);
     const PathOptions* best = nullptr;
     for (const PathOptions& candidate : paths_) {
-        if (!canonical_path.starts_with(candidate.prefix) ||
+        if (!path_prefix_matches(canonical_path, candidate.prefix) ||
             !candidate.values.contains(canonical_name)) {
             continue;
         }
@@ -301,7 +307,8 @@ std::string ConfigSnapshot::scope_key(std::string_view path,
         const std::string name = canonical_option_name(raw_name);
         const PathOptions* best = nullptr;
         for (const PathOptions& candidate : paths_) {
-            if (!canonical_path.starts_with(candidate.prefix) || !candidate.values.contains(name))
+            if (!path_prefix_matches(canonical_path, candidate.prefix) ||
+                !candidate.values.contains(name))
                 continue;
             if (best == nullptr || candidate.prefix.size() > best->prefix.size())
                 best = &candidate;
@@ -383,7 +390,7 @@ HttpRequestOptions ConfigSnapshot::http_options(std::string_view path) const {
     }
     result.proxy = option(path, "KARU_HTTP_PROXY");
     result.proxy_user_password = option(path, "KARU_HTTP_PROXY_CREDENTIALS");
-    result.user_agent = option(path, "KARU_HTTP_USER_AGENT");
+    result.user_agent = option(path, "KARU_HTTP_USER_AGENT", "karu/" KARU_VERSION_STRING);
     return result;
 }
 

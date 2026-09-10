@@ -4,6 +4,7 @@
 #include "../request.hpp"
 
 #include <cstdint>
+#include <ctime>
 #include <expected>
 #include <string>
 #include <string_view>
@@ -26,7 +27,7 @@ struct S3GetRequest {
 // pointer deliberately produces an unsigned request.
 [[nodiscard]] std::expected<PreparedRequest, RequestError>
 prepare_s3_get(const S3GetRequest& target, const ProviderCredentials* credentials,
-               std::string_view range, std::string_view if_match);
+               std::string_view range, std::string_view if_match, std::time_t signing_time);
 
 } // namespace karu::backends
 

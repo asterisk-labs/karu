@@ -32,6 +32,12 @@ std::expected<ProviderCredentials, RequestError> load_credentials(Load&& load) n
 
 } // namespace
 
+CredentialCache::CredentialCache(Clock clock) : clock_(std::move(clock)) {}
+
+std::int64_t CredentialCache::now() const {
+    return clock_ ? clock_() : static_cast<std::int64_t>(std::time(nullptr));
+}
+
 std::int64_t CredentialCache::refresh_time(const ProviderCredentials& credentials, std::int64_t now,
                                            bool refresh_static) noexcept {
     if (credentials.expires_at == 0) {
@@ -57,15 +63,16 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
     if (!callback)
         return std::unexpected(RequestError{KARU_ERR_CREDENTIALS, {}});
 
-    const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+    const std::int64_t checked_at = now();
     const std::string family = "custom\n" + std::to_string(static_cast<int>(kind)) + "\n";
     const auto find_reusable = [&] {
         auto best = entries_.end();
         for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
             const auto& [key, entry] = *iterator;
             const auto& value = entry.credentials;
-            const bool current = key.starts_with(family) && path.starts_with(value.cache_prefix) &&
-                                 reusable(entry, now);
+            const bool current = key.starts_with(family) &&
+                                 path_prefix_matches(path, value.cache_prefix) &&
+                                 reusable(entry, checked_at);
             if (current &&
                 (best == entries_.end() ||
                  value.cache_prefix.size() > best->second.credentials.cache_prefix.size())) {
@@ -95,7 +102,7 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
         auto value = backends::copy_callback_credentials(callback, kind, path);
         if (value && !value->cache_prefix.empty()) {
             value->cache_prefix = canonical_vsi_path(value->cache_prefix);
-            if (!path.starts_with(value->cache_prefix)) {
+            if (!path_prefix_matches(path, value->cache_prefix)) {
                 return std::expected<ProviderCredentials, RequestError>{std::unexpected(
                     RequestError{KARU_ERR_CREDENTIALS,
                                  "custom credential cache_prefix does not contain the requested "
@@ -105,12 +112,19 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
         return value;
     });
 
+    const std::int64_t loaded_at = now();
+    if (refreshed && refreshed->expires_at != 0 && refreshed->expires_at <= loaded_at) {
+        refreshed = std::unexpected(RequestError{
+            KARU_ERR_CREDENTIALS, "custom credential provider returned expired credentials"});
+    }
+
     {
         std::unique_lock lock(mutex_);
         if (refreshed && !refreshed->cache_prefix.empty() && !flight->invalidated) {
             try {
-                entries_.insert_or_assign(family + refreshed->cache_prefix,
-                                          Entry{*refreshed, refresh_time(*refreshed, now, false)});
+                entries_.insert_or_assign(
+                    family + refreshed->cache_prefix,
+                    Entry{*refreshed, refresh_time(*refreshed, loaded_at, false)});
             } catch (...) {
                 // A cache insertion must not strand waiters or fail a usable credential load.
             }
@@ -131,12 +145,12 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
     const std::string key = "native\n" +
                             std::to_string(static_cast<int>(provider.credentials_kind)) + "\n" +
                             config.scope_key(path, provider.credential_options);
-    const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+    const std::int64_t checked_at = now();
     std::shared_ptr<Flight> flight;
     {
         std::unique_lock lock(mutex_);
         const auto found = entries_.find(key);
-        if (found != entries_.end() && reusable(found->second, now))
+        if (found != entries_.end() && reusable(found->second, checked_at))
             return found->second.credentials;
         if (const auto current = flights_.find(key); current != flights_.end()) {
             flight = current->second;
@@ -148,6 +162,11 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
     }
 
     auto loaded = load_credentials([&] { return provider.load_credentials(config, path); });
+    const std::int64_t loaded_at = now();
+    if (loaded && loaded->expires_at != 0 && loaded->expires_at <= loaded_at) {
+        loaded = std::unexpected(
+            RequestError{KARU_ERR_CREDENTIALS, "credential provider returned expired credentials"});
+    }
     const bool present =
         loaded && (!loaded->access_key_id.empty() || !loaded->secret_access_key.empty() ||
                    !loaded->session_token.empty() || !loaded->bearer_token.empty() ||
@@ -156,10 +175,10 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
         std::unique_lock lock(mutex_);
         // Never negative-cache credential discovery. One anonymous/missing lookup
         // must not poison later signed requests.
-        if (loaded && present && (loaded->expires_at == 0 || loaded->expires_at > now) &&
-            !flight->invalidated) {
+        if (loaded && present && !flight->invalidated) {
             try {
-                entries_.insert_or_assign(key, Entry{*loaded, refresh_time(*loaded, now, true)});
+                entries_.insert_or_assign(key,
+                                          Entry{*loaded, refresh_time(*loaded, loaded_at, true)});
             } catch (...) {
                 // A cache insertion must not strand waiters or fail a usable credential load.
             }
@@ -198,7 +217,7 @@ void CredentialCache::invalidate(const ConfigSnapshot& config,
     }
     for (auto iterator = entries_.begin(); iterator != entries_.end();) {
         if (iterator->first.starts_with(family) &&
-            path.starts_with(iterator->second.credentials.cache_prefix)) {
+            path_prefix_matches(path, iterator->second.credentials.cache_prefix)) {
             iterator = entries_.erase(iterator);
         } else {
             ++iterator;

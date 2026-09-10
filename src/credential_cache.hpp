@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -22,6 +23,10 @@ struct CloudProvider;
 
 class CredentialCache {
   public:
+    using Clock = std::function<std::int64_t()>;
+
+    explicit CredentialCache(Clock clock = {});
+
     [[nodiscard]] std::expected<ProviderCredentials, RequestError>
     custom(const ConfigSnapshot& config, karu_credentials_kind kind, std::string_view path);
 
@@ -48,7 +53,9 @@ class CredentialCache {
     [[nodiscard]] static std::int64_t refresh_time(const ProviderCredentials& credentials,
                                                    std::int64_t now, bool refresh_static) noexcept;
     [[nodiscard]] static bool reusable(const Entry& entry, std::int64_t now) noexcept;
+    [[nodiscard]] std::int64_t now() const;
 
+    Clock clock_;
     std::mutex mutex_;
     std::unordered_map<std::string, Entry> entries_;
     std::unordered_map<std::string, std::shared_ptr<Flight>> flights_;

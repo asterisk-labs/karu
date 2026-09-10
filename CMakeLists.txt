@@ -21,6 +21,7 @@ set(KARU_SANITIZE "" CACHE STRING
 
 set(KARU_CORE_SOURCES
     src/platform.cpp
+    src/process.cpp
     src/config.cpp
     src/uri.cpp
     src/error.cpp

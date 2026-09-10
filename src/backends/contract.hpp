@@ -6,6 +6,7 @@
 #include "../request.hpp"
 
 #include <cstdint>
+#include <ctime>
 #include <expected>
 #include <span>
 #include <string_view>
@@ -22,6 +23,7 @@ struct RequestContext {
     std::string_view range;
     std::string_view region_hint;
     std::string_view if_match;
+    std::time_t signing_time;
 };
 
 using LoadCredentials = std::expected<ProviderCredentials, RequestError> (*)(const ConfigSnapshot&,

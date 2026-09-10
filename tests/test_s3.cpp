@@ -1,6 +1,11 @@
+#include "backends/aws_profile.hpp"
+#include "backends/contract.hpp"
 #include "backends/crypto.hpp"
 #include "locator.hpp"
+#include "process.hpp"
 #include "test_support.hpp"
+
+#include <chrono>
 
 namespace karu::test {
 
@@ -24,6 +29,27 @@ void test_s3_request() {
     EQS(header(*request, "if-match"), "\"etag\"");
     EQS(header(*request, "x-amz-content-sha256"), "UNSIGNED-PAYLOAD");
     OK(!request->http.follow_redirects);
+
+    const ConfigSnapshot exact_config = must_freeze(ConfigBuilder(false));
+    const Resolved exact_object = must_resolve("s3://examplebucket/test file");
+    ProviderCredentials exact_credentials;
+    exact_credentials.access_key_id = "AKIDEXAMPLE";
+    exact_credentials.secret_access_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+    exact_credentials.session_token = "session";
+    const backends::RequestContext exact_context{exact_config,  exact_object, &exact_credentials,
+                                                 "bytes=10-29", {},           "\"etag\"",
+                                                 1'440'938'160};
+    auto exact_request = backends::s3_provider().prepare_request(exact_context);
+    OK(exact_request.has_value());
+    if (exact_request) {
+        EQS(header(*exact_request, "x-amz-date"), "20150830T123600Z");
+        EQS(header(*exact_request, "Authorization"),
+            "AWS4-HMAC-SHA256 "
+            "Credential=AKIDEXAMPLE/20150830/us-east-1/s3/aws4_request, "
+            "SignedHeaders=host;if-match;range;x-amz-content-sha256;x-amz-date;"
+            "x-amz-security-token, "
+            "Signature=a47ce3c9bbb62233c87e37d9e4265301fa0a5d5d0ab60ad9ab9d8baebd8165bc");
+    }
 
     karu::Locator dotted{must_resolve("s3://bucket.with.dots/key")};
     auto dotted_request = request_builder.prepare(dotted, 0, 1);
@@ -88,6 +114,46 @@ void test_s3_request() {
     OK(!unavailable_hmac);
     if (!unavailable_hmac)
         EQ(unavailable_hmac.error().status, KARU_ERR_CREDENTIALS);
+
+    SECTION("AWS credential process");
+    karu::backends::AwsProfile slow_profile;
+#ifdef _WIN32
+    slow_profile.values.emplace("credential_process", "ping 127.0.0.1 -n 6 >NUL");
+#else
+    slow_profile.values.emplace("credential_process", "sleep 5");
+#endif
+    const auto started = std::chrono::steady_clock::now();
+    auto timed_out = karu::backends::credentials_from_aws_profile(slow_profile, "AWS", 1);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    OK(!timed_out);
+    if (!timed_out)
+        EQ(timed_out.error().status, KARU_TIMEOUT);
+    OK(elapsed < std::chrono::seconds(4));
+
+#ifdef _WIN32
+    constexpr std::string_view ready_command = "echo ready";
+    constexpr std::string_view noisy_command =
+        "for /L %i in (1,1,10000) do @echo 12345678901234567890";
+    constexpr std::string_view failing_command = "exit /B 7";
+#else
+    constexpr std::string_view ready_command = "printf ready";
+    constexpr std::string_view noisy_command = "while :; do printf 12345678901234567890; done";
+    constexpr std::string_view failing_command = "exit 7";
+#endif
+    auto ready = os::run_command(ready_command, 1'024, std::chrono::seconds(2));
+    OK(ready.has_value());
+    if (ready) {
+        EQ(ready->exit_code, 0);
+        OK(ready->output.find("ready") != std::string::npos);
+    }
+    auto limited = os::run_command(noisy_command, 1'024, std::chrono::seconds(2));
+    OK(limited.has_value());
+    if (limited)
+        OK(limited->output_limit_exceeded);
+    auto failed = os::run_command(failing_command, 1'024, std::chrono::seconds(2));
+    OK(failed.has_value());
+    if (failed)
+        EQ(failed->exit_code, 7);
 }
 
 void test_managed_headers() {
