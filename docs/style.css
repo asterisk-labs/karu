@@ -96,14 +96,62 @@ main {
   padding-top: 24px;
 }
 
-.columns {
+.essay section {
   display: grid;
-  grid-template-columns: 0.82fr 1.18fr;
-  gap: 28px;
+  grid-template-columns: 124px minmax(0, 1fr);
+  gap: 0 32px;
 }
 
-.columns section + section {
-  margin-top: 30px;
+.essay section + section {
+  margin-top: 28px;
+  padding-top: 26px;
+  border-top: 1px solid var(--line);
+}
+
+.essay .eyebrow {
+  grid-column: 1;
+  margin-top: 4px;
+}
+
+.essay h1,
+.essay h2,
+.essay p,
+.essay .pull {
+  grid-column: 2;
+  max-width: 66ch;
+}
+
+.essay h2 + p,
+.essay h1 + p {
+  margin-top: 11px;
+}
+
+.essay p + p {
+  margin-top: 11px;
+}
+
+.essay .pull {
+  margin: 14px 0 0;
+  padding-left: 13px;
+  border-left: 2px solid var(--accent);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.onward-block {
+  margin-top: 34px;
+  padding-top: 18px;
+  border-top: 1px solid var(--ink);
+}
+
+.essay .onward {
+  margin-top: 11px;
+  color: #454545;
+}
+
+.essay .onward a {
+  color: var(--accent);
 }
 
 .eyebrow {
@@ -135,74 +183,9 @@ section > p:not(.eyebrow) {
   color: #454545;
 }
 
-.formula {
-  margin-top: 14px;
-  padding: 10px 12px;
-  background: var(--soft);
-  color: var(--accent);
-  text-align: center;
-}
-
 code,
 pre {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-}
-
-.facts {
-  margin: 0;
-}
-
-.facts div {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 8px;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.facts dt {
-  font-weight: 700;
-}
-
-.facts dd {
-  margin: 0;
-  color: var(--muted);
-}
-
-.stages {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 5px;
-  margin-top: 12px;
-}
-
-.stages div {
-  min-height: 92px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  background: var(--soft);
-}
-
-.stages b,
-.stages strong,
-.stages span {
-  display: block;
-}
-
-.stages b {
-  color: var(--accent);
-  font-size: 9px;
-}
-
-.stages strong {
-  margin-top: 12px;
-  font-size: 12px;
-}
-
-.stages span {
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 9px;
 }
 
 pre {
@@ -496,15 +479,31 @@ footer {
     box-shadow: none;
   }
 
-  .columns,
+  .essay section,
   .sync-heading,
   .docs-layout {
     grid-template-columns: 1fr;
   }
 
-  .columns,
+  /* An explicit grid-column would otherwise create an implicit second track. */
+  .essay .eyebrow,
+  .essay h1,
+  .essay h2,
+  .essay p,
+  .essay .pull {
+    grid-column: 1;
+  }
+
+  .essay .eyebrow {
+    margin-bottom: 6px;
+  }
+
+  .essay section {
+    gap: 0;
+  }
+
   .docs-layout {
-    gap: 30px;
+    gap: 22px;
   }
 
   .docs-nav {
