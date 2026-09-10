@@ -55,6 +55,11 @@ struct RefreshState {
     int calls = 0;
 };
 
+struct SlowCredentialsState {
+    std::atomic<int> active{0};
+    std::atomic<bool> release{false};
+};
+
 karu_status refresh_credentials(void* data, karu_credentials_kind kind, const char*,
                                 karu_credentials* out) {
     auto& state = *static_cast<RefreshState*>(data);
@@ -65,6 +70,23 @@ karu_status refresh_credentials(void* data, karu_credentials_kind kind, const ch
     out->bearer_token = state.calls == 1 ? "stale" : "fresh";
     out->cache_prefix = "/vsigs/bucket/";
     out->expires_at = static_cast<std::int64_t>(std::time(nullptr)) + 3600;
+    return KARU_OK;
+}
+
+karu_status slow_credentials(void* data, karu_credentials_kind kind, const char*,
+                             karu_credentials* out) {
+    auto& state = *static_cast<SlowCredentialsState*>(data);
+    state.active.fetch_add(1, std::memory_order_relaxed);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!state.release.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    state.active.fetch_sub(1, std::memory_order_relaxed);
+    if (kind != KARU_CREDENTIALS_GCS)
+        return KARU_ERR_CREDENTIALS;
+    *out = karu_credentials{};
+    out->bearer_token = "token";
     return KARU_OK;
 }
 
@@ -313,6 +335,71 @@ int main(int argc, char** argv) {
     check(refresh_state.calls == 2, "credential provider called twice");
     karu_client_free(refresh_client);
     karu_config_free(refresh_config);
+
+    karu_config* slow_credentials_config = nullptr;
+    karu_client* slow_credentials_client = nullptr;
+    SlowCredentialsState slow_credentials_state;
+    check(karu_config_create_empty(&slow_credentials_config) == KARU_OK,
+          "create slow credentials config");
+    check(karu_config_set_option(slow_credentials_config, "GCS_ENDPOINT", base.c_str()) == KARU_OK,
+          "set slow credentials endpoint");
+    check(karu_config_set_option(slow_credentials_config, "KARU_CONCURRENCY", "4") == KARU_OK,
+          "set slow credentials concurrency");
+    check(karu_config_set_credentials_provider(slow_credentials_config, KARU_CREDENTIALS_GCS,
+                                               slow_credentials, &slow_credentials_state,
+                                               nullptr) == KARU_OK,
+          "set slow credentials provider");
+    check(karu_client_create(slow_credentials_config, &slow_credentials_client) == KARU_OK,
+          "create slow credentials client");
+    karu_config_free(slow_credentials_config);
+
+    std::array<karu_locator*, 4> slow_locators{};
+    std::array<std::array<unsigned char, 1>, 4> slow_buffers{};
+    std::array<karu_req, 4> slow_requests{};
+    for (std::size_t index = 0; index < slow_locators.size(); ++index) {
+        const std::string uri = "gs://bucket/slow-credentials-" + std::to_string(index);
+        check(karu_resolve(uri.c_str(), &slow_locators[index]) == KARU_OK,
+              "resolve slow credential object");
+        slow_requests[index] =
+            karu_req{slow_locators[index], 0, 1, slow_buffers[index].data(), nullptr, nullptr};
+    }
+    karu_batch* slow_batch = nullptr;
+    check(karu_client_submit(slow_credentials_client, slow_requests.data(), slow_requests.size(),
+                             &slow_batch) == KARU_OK,
+          "submit slow credential batch");
+    const auto credentials_wait_started = std::chrono::steady_clock::now();
+    while (slow_credentials_state.active.load(std::memory_order_relaxed) < 4 &&
+           std::chrono::steady_clock::now() - credentials_wait_started < std::chrono::seconds(1)) {
+        std::this_thread::yield();
+    }
+    const bool credentials_are_blocked =
+        slow_credentials_state.active.load(std::memory_order_relaxed) == 4;
+    check(credentials_are_blocked, "independent credential loads run concurrently");
+
+    if (credentials_are_blocked) {
+        started = std::chrono::steady_clock::now();
+        check(fetch(slow_credentials_client, base + "/object", 0, small) == KARU_OK,
+              "HTTP read bypasses cloud credential loading");
+        elapsed = std::chrono::steady_clock::now() - started;
+        check(elapsed < std::chrono::seconds(1),
+              "slow credential providers do not block HTTP transport");
+    }
+    slow_credentials_state.release.store(true, std::memory_order_release);
+
+    int slow_completions = 0;
+    while (slow_batch != nullptr) {
+        karu_done done{};
+        const karu_status status = karu_batch_next(slow_batch, &done, -1);
+        if (status == KARU_END)
+            break;
+        check(status == KARU_OK && done.status == KARU_OK, "slow credential batch completion");
+        ++slow_completions;
+    }
+    check(slow_completions == 4, "all slow credential reads complete");
+    karu_batch_free(slow_batch);
+    for (karu_locator* locator : slow_locators)
+        karu_locator_free(locator);
+    karu_client_free(slow_credentials_client);
 
     std::array<unsigned char, 24> first{};
     std::array<unsigned char, 24> second{};

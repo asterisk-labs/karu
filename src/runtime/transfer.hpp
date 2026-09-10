@@ -57,9 +57,12 @@ struct Transfer {
     // Rebuilt for every attempt after the byte range is known. This keeps
     // renewable credentials and signatures out of the locator.
     std::string request_url;
+    std::string request_range;
     std::vector<std::pair<std::string, std::string>> request_headers;
     std::unique_ptr<HttpRequestOptions> http;
     std::string region_hint;
+    ResolvedCredentials credentials;
+    bool credentials_ready = false;
 
     std::uint64_t received = 0;
     std::uint64_t skip = 0;

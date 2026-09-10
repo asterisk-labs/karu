@@ -246,7 +246,9 @@ Source uses `KARU_CREDENTIALS_SOURCE` and the same access-key, secret, and
 session-token fields as AWS, but its cache namespace is separate. A Source
 prefix therefore starts with `/vsisource/`, not `/vsis3/`.
 
-Karu serializes callback refreshes for a client to prevent token stampedes.
+Karu coalesces simultaneous callback refreshes for the same path. Callbacks for
+different paths may run concurrently, so the callback and its `user_data` must
+be thread-safe.
 Expiring credentials refresh near the end of their lifetime rather than at a
 fixed 60-second boundary. Native static credentials are rechecked after one
 minute so profile rotation remains visible; callback values with

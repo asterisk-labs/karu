@@ -4,7 +4,11 @@
 #include "test_support.hpp"
 
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <ctime>
+#include <latch>
+#include <thread>
 
 namespace karu::test {
 
@@ -50,6 +54,34 @@ karu_status callback_credentials(void* data, karu_credentials_kind kind, const c
     out->bearer_token = "token";
     out->cache_prefix = state.prefix;
     out->expires_at = static_cast<std::int64_t>(std::time(nullptr)) + state.lifetime;
+    return KARU_OK;
+}
+
+struct ConcurrentCallbackState {
+    std::atomic<int> calls{0};
+    std::atomic<int> active{0};
+    std::atomic<int> maximum_active{0};
+    const char* prefix = nullptr;
+};
+
+karu_status concurrent_credentials(void* data, karu_credentials_kind kind, const char*,
+                                   karu_credentials* out) {
+    auto& state = *static_cast<ConcurrentCallbackState*>(data);
+    state.calls.fetch_add(1, std::memory_order_relaxed);
+    const int active = state.active.fetch_add(1, std::memory_order_relaxed) + 1;
+    int maximum = state.maximum_active.load(std::memory_order_relaxed);
+    while (active > maximum && !state.maximum_active.compare_exchange_weak(
+                                   maximum, active, std::memory_order_relaxed)) {
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    state.active.fetch_sub(1, std::memory_order_relaxed);
+
+    if (kind != KARU_CREDENTIALS_GCS)
+        return KARU_ERR_CREDENTIALS;
+    *out = karu_credentials{};
+    out->bearer_token = "token";
+    out->cache_prefix = state.prefix;
+    out->expires_at = static_cast<std::int64_t>(std::time(nullptr)) + 3600;
     return KARU_OK;
 }
 
@@ -121,6 +153,59 @@ void test_renewable_callback_cache() {
     native_cache.invalidate(snapshot, provider, "/vsigs/bucket/key", false);
     OK(native_cache.native(snapshot, provider, "/vsigs/bucket/key"));
     EQ(native_calls, 2);
+
+    ConcurrentCallbackState shared_state{.prefix = "/vsigs/bucket/"};
+    karu::ConfigBuilder shared_builder(false);
+    OK(shared_builder.set_provider(KARU_CREDENTIALS_GCS, concurrent_credentials, &shared_state,
+                                   nullptr));
+    karu::RequestBuilder shared_builder_request(must_freeze(shared_builder));
+    std::latch shared_ready(4);
+    std::latch shared_start(1);
+    std::array<bool, 4> shared_results{};
+    std::array<std::thread, 4> shared_workers;
+    for (std::size_t index = 0; index < shared_workers.size(); ++index) {
+        shared_workers[index] = std::thread([&, index] {
+            shared_ready.count_down();
+            shared_start.wait();
+            shared_results[index] = shared_builder_request.prepare(object, index, 1).has_value();
+        });
+    }
+    shared_ready.wait();
+    shared_start.count_down();
+    for (std::thread& worker : shared_workers)
+        worker.join();
+    for (const bool result : shared_results)
+        OK(result);
+    EQ(shared_state.calls.load(std::memory_order_relaxed), 1);
+
+    ConcurrentCallbackState independent_state;
+    karu::ConfigBuilder independent_builder(false);
+    OK(independent_builder.set_provider(KARU_CREDENTIALS_GCS, concurrent_credentials,
+                                        &independent_state, nullptr));
+    karu::RequestBuilder independent_request(must_freeze(independent_builder));
+    karu::Locator other{must_resolve("gs://bucket/other")};
+    std::latch independent_ready(2);
+    std::latch independent_start(1);
+    std::array<bool, 2> independent_results{};
+    std::array<std::thread, 2> independent_workers;
+    independent_workers[0] = std::thread([&] {
+        independent_ready.count_down();
+        independent_start.wait();
+        independent_results[0] = independent_request.prepare(object, 0, 1).has_value();
+    });
+    independent_workers[1] = std::thread([&] {
+        independent_ready.count_down();
+        independent_start.wait();
+        independent_results[1] = independent_request.prepare(other, 0, 1).has_value();
+    });
+    independent_ready.wait();
+    independent_start.count_down();
+    for (std::thread& worker : independent_workers)
+        worker.join();
+    for (const bool result : independent_results)
+        OK(result);
+    EQ(independent_state.calls.load(std::memory_order_relaxed), 2);
+    EQ(independent_state.maximum_active.load(std::memory_order_relaxed), 2);
 }
 
 } // namespace karu::test

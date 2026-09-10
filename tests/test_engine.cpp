@@ -88,6 +88,9 @@ void test_windows_allocations_and_errors() {
     karu_req outside{window, 1950, destination.size(), destination.data(), nullptr, nullptr};
     EQ(karu_client_fetch(client, &outside, 1), KARU_ERR_RANGE);
 
+    karu_req unbounded{window, 0, KARU_TO_END, destination.data(), nullptr, nullptr};
+    EQ(karu_client_fetch(client, &unbounded, 1), KARU_ERR_INVALID);
+
     karu_req allocated{window, 128, 256, nullptr, reinterpret_cast<void*>(42), nullptr};
     karu_batch* batch = nullptr;
     EQ(karu_client_submit(client, &allocated, 1, &batch), KARU_OK);

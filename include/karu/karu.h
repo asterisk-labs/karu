@@ -17,6 +17,8 @@ extern "C" {
 #endif
 
 #define KARU_API_VERSION 1
+// Returned by karu_locator_window_length() for an unbounded locator. This is
+// not a valid karu_req.length; range reads must always have a finite length.
 #define KARU_TO_END UINT64_MAX
 
 KARU_API int karu_api_version(void);
@@ -71,8 +73,9 @@ KARU_API karu_status karu_config_set_option(karu_config* config, const char* nam
 KARU_API karu_status karu_config_set_path_option(karu_config* config, const char* prefix,
                                                  const char* name, const char* value);
 
-// Credential callbacks run when a request needs credentials. Karu copies all
-// returned strings before the callback returns.
+// Credential callbacks run when a request needs credentials and may run
+// concurrently for different paths. Karu copies all returned strings before
+// the callback returns.
 typedef enum {
     KARU_CREDENTIALS_AWS = 1,
     KARU_CREDENTIALS_GCS = 2,

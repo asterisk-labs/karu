@@ -40,9 +40,13 @@ std::string hex(std::span<const unsigned char> bytes) {
     return result;
 }
 
-std::array<unsigned char, SHA256_DIGEST_LENGTH> sha256(std::string_view text) {
+std::expected<std::array<unsigned char, SHA256_DIGEST_LENGTH>, RequestError>
+sha256(std::string_view text) {
     std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
-    SHA256(reinterpret_cast<const unsigned char*>(text.data()), text.size(), digest.data());
+    if (SHA256(reinterpret_cast<const unsigned char*>(text.data()), text.size(), digest.data()) ==
+        nullptr) {
+        return std::unexpected(RequestError{KARU_ERR_CREDENTIALS, "OpenSSL SHA256 failed"});
+    }
     return digest;
 }
 
@@ -54,9 +58,10 @@ bool valid_aws_region(std::string_view region) noexcept {
     });
 }
 
-std::expected<PreparedRequest, RequestError>
-prepare_s3_get(const S3GetRequest& target, const ProviderCredentials* credentials,
-               std::uint64_t first, std::uint64_t length, std::string_view if_match) {
+std::expected<PreparedRequest, RequestError> prepare_s3_get(const S3GetRequest& target,
+                                                            const ProviderCredentials* credentials,
+                                                            std::string_view range,
+                                                            std::string_view if_match) {
     auto endpoint = split_url(target.endpoint);
     if (!endpoint)
         return std::unexpected(endpoint.error());
@@ -80,11 +85,10 @@ prepare_s3_get(const S3GetRequest& target, const ProviderCredentials* credential
     const std::time_t now = std::time(nullptr);
     const std::string timestamp = date_utc(now, "%Y%m%dT%H%M%SZ");
     const std::string date = timestamp.substr(0, 8);
-    const std::string range = range_header(first, length);
     const std::string payload = "UNSIGNED-PAYLOAD";
 
     std::vector<Header> signed_headers{{"host", signed_host(*url_parts)},
-                                       {"range", range},
+                                       {"range", std::string(range)},
                                        {"x-amz-content-sha256", payload},
                                        {"x-amz-date", timestamp}};
     if (!if_match.empty())
@@ -107,16 +111,30 @@ prepare_s3_get(const S3GetRequest& target, const ProviderCredentials* credential
                                           "\n" + canonical_headers + "\n" + signed_names + "\n" +
                                           payload;
     const std::string scope = date + "/" + std::string(target.region) + "/s3/aws4_request";
+    auto request_hash = sha256(canonical_request);
+    if (!request_hash)
+        return std::unexpected(request_hash.error());
     const std::string string_to_sign =
-        "AWS4-HMAC-SHA256\n" + timestamp + "\n" + scope + "\n" + hex(sha256(canonical_request));
+        "AWS4-HMAC-SHA256\n" + timestamp + "\n" + scope + "\n" + hex(*request_hash);
 
     const std::string initial = "AWS4" + credentials->secret_access_key;
     auto date_key = hmac_sha256(
         std::span(reinterpret_cast<const unsigned char*>(initial.data()), initial.size()), date);
-    auto region_key = hmac_sha256(date_key, target.region);
-    auto service_key = hmac_sha256(region_key, "s3");
-    auto signing_key = hmac_sha256(service_key, "aws4_request");
-    const std::string signature = hex(hmac_sha256(signing_key, string_to_sign));
+    if (!date_key)
+        return std::unexpected(date_key.error());
+    auto region_key = hmac_sha256(*date_key, target.region);
+    if (!region_key)
+        return std::unexpected(region_key.error());
+    auto service_key = hmac_sha256(*region_key, "s3");
+    if (!service_key)
+        return std::unexpected(service_key.error());
+    auto signing_key = hmac_sha256(*service_key, "aws4_request");
+    if (!signing_key)
+        return std::unexpected(signing_key.error());
+    auto signed_request = hmac_sha256(*signing_key, string_to_sign);
+    if (!signed_request)
+        return std::unexpected(signed_request.error());
+    const std::string signature = hex(*signed_request);
 
     std::vector<Header> headers;
     headers.reserve(signed_headers.size() + 1);

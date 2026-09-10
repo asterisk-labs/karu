@@ -18,25 +18,24 @@ void apply_http_options(const ConfigSnapshot& config, std::string_view path,
 std::expected<PreparedRequest, RequestError>
 RequestBuilder::prepare(const Locator& locator, std::uint64_t first, std::uint64_t length,
                         std::string_view region_hint, std::string_view if_match) {
-    const Resolved& object = locator.resolved;
     if (length == 0 || first > UINT64_MAX - (length - 1))
         return std::unexpected(RequestError{KARU_ERR_RANGE, "HTTP range overflows"});
+    auto credentials = resolve_credentials(locator);
+    if (!credentials)
+        return std::unexpected(credentials.error());
+    return materialize(locator, *credentials, first, length, region_hint, if_match);
+}
 
-    if (object.backend == Backend::Http || object.backend == Backend::HuggingFace) {
-        auto prepared = object.backend == Backend::Http
-                            ? backends::prepare_http(config_, object, if_match)
-                            : backends::prepare_hugging_face(config_, object, if_match);
-        if (prepared)
-            apply_http_options(config_, object.canonical_uri, *prepared);
-        return prepared;
-    }
+std::expected<ResolvedCredentials, RequestError>
+RequestBuilder::resolve_credentials(const Locator& locator) {
+    const Resolved& object = locator.resolved;
+    if (object.backend == Backend::Http || object.backend == Backend::HuggingFace)
+        return ResolvedCredentials{};
 
     const backends::CloudProvider* provider = backends::cloud_provider(object.backend);
     if (provider == nullptr)
         return std::unexpected(RequestError{KARU_ERR_UNSUPPORTED, "unsupported request backend"});
 
-    ProviderCredentials credentials;
-    const ProviderCredentials* credentials_ptr = nullptr;
     const auto custom_provider = config_.provider(provider->credentials_kind);
     bool credentials_configured = custom_provider != nullptr;
     if (provider->anonymous_by_default && !credentials_configured) {
@@ -52,19 +51,44 @@ RequestBuilder::prepare(const Locator& locator, std::uint64_t first, std::uint64
         config_.has_option(object.canonical_uri, provider->no_sign_option)
             ? option_is_true(config_.option(object.canonical_uri, provider->no_sign_option))
             : provider->anonymous_by_default && !credentials_configured;
-    if (!no_sign) {
-        auto loaded =
-            custom_provider
-                ? credentials_.custom(config_, provider->credentials_kind, object.canonical_uri)
-                : credentials_.native(config_, *provider, object.canonical_uri);
-        if (!loaded)
-            return std::unexpected(loaded.error());
-        credentials = std::move(*loaded);
-        credentials_ptr = &credentials;
+    if (no_sign)
+        return ResolvedCredentials{};
+
+    auto loaded = custom_provider ? credentials_.custom(config_, provider->credentials_kind,
+                                                        object.canonical_uri)
+                                  : credentials_.native(config_, *provider, object.canonical_uri);
+    if (!loaded)
+        return std::unexpected(loaded.error());
+    return ResolvedCredentials{std::move(*loaded)};
+}
+
+std::expected<PreparedRequest, RequestError>
+RequestBuilder::materialize(const Locator& locator, const ResolvedCredentials& credentials,
+                            std::uint64_t first, std::uint64_t length, std::string_view region_hint,
+                            std::string_view if_match) {
+    const Resolved& object = locator.resolved;
+    if (length == 0 || first > UINT64_MAX - (length - 1))
+        return std::unexpected(RequestError{KARU_ERR_RANGE, "HTTP range overflows"});
+
+    const std::string range = backends::range_header(first, length);
+    if (object.backend == Backend::Http || object.backend == Backend::HuggingFace) {
+        auto prepared = object.backend == Backend::Http
+                            ? backends::prepare_http(config_, object, if_match)
+                            : backends::prepare_hugging_face(config_, object, if_match);
+        if (prepared) {
+            prepared->range = range;
+            apply_http_options(config_, object.canonical_uri, *prepared);
+        }
+        return prepared;
     }
 
-    backends::RequestContext request{config_, object,      credentials_ptr, first,
-                                     length,  region_hint, if_match};
+    const backends::CloudProvider* provider = backends::cloud_provider(object.backend);
+    if (provider == nullptr)
+        return std::unexpected(RequestError{KARU_ERR_UNSUPPORTED, "unsupported request backend"});
+
+    backends::RequestContext request{
+        config_, object,      credentials.value ? &*credentials.value : nullptr,
+        range,   region_hint, if_match};
     auto prepared = provider->prepare_request(request);
     if (!prepared)
         return std::unexpected(prepared.error());
@@ -73,6 +97,7 @@ RequestBuilder::prepare(const Locator& locator, std::uint64_t first, std::uint64
         !headers) {
         return std::unexpected(headers.error());
     }
+    prepared->range = range;
     apply_http_options(config_, object.canonical_uri, *prepared);
     return prepared;
 }

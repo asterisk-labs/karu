@@ -1,3 +1,4 @@
+#include "backends/crypto.hpp"
 #include "locator.hpp"
 #include "test_support.hpp"
 
@@ -16,6 +17,7 @@ void test_s3_request() {
     if (!request)
         return;
     EQS(request->url, "https://my-bucket.s3.us-west-2.amazonaws.com/a%20b//c");
+    EQS(request->range, "bytes=10-29");
     OK(header(*request, "Authorization").starts_with("AWS4-HMAC-SHA256 "));
     OK(header(*request, "Authorization").find("range;") != std::string::npos);
     OK(header(*request, "Authorization").find("if-match;") != std::string::npos);
@@ -81,6 +83,11 @@ void test_s3_request() {
     OK(!inaccessible_request);
     if (!inaccessible_request)
         EQ(inaccessible_request.error().status, KARU_ERR_CREDENTIALS);
+
+    const auto unavailable_hmac = karu::backends::hmac(nullptr, {}, "value");
+    OK(!unavailable_hmac);
+    if (!unavailable_hmac)
+        EQ(unavailable_hmac.error().status, KARU_ERR_CREDENTIALS);
 }
 
 void test_managed_headers() {

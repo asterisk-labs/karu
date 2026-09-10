@@ -73,10 +73,11 @@ std::expected<std::vector<unsigned char>, RequestError> decode_base64(std::strin
     return result;
 }
 
-std::expected<PreparedRequest, RequestError>
-prepare_azure(const ConfigSnapshot& config, const Resolved& object,
-              const ProviderCredentials* custom, std::uint64_t first, std::uint64_t length,
-              std::string_view if_match) {
+std::expected<PreparedRequest, RequestError> prepare_azure(const ConfigSnapshot& config,
+                                                           const Resolved& object,
+                                                           const ProviderCredentials* custom,
+                                                           std::string_view range,
+                                                           std::string_view if_match) {
     const std::string& path = object.canonical_uri;
     const auto connection =
         parse_connection_string(config.option(path, "AZURE_STORAGE_CONNECTION_STRING"));
@@ -177,7 +178,6 @@ prepare_azure(const ConfigSnapshot& config, const Resolved& object,
     if (!decoded_key)
         return std::unexpected(decoded_key.error());
     const std::string date = rfc7231_date(std::time(nullptr));
-    const std::string range = range_header(first, length);
     const std::string canonical_headers = "x-ms-date:" + date + "\nx-ms-version:2023-11-03\n";
     auto url_parts = split_url(url);
     if (!url_parts)
@@ -191,10 +191,13 @@ prepare_azure(const ConfigSnapshot& config, const Resolved& object,
         string_to_sign.push_back('\n');
     }
     string_to_sign += canonical_headers + canonical_resource;
+    auto signature = hmac_sha256(*decoded_key, string_to_sign);
+    if (!signature)
+        return std::unexpected(signature.error());
     headers.emplace_back("x-ms-date", date);
     headers.emplace_back("x-ms-version", "2023-11-03");
-    headers.emplace_back("Authorization", "SharedKey " + credentials.account_name + ":" +
-                                              base64(hmac_sha256(*decoded_key, string_to_sign)));
+    headers.emplace_back("Authorization",
+                         "SharedKey " + credentials.account_name + ":" + base64(*signature));
     PreparedRequest request{std::move(url), std::move(headers)};
     request.http.follow_redirects = false;
     return request;
@@ -211,8 +214,8 @@ const CloudProvider& azure_provider() noexcept {
                                         load_azure_credentials,
                                         [](const RequestContext& request) {
                                             return prepare_azure(request.config, request.object,
-                                                                 request.credentials, request.first,
-                                                                 request.length, request.if_match);
+                                                                 request.credentials, request.range,
+                                                                 request.if_match);
                                         }};
     return provider;
 }

@@ -4,9 +4,12 @@
 #include "config.hpp"
 #include "request.hpp"
 
+#include <condition_variable>
 #include <cstdint>
 #include <expected>
-#include <shared_mutex>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -35,12 +38,20 @@ class CredentialCache {
         std::int64_t refresh_at = 0;
     };
 
+    struct Flight {
+        std::condition_variable ready;
+        bool done = false;
+        bool invalidated = false;
+        std::optional<std::expected<ProviderCredentials, RequestError>> result;
+    };
+
     [[nodiscard]] static std::int64_t refresh_time(const ProviderCredentials& credentials,
                                                    std::int64_t now, bool refresh_static) noexcept;
     [[nodiscard]] static bool reusable(const Entry& entry, std::int64_t now) noexcept;
 
-    mutable std::shared_mutex mutex_;
+    std::mutex mutex_;
     std::unordered_map<std::string, Entry> entries_;
+    std::unordered_map<std::string, std::shared_ptr<Flight>> flights_;
 };
 
 } // namespace karu

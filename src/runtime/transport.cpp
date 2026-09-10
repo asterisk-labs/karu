@@ -424,6 +424,7 @@ std::size_t size_header_callback(char* data, std::size_t size, std::size_t count
         state.retry_after = 0;
         state.response_region.clear();
         state.error_body_size = 0;
+        state.error_body_received = 0;
     } else if (header_name_is(line, "content-range:")) {
         const std::string_view value = header_value(line, "content-range:");
         std::uint64_t first = 0;
@@ -504,9 +505,7 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
     transfer.error_body_received = 0;
     transfer.http_buffers->error[0] = '\0';
 
-    const std::string range =
-        concat("bytes=", transfer.offset, "-", transfer.offset + transfer.length - 1);
-    auto headers = build_headers(transfer.request_headers, range);
+    auto headers = build_headers(transfer.request_headers, transfer.request_range);
     if (!headers)
         return std::unexpected(headers.error());
     transfer.headers = std::move(*headers);
@@ -570,7 +569,7 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
         }
         if (deadline.expired())
             return std::unexpected(timeout_failure(request->url));
-        auto headers = build_headers(request->headers, "bytes=0-0");
+        auto headers = build_headers(request->headers, request->range);
         if (!headers) {
             return std::unexpected(Failure{KARU_ERR_NOMEM, headers.error()});
         }

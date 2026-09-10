@@ -19,8 +19,7 @@ struct RequestContext {
     const ConfigSnapshot& config;
     const Resolved& object;
     const ProviderCredentials* credentials;
-    std::uint64_t first;
-    std::uint64_t length;
+    std::string_view range;
     std::string_view region_hint;
     std::string_view if_match;
 };

@@ -4,6 +4,7 @@
 #include "karu/karu.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,6 +35,7 @@ struct PreparedRequest {
 
     std::string url;
     std::vector<std::pair<std::string, std::string>> headers;
+    std::string range;
     HttpRequestOptions http;
     std::string routing_region;
 };
@@ -53,6 +55,10 @@ struct ProviderCredentials {
     std::string region;
     std::string cache_prefix;
     std::int64_t expires_at = 0;
+};
+
+struct ResolvedCredentials {
+    std::optional<ProviderCredentials> value;
 };
 
 } // namespace karu

@@ -15,6 +15,7 @@ void test_azure_request() {
     OK(azure_request.has_value());
     if (azure_request) {
         EQS(azure_request->url, "https://account.blob.core.windows.net/container/a%20b");
+        EQS(azure_request->range, "bytes=3-9");
         OK(header(*azure_request, "Authorization").starts_with("SharedKey account:"));
         OK(!header(*azure_request, "x-ms-date").empty());
     }

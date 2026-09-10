@@ -45,6 +45,11 @@ int main(void) {
         return 15;
     if (karu_locator_is_remote(locator))
         return 16;
+    unsigned char byte = 0;
+    karu_req unbounded = {locator, 0, KARU_TO_END, &byte, NULL, NULL};
+    karu_batch* batch = NULL;
+    if (karu_client_submit(client, &unbounded, 1, &batch) != KARU_ERR_INVALID || batch != NULL)
+        return 17;
     karu_locator_free(locator);
     karu_free(NULL);
     karu_client_free(client);

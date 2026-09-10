@@ -1,5 +1,6 @@
 #include "engine.hpp"
 
+#include "../backends/contract.hpp"
 #include "../error.hpp"
 #include "../platform.hpp"
 #include "../text.hpp"
@@ -22,6 +23,7 @@ namespace {
 using SteadyClock = std::chrono::steady_clock;
 
 constexpr int kFileWorkers = 4;
+constexpr int kCredentialWorkers = 4;
 constexpr int kMaximumRetryAfterSeconds = 60;
 
 CURLcode initialize_curl() {
@@ -76,6 +78,15 @@ std::chrono::milliseconds retry_delay(const Transfer& transfer, std::mt19937& ra
     return std::chrono::milliseconds(base + jitter(random));
 }
 
+std::mt19937 retry_generator(const void* identity) {
+    const auto ticks = static_cast<std::uint64_t>(SteadyClock::now().time_since_epoch().count());
+    const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(identity));
+    std::seed_seq seed{static_cast<std::uint32_t>(os::pid()), static_cast<std::uint32_t>(ticks),
+                       static_cast<std::uint32_t>(ticks >> 32), static_cast<std::uint32_t>(address),
+                       static_cast<std::uint32_t>(address >> 32)};
+    return std::mt19937(seed);
+}
+
 std::string timeout_detail(const Transfer& transfer,
                            std::string_view reason = "request timeout exceeded") {
     const std::string& uri = transfer.request_url.empty() ? transfer.locator->resolved.canonical_uri
@@ -119,6 +130,10 @@ Engine::Engine(ConfigSnapshot config)
         for (int index = 0; index < kFileWorkers; ++index) {
             file_workers_.emplace_back([this] { file_loop(); });
         }
+        credential_workers_.reserve(kCredentialWorkers);
+        for (int index = 0; index < kCredentialWorkers; ++index) {
+            credential_workers_.emplace_back([this] { credential_loop(); });
+        }
     } catch (...) {
         stop_workers();
         throw;
@@ -132,6 +147,9 @@ Engine::~Engine() {
         discard_transfer(std::move(transfer));
     }
     for (auto& transfer : file_queue_) {
+        discard_transfer(std::move(transfer));
+    }
+    for (auto& transfer : credential_queue_) {
         discard_transfer(std::move(transfer));
     }
 }
@@ -150,6 +168,10 @@ void Engine::stop_workers() noexcept {
     if (io_thread_.joinable())
         io_thread_.join();
     for (std::thread& worker : file_workers_) {
+        if (worker.joinable())
+            worker.join();
+    }
+    for (std::thread& worker : credential_workers_) {
         if (worker.joinable())
             worker.join();
     }
@@ -183,6 +205,8 @@ std::unique_ptr<BatchCore> Engine::submit(std::span<const Request> requests, kar
         for (auto& transfer : plan.transfers) {
             if (transfer->locator->resolved.backend == Backend::File) {
                 file_queue_.push_back(std::move(transfer));
+            } else if (backends::cloud_provider(transfer->locator->resolved.backend) != nullptr) {
+                credential_queue_.push_back(std::move(transfer));
             } else {
                 http_queue_.push_back(std::move(transfer));
             }
@@ -259,9 +283,18 @@ void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
             transfer->region_hint =
                 transfer->batch->region_hint(transfer->locator->resolved.canonical_uri);
         }
+        const bool cloud = backends::cloud_provider(transfer->locator->resolved.backend) != nullptr;
+        if (cloud && !transfer->credentials_ready) {
+            finish_transfer(std::move(transfer), KARU_ERR_INVALID,
+                            "internal error: cloud request has no resolved credentials");
+            return;
+        }
         auto request =
-            request_builder_.prepare(*transfer->locator, transfer->offset, transfer->length,
-                                     transfer->region_hint, transfer->if_match);
+            cloud ? request_builder_.materialize(*transfer->locator, transfer->credentials,
+                                                 transfer->offset, transfer->length,
+                                                 transfer->region_hint, transfer->if_match)
+                  : request_builder_.prepare(*transfer->locator, transfer->offset, transfer->length,
+                                             transfer->region_hint, transfer->if_match);
         if (!request) {
             finish_transfer(std::move(transfer), request.error().status,
                             std::move(request.error().message));
@@ -273,6 +306,7 @@ void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
             return;
         }
         transfer->request_url = std::move(request->url);
+        transfer->request_range = std::move(request->range);
         transfer->request_headers = std::move(request->headers);
         transfer->http = std::make_unique<HttpRequestOptions>(std::move(request->http));
         if (!request->routing_region.empty())
@@ -376,7 +410,7 @@ void Engine::discard_cancelled_http() {
 }
 
 void Engine::io_loop() {
-    std::mt19937 random{static_cast<std::mt19937::result_type>(os::pid())};
+    std::mt19937 random = retry_generator(this);
 
     while (!stop_.load(std::memory_order_acquire)) {
         std::deque<std::unique_ptr<Transfer>> incoming;
@@ -431,19 +465,19 @@ void Engine::io_loop() {
             if (message->msg != CURLMSG_DONE)
                 continue;
 
+            CURL* const easy = message->easy_handle;
+            const CURLcode result = message->data.result;
             Transfer* key = nullptr;
-            curl_easy_getinfo(message->easy_handle, CURLINFO_PRIVATE, &key);
+            curl_easy_getinfo(easy, CURLINFO_PRIVATE, &key);
             auto node = active_.extract(key);
             if (node.empty())
                 continue;
-            curl_multi_remove_handle(multi_.get(), message->easy_handle);
+            curl_multi_remove_handle(multi_.get(), easy);
             std::unique_ptr<Transfer> transfer = std::move(node.mapped());
 
             if (transfer->http_status == 0) {
-                curl_easy_getinfo(message->easy_handle, CURLINFO_RESPONSE_CODE,
-                                  &transfer->http_status);
+                curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &transfer->http_status);
             }
-            const CURLcode result = message->data.result;
             if (transport::succeeded(*transfer, result)) {
                 finish_transfer(std::move(transfer), KARU_OK);
                 continue;
@@ -477,9 +511,15 @@ void Engine::io_loop() {
                 transport::detail::credentials_expired(*transfer)) {
                 request_builder_.invalidate_credentials(*transfer->locator);
                 transfer->credentials_retried = true;
+                transfer->credentials = {};
+                transfer->credentials_ready = false;
                 curl_easy_reset(transfer->easy.get());
                 easy_pool_.push_back(std::move(transfer->easy));
-                pending_.push_front(std::move(transfer));
+                {
+                    std::lock_guard lock(queue_mutex_);
+                    credential_queue_.push_front(std::move(transfer));
+                }
+                queue_cv_.notify_all();
                 continue;
             }
 
@@ -597,6 +637,67 @@ void Engine::file_loop() {
     }
 }
 
+void Engine::credential_loop() {
+    while (true) {
+        std::unique_ptr<Transfer> transfer;
+        {
+            std::unique_lock lock(queue_mutex_);
+            queue_cv_.wait(lock, [this] {
+                return stop_.load(std::memory_order_acquire) || !credential_queue_.empty();
+            });
+            if (stop_.load(std::memory_order_acquire))
+                return;
+            transfer = std::move(credential_queue_.front());
+            credential_queue_.pop_front();
+        }
+
+        if (transfer->batch->is_cancelled()) {
+            discard_transfer(std::move(transfer));
+            continue;
+        }
+
+        transfer->deadline.start(options_.request_timeout_seconds);
+        try {
+            auto credentials = request_builder_.resolve_credentials(*transfer->locator);
+            if (!credentials) {
+                finish_transfer(std::move(transfer), credentials.error().status,
+                                std::move(credentials.error().message));
+                continue;
+            }
+            if (transfer->batch->is_cancelled()) {
+                discard_transfer(std::move(transfer));
+                continue;
+            }
+            if (transfer->deadline.expired()) {
+                const std::string detail = timeout_detail(*transfer);
+                finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
+                continue;
+            }
+
+            transfer->credentials = std::move(*credentials);
+            transfer->credentials_ready = true;
+            {
+                std::lock_guard lock(queue_mutex_);
+                if (stop_.load(std::memory_order_acquire)) {
+                    discard_transfer(std::move(transfer));
+                    continue;
+                }
+                http_queue_.push_back(std::move(transfer));
+            }
+            curl_multi_wakeup(multi_.get());
+        } catch (const std::bad_alloc&) {
+            finish_transfer(std::move(transfer), KARU_ERR_NOMEM,
+                            "out of memory resolving credentials");
+        } catch (const std::exception& error) {
+            finish_transfer(std::move(transfer), KARU_ERR_CREDENTIALS,
+                            concat("could not resolve credentials: ", error.what()));
+        } catch (...) {
+            finish_transfer(std::move(transfer), KARU_ERR_CREDENTIALS,
+                            "could not resolve credentials: unknown C++ exception");
+        }
+    }
+}
+
 void Engine::cancel(BatchCore& batch) {
     batch.cancelled.store(true, std::memory_order_release);
     batch.cv.notify_all();
@@ -610,6 +711,15 @@ void Engine::cancel(BatchCore& batch) {
             }
             auto transfer = std::move(*iterator);
             iterator = file_queue_.erase(iterator);
+            discard_transfer(std::move(transfer));
+        }
+        for (auto iterator = credential_queue_.begin(); iterator != credential_queue_.end();) {
+            if ((*iterator)->batch != &batch) {
+                ++iterator;
+                continue;
+            }
+            auto transfer = std::move(*iterator);
+            iterator = credential_queue_.erase(iterator);
             discard_transfer(std::move(transfer));
         }
     }

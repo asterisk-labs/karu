@@ -48,6 +48,7 @@ class Engine {
   private:
     void io_loop();
     void file_loop();
+    void credential_loop();
     void start_transfer(std::unique_ptr<Transfer> transfer);
     void finish_transfer(std::unique_ptr<Transfer> transfer, karu_status status,
                          std::string detail = {});
@@ -62,6 +63,7 @@ class Engine {
     std::atomic<bool> cancellation_pending_{false};
     std::thread io_thread_;
     std::vector<std::thread> file_workers_;
+    std::vector<std::thread> credential_workers_;
 
     RequestBuilder request_builder_;
     ClientOptions options_;
@@ -77,6 +79,7 @@ class Engine {
     std::condition_variable queue_cv_;
     std::deque<std::unique_ptr<Transfer>> http_queue_;
     std::deque<std::unique_ptr<Transfer>> file_queue_;
+    std::deque<std::unique_ptr<Transfer>> credential_queue_;
     std::deque<std::unique_ptr<Transfer>> pending_;
     std::unordered_map<Transfer*, std::unique_ptr<Transfer>> active_;
     std::deque<Retry> retries_;

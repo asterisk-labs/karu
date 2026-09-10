@@ -27,11 +27,10 @@ constexpr std::array<std::string_view, 14> CREDENTIAL_OPTIONS{"GCS_HMAC_ACCESS_K
                                                               "GCS_METADATA_DISABLED",
                                                               "GCS_METADATA_ENDPOINT"};
 
-std::expected<PreparedRequest, RequestError>
-prepare_gcs(const ConfigSnapshot& config, const Resolved& object, const ProviderCredentials* custom,
-            std::uint64_t first, std::uint64_t length, std::string_view if_match) {
-    static_cast<void>(first);
-    static_cast<void>(length);
+std::expected<PreparedRequest, RequestError> prepare_gcs(const ConfigSnapshot& config,
+                                                         const Resolved& object,
+                                                         const ProviderCredentials* custom,
+                                                         std::string_view if_match) {
     const std::string& path = object.canonical_uri;
     std::string endpoint = config.option(path, "GCS_ENDPOINT", "https://storage.googleapis.com");
     auto normalized_endpoint = http_endpoint(std::move(endpoint), "GCS_ENDPOINT");
@@ -77,9 +76,12 @@ prepare_gcs(const ConfigSnapshot& config, const Resolved& object, const Provider
         const auto key =
             std::span(reinterpret_cast<const unsigned char*>(credentials.secret_access_key.data()),
                       credentials.secret_access_key.size());
+        auto signature = hmac(EVP_sha1(), key, canonical);
+        if (!signature)
+            return std::unexpected(signature.error());
         headers.emplace_back("Date", date);
-        headers.emplace_back("Authorization", "GOOG1 " + credentials.access_key_id + ":" +
-                                                  base64(hmac(EVP_sha1(), key, canonical)));
+        headers.emplace_back("Authorization",
+                             "GOOG1 " + credentials.access_key_id + ":" + base64(*signature));
         PreparedRequest request{std::move(url), std::move(headers)};
         request.http.follow_redirects = false;
         return request;
@@ -102,8 +104,8 @@ const CloudProvider& gcs_provider() noexcept {
                                         load_gcs_credentials,
                                         [](const RequestContext& request) {
                                             return prepare_gcs(request.config, request.object,
-                                                               request.credentials, request.first,
-                                                               request.length, request.if_match);
+                                                               request.credentials,
+                                                               request.if_match);
                                         }};
     return provider;
 }

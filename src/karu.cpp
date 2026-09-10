@@ -51,6 +51,11 @@ std::vector<karu::Request> convert_requests(const karu_req* requests, std::size_
             karu::set_error(karu::concat(call, ": request ", index, " is empty"));
             return {};
         }
+        if (request.length == KARU_TO_END) {
+            karu::set_error(
+                karu::concat(call, ": request ", index, " does not have a finite length"));
+            return {};
+        }
         if (request.if_match != nullptr &&
             std::string_view(request.if_match).find_first_of("\r\n") != std::string_view::npos) {
             karu::set_error(karu::concat(call, ": request ", index, " has an invalid ETag"));
