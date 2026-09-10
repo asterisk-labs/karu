@@ -3,6 +3,7 @@ SHELL := /bin/sh
 CMAKE        ?= cmake
 CTEST        ?= ctest
 CLANG_FORMAT ?= clang-format
+GCOVR        ?= gcovr
 
 BUILD      ?= build
 BUILD_TYPE ?= Release
@@ -10,9 +11,10 @@ JOBS       ?=
 WERROR     ?= ON
 PREFIX     ?= $(abspath $(BUILD)/stage)
 
-ASAN_BUILD    ?= build-asan
-TSAN_BUILD    ?= build-tsan
-PACKAGE_BUILD ?= $(BUILD)/package-test
+ASAN_BUILD     ?= build-asan
+TSAN_BUILD     ?= build-tsan
+COVERAGE_BUILD ?= build-coverage
+PACKAGE_BUILD  ?= $(BUILD)/package-test
 
 SYSTEM_NAME := $(shell uname -s 2>/dev/null)
 ifeq ($(SYSTEM_NAME),Darwin)
@@ -32,7 +34,7 @@ CHANGED_SOURCES := $(shell \
 .DEFAULT_GOAL := all
 
 .PHONY: help all configure build test debug release install package-test \
-	test-asan test-tsan check format format-check clean
+	test-asan test-tsan coverage check format format-check clean
 
 help: ## Show the available targets and configuration variables
 	@awk 'BEGIN {FS = ":.*## "; print "Karu development targets:\n"} \
@@ -92,6 +94,18 @@ test-tsan: ## Run tests with ThreadSanitizer
 	TSAN_OPTIONS=halt_on_error=1 \
 	$(CTEST) --test-dir "$(TSAN_BUILD)" --build-config Debug --output-on-failure
 
+coverage: ## Write GCC line coverage reports to build-coverage
+	$(CMAKE) -S . -B "$(COVERAGE_BUILD)" \
+		-DCMAKE_BUILD_TYPE=Debug \
+		-DKARU_BUILD_TESTS=ON \
+		-DKARU_COVERAGE=ON $(CMAKE_FLAGS)
+	$(CMAKE) --build "$(COVERAGE_BUILD)" --parallel $(JOBS)
+	$(CTEST) --test-dir "$(COVERAGE_BUILD)" --output-on-failure
+	$(GCOVR) --root . --filter '^src/' --print-summary "$(COVERAGE_BUILD)" \
+		--gcov-ignore-parse-errors negative_hits.warn_once_per_file \
+		--xml "$(COVERAGE_BUILD)/coverage.xml" --xml-pretty \
+		--html-details "$(COVERAGE_BUILD)/coverage.html"
+
 check: ## Run the complete local validation suite
 	$(MAKE) test
 	$(MAKE) package-test
@@ -109,4 +123,4 @@ format-check: ## Verify formatting of changed C and C++ sources
 	fi
 
 clean: ## Remove only Makefile-managed build directories
-	$(CMAKE) -E rm -rf build build-debug build-release build-asan build-tsan
+	$(CMAKE) -E rm -rf build build-debug build-release build-asan build-tsan build-coverage

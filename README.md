@@ -3,6 +3,7 @@
 *karu is the Quechua word for far.*
 
 [![CI](https://github.com/asterisk-labs/karu/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/asterisk-labs/karu/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/asterisk-labs/karu/graph/badge.svg?branch=main)](https://codecov.io/gh/asterisk-labs/karu)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-4E04EB.svg)
 ![Linux, macOS, and Windows](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-4E04EB.svg)
 [![MIT license](https://img.shields.io/badge/license-MIT-2b8a3e.svg)](#license)

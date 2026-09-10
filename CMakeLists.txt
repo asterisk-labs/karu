@@ -16,6 +16,7 @@ project(karu
 
 option(KARU_BUILD_TESTS "Build the Karu component tests" OFF)
 option(KARU_WERROR      "Treat warnings in Karu as errors" OFF)
+option(KARU_COVERAGE    "Instrument Karu for GCC coverage reporting" OFF)
 set(KARU_SANITIZE "" CACHE STRING
     "Sanitizers used to compile and link Karu component tests")
 
@@ -99,6 +100,14 @@ if(KARU_SANITIZE AND NOT MSVC)
     target_link_options(karu PUBLIC -fsanitize=${KARU_SANITIZE})
 endif()
 
+if(KARU_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR "KARU_COVERAGE requires GCC")
+    endif()
+    target_compile_options(karu PRIVATE --coverage -O0 -g)
+    target_link_options(karu PUBLIC --coverage)
+endif()
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -107,7 +116,7 @@ install(TARGETS karu EXPORT karuTargets
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/karu)
-install(FILES README.md CONFIGURATION.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(FILES README.md CHANGELOG.md CONFIGURATION.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(EXPORT karuTargets
     FILE karuTargets.cmake
     NAMESPACE karu::
