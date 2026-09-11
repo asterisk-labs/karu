@@ -70,6 +70,7 @@ void test_windows_allocations_and_errors();
 void test_batch_lifetimes_and_concurrency();
 void test_engine_shutdown();
 void test_planner_scope();
+void test_planner_property();
 void test_transport_statuses();
 void test_cpp_facade();
 

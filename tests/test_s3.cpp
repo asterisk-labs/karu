@@ -99,6 +99,7 @@ void test_s3_request() {
         EQS(public_request->url, "http://127.0.0.1:9000/my-bucket/a%20b//c");
         OK(public_request->headers.empty());
         OK(public_request->http.follow_redirects);
+        OK(!public_request->http.same_origin_redirects_only);
     }
 
     karu::ConfigBuilder inaccessible(false);

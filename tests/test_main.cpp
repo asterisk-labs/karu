@@ -23,6 +23,7 @@ int main() {
     test_batch_lifetimes_and_concurrency();
     test_engine_shutdown();
     test_planner_scope();
+    test_planner_property();
     test_transport_statuses();
     test_cpp_facade();
 

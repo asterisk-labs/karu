@@ -28,6 +28,7 @@ void test_hugging_face_request() {
         EQS(header(*request, "Authorization"), "Bearer token");
         EQS(header(*request, "If-Match"), "\"etag\"");
         EQS(header(*request, "X-Karu-Test"), "yes");
+        OK(request->http.same_origin_redirects_only);
     }
 
     SECTION("Hugging Face cached token");
@@ -47,8 +48,10 @@ void test_hugging_face_request() {
     auto cached_request =
         cached_builder.prepare(Locator{must_resolve("hf://datasets/org/repo/file.bin")}, 0, 1, {});
     OK(cached_request.has_value());
-    if (cached_request)
+    if (cached_request) {
         EQS(header(*cached_request, "Authorization"), "Bearer cached-token");
+        OK(!cached_request->http.same_origin_redirects_only);
+    }
 
     // Token files are consulted for each request preparation. Rotating a
     // login does not require rebuilding the client or introduce object state.

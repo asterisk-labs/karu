@@ -130,6 +130,10 @@ int main(int argc, char** argv) {
     check(fetch(client, base + "/object", 127, range) == KARU_OK, "206 range read");
     check_bytes(range, 127, "206 range contents");
 
+    std::array<unsigned char, 333> chunked{};
+    check(fetch(client, base + "/chunked", 127, chunked) == KARU_OK, "chunked 206 range read");
+    check_bytes(chunked, 127, "chunked 206 range contents");
+
     std::array<unsigned char, 1> user_agent_byte{};
     check(fetch(client, base + "/user-agent", 0, user_agent_byte) == KARU_OK,
           "default User-Agent reaches the server");
@@ -231,6 +235,9 @@ int main(int argc, char** argv) {
     std::array<unsigned char, 16> small{};
     check(fetch(client, base + "/redirect", 21, small) == KARU_OK, "same-origin redirect");
     check_bytes(small, 21, "redirect contents");
+    check(fetch(client, base + "/redirect-cross-origin", 21, small) == KARU_OK,
+          "headerless cross-origin redirect");
+    check_bytes(small, 21, "headerless cross-origin redirect contents");
     check(fetch(client, base + "/redirect-ftp", 0, small) == KARU_ERR_NETWORK,
           "non-HTTP redirect rejected");
     karu_locator* redirected = nullptr;
@@ -239,6 +246,37 @@ int main(int argc, char** argv) {
     check(karu_client_size(client, redirected, &size) == KARU_ERR_NETWORK,
           "non-HTTP size redirect rejected");
     karu_locator_free(redirected);
+
+    karu_config* custom_header_config = nullptr;
+    karu_client* custom_header_client = nullptr;
+    check(karu_config_create_empty(&custom_header_config) == KARU_OK,
+          "create custom-header config");
+    check(karu_config_set_option(custom_header_config, "KARU_HTTP_HEADERS",
+                                 "X-Karu-Secret: sentinel") == KARU_OK,
+          "set custom redirect header");
+    check(karu_client_create(custom_header_config, &custom_header_client) == KARU_OK,
+          "create custom-header client");
+    karu_config_free(custom_header_config);
+
+    check(fetch(custom_header_client, base + "/redirect-same-origin-header", 21, small) == KARU_OK,
+          "custom header retained on same-origin redirect");
+    check(fetch(custom_header_client, base + "/redirect-cross-origin", 21, small) == KARU_ERR_HTTP,
+          "custom header blocks cross-origin redirect");
+    check(std::strstr(karu_last_error(), "cross-origin redirect") != nullptr,
+          "cross-origin redirect error is precise");
+
+    karu_locator* cross_origin_size = nullptr;
+    check(karu_resolve((base + "/redirect-cross-origin").c_str(), &cross_origin_size) == KARU_OK,
+          "resolve custom-header size redirect");
+    check(karu_client_size(custom_header_client, cross_origin_size, &size) == KARU_ERR_HTTP,
+          "custom header blocks cross-origin size redirect");
+    karu_locator_free(cross_origin_size);
+
+    std::array<unsigned char, 1> leak_status{};
+    check(fetch(custom_header_client, base + "/redirect-leak-status", 0, leak_status) == KARU_OK,
+          "read redirect leak status");
+    check(leak_status[0] == 0, "custom header never reached redirect target");
+    karu_client_free(custom_header_client);
     check(fetch(client, base + "/retry", 31, small) == KARU_OK, "retry after 503");
     check_bytes(small, 31, "retry contents");
     check(fetch(client, base + "/large-error-retry", 31, small) == KARU_OK,

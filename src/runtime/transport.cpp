@@ -65,6 +65,106 @@ bool header_name_is(std::string_view line, std::string_view name) noexcept {
     return true;
 }
 
+bool ascii_equal(std::string_view left, std::string_view right) noexcept {
+    if (left.size() != right.size())
+        return false;
+    return std::ranges::equal(left, right, [](unsigned char a, unsigned char b) {
+        return std::tolower(a) == std::tolower(b);
+    });
+}
+
+struct HttpOrigin {
+    std::string_view scheme;
+    std::string_view host;
+    unsigned port = 0;
+};
+
+std::optional<HttpOrigin> http_origin(std::string_view url,
+                                      std::string_view inherited_scheme = {}) noexcept {
+    std::size_t authority_start = 0;
+    std::string_view scheme;
+    if (url.starts_with("//")) {
+        scheme = inherited_scheme;
+        authority_start = 2;
+    } else {
+        const std::size_t marker = url.find("://");
+        if (marker == std::string_view::npos)
+            return std::nullopt;
+        scheme = url.substr(0, marker);
+        authority_start = marker + 3;
+    }
+    if (!ascii_equal(scheme, "http") && !ascii_equal(scheme, "https"))
+        return std::nullopt;
+
+    const std::size_t authority_end = url.find_first_of("/?#", authority_start);
+    const std::string_view authority = url.substr(authority_start, authority_end - authority_start);
+    if (authority.empty() || authority.find('@') != std::string_view::npos)
+        return std::nullopt;
+
+    std::string_view host = authority;
+    std::string_view port_text;
+    if (authority.starts_with('[')) {
+        const std::size_t closing = authority.find(']');
+        if (closing == std::string_view::npos)
+            return std::nullopt;
+        host = authority.substr(0, closing + 1);
+        const std::string_view suffix = authority.substr(closing + 1);
+        if (!suffix.empty()) {
+            if (!suffix.starts_with(':'))
+                return std::nullopt;
+            port_text = suffix.substr(1);
+        }
+    } else if (const std::size_t colon = authority.rfind(':'); colon != std::string_view::npos) {
+        host = authority.substr(0, colon);
+        port_text = authority.substr(colon + 1);
+    }
+    if (host.empty())
+        return std::nullopt;
+
+    unsigned port = ascii_equal(scheme, "https") ? 443u : 80u;
+    if (!port_text.empty()) {
+        unsigned parsed = 0;
+        const auto result =
+            std::from_chars(port_text.data(), port_text.data() + port_text.size(), parsed);
+        if (result.ec != std::errc{} || result.ptr != port_text.data() + port_text.size() ||
+            parsed > 65'535) {
+            return std::nullopt;
+        }
+        port = parsed;
+    } else if (authority.ends_with(':')) {
+        return std::nullopt;
+    }
+    return HttpOrigin{scheme, host, port};
+}
+
+bool same_origin_redirect(std::string_view original, std::string_view location) noexcept {
+    const auto source = http_origin(original);
+    if (!source || location.empty())
+        return false;
+
+    if (!location.starts_with("//") && location.find("://") == std::string_view::npos) {
+        // Relative references cannot change the origin.
+        return location.find(':') == std::string_view::npos;
+    }
+    const auto target = http_origin(location, source->scheme);
+    return target && ascii_equal(source->scheme, target->scheme) &&
+           ascii_equal(source->host, target->host) && source->port == target->port;
+}
+
+long response_status(std::string_view line) noexcept {
+    const std::size_t first = line.find(' ');
+    if (first == std::string_view::npos)
+        return 0;
+    const std::size_t begin = line.find_first_not_of(' ', first);
+    const std::size_t end = line.find(' ', begin);
+    if (begin == std::string_view::npos)
+        return 0;
+    long status = 0;
+    const std::string_view text = line.substr(begin, end - begin);
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), status);
+    return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() ? status : 0;
+}
+
 std::string_view header_value(std::string_view line, std::string_view name) noexcept {
     std::string_view value = line.substr(name.size());
     while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
@@ -142,6 +242,7 @@ void reset_response(Transfer& transfer) noexcept {
     transfer.satisfied = false;
     transfer.checked_status = false;
     transfer.http_status = 0;
+    transfer.redirect_blocked = false;
     transfer.content_range_seen = false;
     transfer.content_range_valid = false;
     transfer.content_range_matches = false;
@@ -245,6 +346,13 @@ std::size_t header_callback(char* data, std::size_t size, std::size_t count,
     // libcurl reports a new status line for redirects and interim responses.
     if (line.starts_with("HTTP/")) {
         reset_response(transfer);
+        transfer.http_status = response_status(line);
+    } else if (header_name_is(line, "location:") && transfer.http_status >= 300 &&
+               transfer.http_status < 400 && transfer.http->follow_redirects &&
+               transfer.http->same_origin_redirects_only &&
+               !same_origin_redirect(transfer.request_url, header_value(line, "location:"))) {
+        transfer.redirect_blocked = true;
+        return 0;
     } else if (header_name_is(line, "content-range:")) {
         transfer.content_range_seen = true;
         transfer.content_range_valid =
@@ -359,6 +467,10 @@ struct SizeState {
     bool content_range_valid = false;
     bool unsatisfied_content_range_valid = false;
     bool follow_redirects = true;
+    bool same_origin_redirects_only = false;
+    bool redirect_blocked = false;
+    long http_status = 0;
+    std::string_view original_url;
     int retry_after = 0;
     std::string response_region;
     std::array<char, kErrorBodyCapacity> error_body{};
@@ -374,6 +486,8 @@ void reset_response(SizeState& state) noexcept {
     state.body_exceeded_range = false;
     state.content_range_valid = false;
     state.unsatisfied_content_range_valid = false;
+    state.redirect_blocked = false;
+    state.http_status = 0;
     state.retry_after = 0;
     state.response_region.clear();
     state.error_body_size = 0;
@@ -419,6 +533,13 @@ std::size_t size_header_callback(char* data, std::size_t size, std::size_t count
 
     if (line.starts_with("HTTP/")) {
         reset_response(state);
+        state.http_status = response_status(line);
+    } else if (header_name_is(line, "location:") && state.http_status >= 300 &&
+               state.http_status < 400 && state.follow_redirects &&
+               state.same_origin_redirects_only &&
+               !same_origin_redirect(state.original_url, header_value(line, "location:"))) {
+        state.redirect_blocked = true;
+        return 0;
     } else if (header_name_is(line, "content-range:")) {
         const std::string_view value = header_value(line, "content-range:");
         std::uint64_t first = 0;
@@ -604,6 +725,8 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
 
         state = SizeState{.easy = easy,
                           .follow_redirects = request->http.follow_redirects,
+                          .same_origin_redirects_only = request->http.same_origin_redirects_only,
+                          .original_url = request->url,
                           .response_region = {}};
         error_buffer[0] = '\0';
         CURLcode code = curl_easy_perform(easy);
@@ -611,6 +734,13 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
         curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &http_status);
         if (code == CURLE_WRITE_ERROR && state.cut_short)
             code = CURLE_OK;
+
+        if (state.redirect_blocked) {
+            return std::unexpected(Failure{
+                KARU_ERR_HTTP,
+                concat(redact_url(request->url),
+                       ": cross-origin redirect blocked because KARU_HTTP_HEADERS is set")});
+        }
 
         const std::string_view error_body(state.error_body.data(), state.error_body_size);
         if (state.response_region.empty() && locator.resolved.backend == Backend::S3)

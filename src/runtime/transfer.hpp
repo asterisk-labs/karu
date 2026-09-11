@@ -72,6 +72,7 @@ struct Transfer {
     bool satisfied = false;
     bool checked_status = false;
     long http_status = 0;
+    bool redirect_blocked = false;
     bool content_range_seen = false;
     bool content_range_valid = false;
     bool content_range_matches = false;

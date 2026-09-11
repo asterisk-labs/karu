@@ -13,7 +13,9 @@
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <span>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -169,6 +171,34 @@ void test_batch_lifetimes_and_concurrency() {
     EQ(karu_client_create(config, &client), KARU_OK);
     EQ(karu_resolve(fixture_path.c_str(), &object), KARU_OK);
     std::atomic<int> errors{0};
+
+    // Repeatedly abandon batches from several submitter threads. This keeps
+    // cancellation, Karu-owned buffers, and a shared engine under contention.
+    std::vector<std::thread> cancellers;
+    for (std::size_t thread_index = 0; thread_index < 4; ++thread_index) {
+        cancellers.emplace_back([&, thread_index] {
+            for (std::size_t iteration = 0; iteration < 20; ++iteration) {
+                std::array<karu_req, 24> cancelled{};
+                for (std::size_t index = 0; index < cancelled.size(); ++index) {
+                    const std::size_t offset =
+                        (thread_index * 65537 + iteration * 4099 + index * 8191) %
+                        (data.size() - 257);
+                    cancelled[index] = karu_req{object, offset, 257, nullptr, nullptr, nullptr};
+                }
+                karu_batch* abandoned = nullptr;
+                if (karu_client_submit(client, cancelled.data(), cancelled.size(), &abandoned) !=
+                    KARU_OK) {
+                    ++errors;
+                    continue;
+                }
+                karu_batch_free(abandoned);
+            }
+        });
+    }
+    for (std::thread& canceller : cancellers)
+        canceller.join();
+    EQ(errors.load(), 0);
+
     std::vector<std::thread> readers;
     for (std::size_t thread_index = 0; thread_index < 8; ++thread_index) {
         readers.emplace_back([&, thread_index] {
@@ -187,6 +217,50 @@ void test_batch_lifetimes_and_concurrency() {
     for (std::thread& reader : readers)
         reader.join();
     EQ(errors.load(), 0);
+
+    // A batch is a concurrent completion queue: multiple consumers must
+    // collectively observe every completion exactly once and may all reach END.
+    constexpr std::size_t shared_count = 256;
+    std::vector<std::array<unsigned char, 257>> shared_buffers(shared_count);
+    std::vector<karu_req> shared_requests(shared_count);
+    for (std::size_t index = 0; index < shared_count; ++index) {
+        const std::size_t offset = index * 4099;
+        shared_requests[index] =
+            karu_req{object,  offset, shared_buffers[index].size(), shared_buffers[index].data(),
+                     nullptr, nullptr};
+    }
+    karu_batch* shared_batch = nullptr;
+    EQ(karu_client_submit(client, shared_requests.data(), shared_requests.size(), &shared_batch),
+       KARU_OK);
+    std::atomic<std::size_t> shared_ready{0};
+    std::atomic<int> shared_ends{0};
+    std::array<std::thread, 8> consumers;
+    for (std::thread& consumer : consumers) {
+        consumer = std::thread([&] {
+            for (;;) {
+                karu_done done{};
+                const karu_status status = karu_batch_next(shared_batch, &done, -1);
+                if (status == KARU_END) {
+                    ++shared_ends;
+                    return;
+                }
+                if (status != KARU_OK || done.status != KARU_OK) {
+                    ++errors;
+                    return;
+                }
+                ++shared_ready;
+            }
+        });
+    }
+    for (std::thread& consumer : consumers)
+        consumer.join();
+    EQ(errors.load(), 0);
+    EQ(shared_ready.load(), shared_count);
+    EQ(shared_ends.load(), static_cast<int>(consumers.size()));
+    for (std::size_t index = 0; index < shared_count; ++index)
+        OK(std::memcmp(shared_buffers[index].data(), data.data() + index * 4099,
+                       shared_buffers[index].size()) == 0);
+    karu_batch_free(shared_batch);
 
     // Undrained Karu-owned buffers remain owned by the batch.
     std::array<karu_req, 32> owned{};
@@ -321,6 +395,37 @@ void test_planner_scope() {
         karu::plan_transfers(local_contiguous_batch, local_contiguous, options, status);
     EQ(status, KARU_OK);
     EQ(local_together.transfers.size(), 1u);
+
+    // Exercise each arithmetic rejection independently. The planner must
+    // report these as immediate range completions without wrapping offsets.
+    std::byte invalid_destination{};
+    karu::Locator outside_window{must_resolve("https://example.test/window")};
+    outside_window.resolved.window_length = 8;
+    karu::Locator absolute_overflow{must_resolve("https://example.test/absolute?token=secret")};
+    absolute_overflow.resolved.window_offset = std::numeric_limits<std::uint64_t>::max() - 3;
+    karu::Locator end_overflow{must_resolve("https://example.test/end")};
+    const std::array<karu::Request, 3> invalid_ranges{{
+        {&outside_window, 9, 1, &invalid_destination, reinterpret_cast<void*>(1), {}},
+        {&absolute_overflow, 4, 1, &invalid_destination, reinterpret_cast<void*>(2), {}},
+        {&end_overflow,
+         std::numeric_limits<std::uint64_t>::max() - 3,
+         8,
+         &invalid_destination,
+         reinterpret_cast<void*>(3),
+         {}},
+    }};
+    karu::BatchCore invalid_batch;
+    auto invalid_plan = karu::plan_transfers(invalid_batch, invalid_ranges, {}, status);
+    EQ(status, KARU_OK);
+    OK(invalid_plan.transfers.empty());
+    EQ(invalid_plan.immediate.size(), invalid_ranges.size());
+    for (const auto& completion : invalid_plan.immediate)
+        EQ(completion.status, KARU_ERR_RANGE);
+    OK(invalid_plan.immediate[0].detail.find("leaves the locator window") != std::string::npos);
+    OK(invalid_plan.immediate[1].detail.find("overflows its absolute offset") != std::string::npos);
+    OK(invalid_plan.immediate[1].detail.find("secret") == std::string::npos);
+    OK(invalid_plan.immediate[1].detail.find("<redacted>") != std::string::npos);
+    OK(invalid_plan.immediate[2].detail.find("overflows its end offset") != std::string::npos);
 }
 
 void test_transport_statuses() {

@@ -4,6 +4,12 @@ Notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Requests configured with `KARU_HTTP_HEADERS` reject cross-origin redirects
+  before custom headers can be forwarded to another server. Same-origin
+  redirects and headerless cross-origin redirects remain supported.
+
 ## [0.2.1] - 2026-09-10
 
 ### Fixed

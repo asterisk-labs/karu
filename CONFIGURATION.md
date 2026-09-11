@@ -204,7 +204,9 @@ supported.
 `KARU_HTTP_HEADERS` accepts newline-separated `Name: value` entries. HTTP and
 Hugging Face requests may follow HTTP(S) redirects; authenticated cloud
 requests return a redirect as an error so that credentials and signatures are
-never replayed against a different request target.
+never replayed against a different request target. When `KARU_HTTP_HEADERS` is
+set, redirects are followed only within the original scheme, host, and port so
+that custom headers cannot be forwarded to another origin.
 
 | Option | Purpose |
 |---|---|

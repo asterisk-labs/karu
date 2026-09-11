@@ -147,6 +147,10 @@ bool retryable(const Transfer& transfer, CURLcode code) noexcept {
 
 Failure failure(const Transfer& transfer, CURLcode code) {
     const std::string url = redact_url(transfer.url());
+    if (transfer.redirect_blocked) {
+        return {KARU_ERR_HTTP,
+                concat(url, ": cross-origin redirect blocked because KARU_HTTP_HEADERS is set")};
+    }
     if (transfer.range_fallback_rejected) {
         return {KARU_ERR_HTTP,
                 concat(url, ": server ignored Range; refusing to discard ", transfer.offset,

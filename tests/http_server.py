@@ -15,6 +15,31 @@ DATA = bytes((index * 31 + 7) & 0xFF for index in range(4096))
 LARGE_DATA = bytes((index * 31 + 7) & 0xFF for index in range(128 * 1024))
 
 
+class RedirectTargetHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    leaked_header = threading.Event()
+
+    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if self.headers.get("X-Karu-Secret") is not None:
+            RedirectTargetHandler.leaked_header.set()
+        range_header = self.headers.get("Range", "")
+        if not range_header.startswith("bytes=") or "-" not in range_header:
+            self.send_error(400)
+            return
+        first_text, last_text = range_header[6:].split("-", 1)
+        first = int(first_text)
+        last = min(int(last_text), len(DATA) - 1)
+        body = DATA[first : last + 1]
+        self.send_response(206)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Range", f"bytes {first}-{last}/{len(DATA)}")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        pass
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     retries = 0
@@ -30,6 +55,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     retry_date_requests = 0
     cancel_started = threading.Event()
     cancel_range_ok = False
+    redirect_target_port = 0
 
     def reply(self, status: int, body: bytes = b"", **headers: str) -> None:
         self.send_response(status)
@@ -49,6 +75,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.reply(425, b"not ready")
                 return
             self.reply(206, DATA[:1], Content_Range=f"bytes 0-0/{len(DATA)}")
+            return
+        if path == "/redirect-leak-status":
+            leaked = b"\x01" if RedirectTargetHandler.leaked_header.is_set() else b"\x00"
+            self.reply(206, leaked, Content_Range="bytes 0-0/1")
             return
         if path.endswith("/missing"):
             self.reply(404, b"missing")
@@ -101,6 +131,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
         if path == "/redirect":
             self.reply(302, Location="/object")
+            return
+        if path == "/redirect-cross-origin":
+            self.reply(
+                302,
+                Location=f"http://127.0.0.1:{Handler.redirect_target_port}/object",
+            )
+            return
+        if path == "/redirect-same-origin-header":
+            self.reply(
+                302,
+                Location=f"http://127.0.0.1:{self.server.server_port}/require-secret",
+            )
+            return
+        if path == "/require-secret" and self.headers.get("X-Karu-Secret") != "sentinel":
+            self.reply(400, b"missing redirect header")
             return
         if path == "/redirect-ftp":
             self.reply(302, Location="ftp://127.0.0.1:1/object")
@@ -213,6 +258,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.flush()
             self.close_connection = True
             return
+        if path == "/chunked":
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {first}-{last}/{len(DATA)}")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            at = 0
+            for chunk_size in (1, 17, 3, 64, 5, 257):
+                if at == len(body):
+                    break
+                chunk = body[at : at + chunk_size]
+                self.wfile.write(f"{len(chunk):x}\r\n".encode("ascii"))
+                self.wfile.write(chunk + b"\r\n")
+                at += len(chunk)
+            if at < len(body):
+                chunk = body[at:]
+                self.wfile.write(f"{len(chunk):x}\r\n".encode("ascii"))
+                self.wfile.write(chunk + b"\r\n")
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+            return
         reported_first = 0 if path == "/bad-range" else first
         reported_last = reported_first + len(body) - 1
         if path == "/bad-range-end":
@@ -247,8 +312,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main() -> int:
     if len(sys.argv) != 2:
         return 2
+    target = http.server.ThreadingHTTPServer(("127.0.0.1", 0), RedirectTargetHandler)
+    Handler.redirect_target_port = target.server_address[1]
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    target_worker = threading.Thread(target=target.serve_forever, daemon=True)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
+    target_worker.start()
     worker.start()
     try:
         completed = subprocess.run(
@@ -257,8 +326,11 @@ def main() -> int:
         return completed.returncode
     finally:
         server.shutdown()
+        target.shutdown()
         worker.join()
+        target_worker.join()
         server.server_close()
+        target.server_close()
 
 
 if __name__ == "__main__":

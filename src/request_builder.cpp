@@ -11,8 +11,10 @@ namespace {
 void apply_http_options(const ConfigSnapshot& config, std::string_view path,
                         PreparedRequest& request) {
     const bool follow_redirects = request.http.follow_redirects;
+    const bool configured_headers = !config.option(path, "KARU_HTTP_HEADERS").empty();
     request.http = config.http_options(path);
     request.http.follow_redirects = follow_redirects;
+    request.http.same_origin_redirects_only = configured_headers;
 }
 
 } // namespace

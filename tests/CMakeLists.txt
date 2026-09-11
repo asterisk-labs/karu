@@ -7,6 +7,7 @@ add_executable(karu_tests
     test_azure.cpp
     test_hugging_face.cpp
     test_source.cpp
+    test_planner_property.cpp
     test_engine.cpp)
 target_link_libraries(karu_tests PRIVATE karu::karu)
 target_include_directories(karu_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)

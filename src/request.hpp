@@ -23,6 +23,8 @@ struct HttpRequestOptions {
     // Cloud backends disable redirects when credentials are bound to the
     // original request or URL.
     bool follow_redirects = true;
+    // User-configured headers are scoped to the original HTTP origin.
+    bool same_origin_redirects_only = false;
     std::string ca_bundle;
     std::string ca_path;
     std::string proxy;
