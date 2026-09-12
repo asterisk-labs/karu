@@ -118,15 +118,14 @@ void redirect_origin_validation() {
     // With KARU_HTTP_HEADERS set, a redirect that leaves the origin is refused
     // before the target is contacted. Every malformed or different-origin
     // target below must fail closed.
-    static constexpr std::array<const char*, 8> blocked{
-        "/redirect/ipv6",           // bracketed IPv6 host with a port
-        "/redirect/ipv6-unclosed",  // '[' with no closing ']'
-        "/redirect/ipv6-trailing",  // text after ']' that is not a port
-        "/redirect/bad-port",       // port outside the 16-bit range
-        "/redirect/empty-port",     // trailing ':' with no digits
-        "/redirect/scheme",         // a scheme that is not http or https
-        "/redirect/no-host",        // an authority that is only a port
-        "/redirect/empty-location", // a Location header with no value
+    static constexpr std::array<const char*, 7> blocked{
+        "/redirect/ipv6",          // bracketed IPv6 host with a port
+        "/redirect/ipv6-unclosed", // '[' with no closing ']'
+        "/redirect/ipv6-trailing", // text after ']' that is not a port
+        "/redirect/bad-port",      // port outside the 16-bit range
+        "/redirect/empty-port",    // trailing ':' with no digits
+        "/redirect/scheme",        // a scheme that is not http or https
+        "/redirect/no-host",       // an authority that is only a port
     };
     const auto guarded =
         make_client({{"KARU_HTTP_HEADERS", "X-Karu-Probe: sentinel"}, {"KARU_MAX_ATTEMPTS", "1"}});
@@ -141,6 +140,18 @@ void redirect_origin_validation() {
                 fail(__LINE__, std::string(route) +
                                    " was refused for the wrong reason: " + read.error().message);
         }
+    }
+
+    // Some libcurl backends pass an empty Location header to the callback and
+    // others treat the response as a plain 302. Both outcomes fail safely: an
+    // empty header has no redirect target to validate or follow.
+    {
+        auto object = karu::Object::parse(fixture_url("/redirect/empty-location")).value();
+        std::vector<std::byte> buffer(16);
+        auto read = guarded.read_into(object, 0, buffer);
+        OK(!read.has_value());
+        if (!read)
+            OK(read.error().status == KARU_ERR_HTTP);
     }
 
     // Without user headers the same redirects are followed, and fail only
