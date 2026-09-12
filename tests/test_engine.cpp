@@ -549,13 +549,13 @@ void test_cpp_facade() {
 
     std::array<std::byte, 8> first{};
     std::array<std::byte, 8> second{};
-    const karu::Read reads[] = {
+    const std::array<karu::Read, 2> reads{{
         {&*object, 0, first, reinterpret_cast<void*>(1), {}},
         {&*object, 64, second, reinterpret_cast<void*>(2), {}},
-    };
+    }};
     karu::SubmitOptions submit_options;
     submit_options.coalesce_gap = 0;
-    auto batch = client->submit(reads, submit_options);
+    auto batch = client->submit(std::span<const karu::Read>(reads), submit_options);
     OK(batch.has_value());
     int ready = 0;
     while (batch) {
