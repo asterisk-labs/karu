@@ -7,6 +7,14 @@ function(karu_instrument_test target)
     endif()
 endfunction()
 
+function(karu_enable_test_warnings target)
+    target_compile_options(${target} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/utf-8>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic;-Wshadow>
+        $<$<AND:$<BOOL:${KARU_WERROR}>,$<CXX_COMPILER_ID:MSVC>>:/WX>
+        $<$<AND:$<BOOL:${KARU_WERROR}>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Werror>)
+endfunction()
+
 add_executable(karu_tests
     test_main.cpp
     test_support.cpp
@@ -24,11 +32,7 @@ karu_instrument_test(karu_tests)
 target_include_directories(karu_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_compile_definitions(karu_tests PRIVATE
     $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS>)
-target_compile_options(karu_tests PRIVATE
-    $<$<CXX_COMPILER_ID:MSVC>:/W4;/utf-8>
-    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic;-Wshadow>
-    $<$<AND:$<BOOL:${KARU_WERROR}>,$<CXX_COMPILER_ID:MSVC>>:/WX>
-    $<$<AND:$<BOOL:${KARU_WERROR}>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Werror>)
+karu_enable_test_warnings(karu_tests)
 add_test(NAME karu COMMAND karu_tests)
 
 add_executable(karu_c_api_test test_c_api.c)
@@ -43,11 +47,7 @@ if(Python3_Interpreter_FOUND)
     add_executable(karu_http_test test_http.cpp)
     target_link_libraries(karu_http_test PRIVATE karu::karu)
     karu_instrument_test(karu_http_test)
-    target_compile_options(karu_http_test PRIVATE
-        $<$<CXX_COMPILER_ID:MSVC>:/W4;/utf-8>
-        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic;-Wshadow>
-        $<$<AND:$<BOOL:${KARU_WERROR}>,$<CXX_COMPILER_ID:MSVC>>:/WX>
-        $<$<AND:$<BOOL:${KARU_WERROR}>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Werror>)
+    karu_enable_test_warnings(karu_http_test)
     add_test(NAME karu_http
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/http_server.py
                 $<TARGET_FILE:karu_http_test>)
@@ -69,11 +69,7 @@ if(Python3_Interpreter_FOUND)
     target_include_directories(karu_credentials_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_compile_definitions(karu_credentials_test PRIVATE
         $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS>)
-    target_compile_options(karu_credentials_test PRIVATE
-        $<$<CXX_COMPILER_ID:MSVC>:/W4;/utf-8>
-        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic;-Wshadow>
-        $<$<AND:$<BOOL:${KARU_WERROR}>,$<CXX_COMPILER_ID:MSVC>>:/WX>
-        $<$<AND:$<BOOL:${KARU_WERROR}>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Werror>)
+    karu_enable_test_warnings(karu_credentials_test)
     add_test(NAME karu_credentials
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/credential_server.py
                 $<TARGET_FILE:karu_credentials_test>)
@@ -85,10 +81,6 @@ endif()
 add_executable(karu_emulator_test test_emulators.cpp)
 target_link_libraries(karu_emulator_test PRIVATE karu::karu)
 karu_instrument_test(karu_emulator_test)
-target_compile_options(karu_emulator_test PRIVATE
-    $<$<CXX_COMPILER_ID:MSVC>:/W4;/utf-8>
-    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic;-Wshadow>
-    $<$<AND:$<BOOL:${KARU_WERROR}>,$<CXX_COMPILER_ID:MSVC>>:/WX>
-    $<$<AND:$<BOOL:${KARU_WERROR}>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Werror>)
+karu_enable_test_warnings(karu_emulator_test)
 add_test(NAME karu_emulators COMMAND karu_emulator_test)
 set_tests_properties(karu_emulators PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)

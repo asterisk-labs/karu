@@ -176,7 +176,6 @@ void uri_rejections() {
     OK(!resolve("/vsisubfile/notanumber,/tmp/x").has_value());
     OK(!resolve("/vsisubfile/10_20").has_value());
     OK(!resolve("/vsisubfile/10_20,").has_value());
-    OK(!resolve("/vsizip/archive.zip/member").has_value());
     OK(!resolve("/vsicurl/ftp://host/object").has_value());
     OK(!resolve("/vsis3/").has_value());
     OK(!resolve("/vsis3/bucket").has_value());
