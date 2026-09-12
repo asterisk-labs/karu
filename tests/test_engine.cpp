@@ -549,10 +549,15 @@ void test_cpp_facade() {
 
     std::array<std::byte, 8> first{};
     std::array<std::byte, 8> second{};
-    const std::array<karu::Read, 2> reads{{
-        {&*object, 0, first, reinterpret_cast<void*>(1), {}},
-        {&*object, 64, second, reinterpret_cast<void*>(2), {}},
-    }};
+    const karu::Object* const object_value = &object.value();
+    std::array<karu::Read, 2> reads{};
+    reads[0].object = object_value;
+    reads[0].destination = first;
+    reads[0].tag = first.data();
+    reads[1].object = object_value;
+    reads[1].offset = 64;
+    reads[1].destination = second;
+    reads[1].tag = second.data();
     karu::SubmitOptions submit_options;
     submit_options.coalesce_gap = 0;
     auto batch = client->submit(std::span<const karu::Read>(reads), submit_options);
