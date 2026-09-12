@@ -82,6 +82,61 @@ struct ConcurrentCallbackState {
     std::atomic<std::int64_t> expires_at{0};
 };
 
+struct BlockingCredentialState {
+    std::atomic<int> calls{0};
+    std::atomic<int> callers_started{0};
+    std::atomic<bool> entered{false};
+    std::atomic<bool> release{false};
+    const char* prefix = "/vsigs/bucket/";
+};
+
+BlockingCredentialState* native_credential_state = nullptr;
+
+void wait_for_release(BlockingCredentialState& state, int call) {
+    if (call != 1)
+        return;
+    state.entered.store(true, std::memory_order_release);
+    while (!state.release.load(std::memory_order_acquire))
+        std::this_thread::yield();
+}
+
+std::expected<ProviderCredentials, RequestError> blocking_native_credentials(const ConfigSnapshot&,
+                                                                             std::string_view) {
+    BlockingCredentialState& state = *native_credential_state;
+    const int call = state.calls.fetch_add(1, std::memory_order_relaxed) + 1;
+    wait_for_release(state, call);
+    ProviderCredentials credentials;
+    credentials.bearer_token = "native-" + std::to_string(call);
+    return credentials;
+}
+
+karu_status blocking_custom_credentials(void* data, karu_credentials_kind kind, const char*,
+                                        karu_credentials* out) {
+    auto& state = *static_cast<BlockingCredentialState*>(data);
+    const int call = state.calls.fetch_add(1, std::memory_order_relaxed) + 1;
+    wait_for_release(state, call);
+    if (kind != KARU_CREDENTIALS_GCS)
+        return KARU_ERR_CREDENTIALS;
+    *out = karu_credentials{};
+    out->bearer_token = call == 1 ? "custom-1" : "custom-2";
+    out->cache_prefix = state.prefix;
+    return KARU_OK;
+}
+
+backends::CloudProvider blocking_native_provider() {
+    static constexpr std::array<std::string_view, 0> no_options{};
+    return {Backend::Gcs,
+            KARU_CREDENTIALS_GCS,
+            "GCS_NO_SIGN_REQUEST",
+            false,
+            no_options,
+            blocking_native_credentials,
+            [](const backends::RequestContext&) {
+                return std::expected<PreparedRequest, RequestError>{
+                    PreparedRequest{"https://example.test", {}}};
+            }};
+}
+
 karu_status concurrent_credentials(void* data, karu_credentials_kind kind, const char*,
                                    karu_credentials* out) {
     auto& state = *static_cast<ConcurrentCallbackState*>(data);
@@ -105,8 +160,93 @@ karu_status concurrent_credentials(void* data, karu_credentials_kind kind, const
     return KARU_OK;
 }
 
+void test_inflight_credential_cache() {
+    const ConfigSnapshot bare = must_freeze(ConfigBuilder(false));
+    const backends::CloudProvider native_provider = blocking_native_provider();
+
+    BlockingCredentialState shared_native;
+    native_credential_state = &shared_native;
+    CredentialCache native_cache([] { return 1'000; });
+    std::latch native_start(1);
+    std::array<std::expected<ProviderCredentials, RequestError>, 4> native_results;
+    std::array<std::thread, 4> native_workers;
+    for (std::size_t index = 0; index < native_workers.size(); ++index) {
+        native_workers[index] = std::thread([&, index] {
+            shared_native.callers_started.fetch_add(1, std::memory_order_release);
+            native_start.wait();
+            native_results[index] = native_cache.native(bare, native_provider, "/vsigs/bucket/key");
+        });
+    }
+    native_start.count_down();
+    while (!shared_native.entered.load(std::memory_order_acquire) ||
+           shared_native.callers_started.load(std::memory_order_acquire) !=
+               static_cast<int>(native_workers.size())) {
+        std::this_thread::yield();
+    }
+    // Give every caller that has crossed the start gate a chance to join the
+    // single flight before its loader is released.
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    shared_native.release.store(true, std::memory_order_release);
+    for (std::thread& worker : native_workers)
+        worker.join();
+    native_credential_state = nullptr;
+    for (const auto& result : native_results) {
+        OK(result.has_value());
+        if (result)
+            EQS(result->bearer_token, "native-1");
+    }
+    EQ(shared_native.calls.load(std::memory_order_relaxed), 1);
+
+    BlockingCredentialState invalidated_native;
+    native_credential_state = &invalidated_native;
+    CredentialCache invalidated_native_cache([] { return 1'000; });
+    std::expected<ProviderCredentials, RequestError> native_first;
+    std::thread native_loader([&] {
+        native_first =
+            invalidated_native_cache.native(bare, native_provider, "/vsigs/bucket/invalidated");
+    });
+    while (!invalidated_native.entered.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    invalidated_native_cache.invalidate(bare, native_provider, "/vsigs/bucket/invalidated", false);
+    invalidated_native.release.store(true, std::memory_order_release);
+    native_loader.join();
+    OK(native_first.has_value());
+    auto native_second =
+        invalidated_native_cache.native(bare, native_provider, "/vsigs/bucket/invalidated");
+    native_credential_state = nullptr;
+    OK(native_second.has_value());
+    if (native_second)
+        EQS(native_second->bearer_token, "native-2");
+    EQ(invalidated_native.calls.load(std::memory_order_relaxed), 2);
+
+    BlockingCredentialState invalidated_custom;
+    ConfigBuilder custom_builder(false);
+    OK(custom_builder.set_provider(KARU_CREDENTIALS_GCS, blocking_custom_credentials,
+                                   &invalidated_custom, nullptr));
+    const ConfigSnapshot custom_config = must_freeze(custom_builder);
+    CredentialCache custom_cache([] { return 1'000; });
+    std::expected<ProviderCredentials, RequestError> custom_first;
+    std::thread custom_loader([&] {
+        custom_first =
+            custom_cache.custom(custom_config, KARU_CREDENTIALS_GCS, "/vsigs/bucket/key");
+    });
+    while (!invalidated_custom.entered.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    custom_cache.invalidate(custom_config, backends::gcs_provider(), "/vsigs/bucket/key", true);
+    invalidated_custom.release.store(true, std::memory_order_release);
+    custom_loader.join();
+    OK(custom_first.has_value());
+    auto custom_second =
+        custom_cache.custom(custom_config, KARU_CREDENTIALS_GCS, "/vsigs/bucket/key");
+    OK(custom_second.has_value());
+    if (custom_second)
+        EQS(custom_second->bearer_token, "custom-2");
+    EQ(invalidated_custom.calls.load(std::memory_order_relaxed), 2);
+}
+
 void test_renewable_callback_cache() {
     SECTION("credential provider");
+    test_inflight_credential_cache();
     CallbackState state;
     karu::ConfigBuilder builder(false);
     OK(builder.set_provider(KARU_CREDENTIALS_GCS, callback_credentials, &state, nullptr));

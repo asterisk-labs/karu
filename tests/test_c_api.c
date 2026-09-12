@@ -88,6 +88,72 @@ int main(void) {
         batch != NULL)
         return 25;
 
+    // Public entry points reject bad handles and outputs before touching caller
+    // memory. These are especially important for language bindings, where a
+    // partially constructed handle commonly appears during error unwinding.
+    if (karu_config_create(NULL) != KARU_ERR_INVALID)
+        return 26;
+    if (karu_config_create_empty(NULL) != KARU_ERR_INVALID)
+        return 27;
+    if (karu_config_set_option(NULL, "KARU_CONCURRENCY", "1") != KARU_ERR_INVALID)
+        return 28;
+    if (karu_config_set_option(config, NULL, "1") != KARU_ERR_INVALID)
+        return 29;
+    if (karu_config_set_path_option(NULL, "/vsis3/b", "AWS_REGION", "us-east-1") !=
+        KARU_ERR_INVALID)
+        return 30;
+    if (karu_config_set_path_option(config, NULL, "AWS_REGION", "us-east-1") != KARU_ERR_INVALID)
+        return 31;
+    if (karu_config_set_path_option(config, "/vsis3/b", NULL, "us-east-1") != KARU_ERR_INVALID)
+        return 32;
+    if (karu_config_set_credentials_provider(NULL, KARU_CREDENTIALS_AWS, NULL, NULL, NULL) !=
+        KARU_ERR_INVALID)
+        return 33;
+    karu_client* invalid_client = NULL;
+    if (karu_client_create(NULL, &invalid_client) != KARU_ERR_INVALID || invalid_client != NULL)
+        return 34;
+    if (karu_client_create(config, NULL) != KARU_ERR_INVALID)
+        return 35;
+    if (karu_client_matches_config(NULL, config, &match) != KARU_ERR_INVALID)
+        return 36;
+    if (karu_client_matches_config(client, NULL, &match) != KARU_ERR_INVALID)
+        return 37;
+    if (karu_client_matches_config(client, config, NULL) != KARU_ERR_INVALID)
+        return 38;
+    if (karu_resolve(NULL, &locator) != KARU_ERR_INVALID)
+        return 39;
+    if (karu_resolve("local.bin", NULL) != KARU_ERR_INVALID)
+        return 40;
+
+    uint64_t size = 0;
+    if (karu_client_size(NULL, locator, &size) != KARU_ERR_INVALID)
+        return 41;
+    if (karu_client_size(client, NULL, &size) != KARU_ERR_INVALID)
+        return 42;
+    if (karu_client_size(client, locator, NULL) != KARU_ERR_INVALID)
+        return 43;
+    if (karu_client_submit(NULL, NULL, 0, &batch) != KARU_ERR_INVALID)
+        return 44;
+    if (karu_client_submit(client, NULL, 1, &batch) != KARU_ERR_INVALID)
+        return 45;
+    if (karu_client_submit(client, NULL, 0, NULL) != KARU_ERR_INVALID)
+        return 46;
+    if (karu_client_fetch(NULL, NULL, 0) != KARU_ERR_INVALID)
+        return 47;
+    if (karu_client_fetch(client, NULL, 1) != KARU_ERR_INVALID)
+        return 48;
+    karu_req missing_buffer = {locator, 0, 1, NULL, NULL, NULL};
+    if (karu_client_fetch(client, &missing_buffer, 1) != KARU_ERR_INVALID)
+        return 49;
+    if (karu_batch_next(NULL, &done, 0) != KARU_ERR_INVALID)
+        return 50;
+    if (karu_client_submit(client, NULL, 0, &batch) != KARU_OK || batch == NULL)
+        return 51;
+    if (karu_batch_next(batch, NULL, 0) != KARU_ERR_INVALID)
+        return 52;
+    karu_batch_free(batch);
+    batch = NULL;
+
     karu_locator_free(locator);
     karu_free(NULL);
     karu_client_free(client);
