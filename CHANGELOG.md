@@ -4,11 +4,20 @@ Notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-12
+
+### Added
+
+- A new "How Karu Reads" guide explains request planning, range coalescing,
+  retries and credential resolution from end to end.
+
 ### Fixed
 
 - Requests configured with `KARU_HTTP_HEADERS` reject cross-origin redirects
   before custom headers can be forwarded to another server. Same-origin
   redirects and headerless cross-origin redirects remain supported.
+- Credential lookups keep the completed single-flight result alive while every
+  caller copies it, closing a remaining race detected by ThreadSanitizer.
 
 ## [0.2.1] - 2026-09-10
 
@@ -73,7 +82,8 @@ Notable user-visible changes are recorded here.
 
 First public release.
 
-[Unreleased]: https://github.com/asterisk-labs/karu/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/asterisk-labs/karu/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/asterisk-labs/karu/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/asterisk-labs/karu/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/asterisk-labs/karu/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/asterisk-labs/karu/compare/v0.1.0...v0.1.1
