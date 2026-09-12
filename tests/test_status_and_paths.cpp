@@ -37,7 +37,6 @@ void status_table() {
     for (const karu_status status : all) {
         const std::string text = karu_status_string(status);
         OK(!text.empty());
-        EQS(text, text);
         if (text == "unknown status")
             fail(__LINE__, "status " + std::to_string(static_cast<int>(status)) + " has no name");
     }

@@ -260,6 +260,9 @@ int main(int argc, char** argv) {
 
     check(fetch(custom_header_client, base + "/redirect-same-origin-header", 21, small) == KARU_OK,
           "custom header retained on same-origin redirect");
+    check(fetch(custom_header_client, base + "/redirect-relative-colon", 21, small) == KARU_OK,
+          "colon in same-origin relative redirect");
+    check_bytes(small, 21, "relative redirect with colon contents");
     check(fetch(custom_header_client, base + "/redirect-cross-origin", 21, small) == KARU_ERR_HTTP,
           "custom header blocks cross-origin redirect");
     check(std::strstr(karu_last_error(), "cross-origin redirect") != nullptr,
@@ -271,6 +274,15 @@ int main(int argc, char** argv) {
     check(karu_client_size(custom_header_client, cross_origin_size, &size) == KARU_ERR_HTTP,
           "custom header blocks cross-origin size redirect");
     karu_locator_free(cross_origin_size);
+
+    karu_locator* relative_colon_size = nullptr;
+    check(karu_resolve((base + "/redirect-relative-colon").c_str(), &relative_colon_size) ==
+              KARU_OK,
+          "resolve relative redirect containing colon");
+    check(karu_client_size(custom_header_client, relative_colon_size, &size) == KARU_OK &&
+              size == 4096,
+          "colon in same-origin relative size redirect");
+    karu_locator_free(relative_colon_size);
 
     std::array<unsigned char, 1> leak_status{};
     check(fetch(custom_header_client, base + "/redirect-leak-status", 0, leak_status) == KARU_OK,

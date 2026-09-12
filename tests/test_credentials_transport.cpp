@@ -1,6 +1,6 @@
 // Transport options that only a live endpoint can exercise: the TLS and proxy
 // knobs, the size probe's fallback when a server answers a range with a whole
-// body, and every arm of the redirect origin parser that guards
+// body, and malformed or cross-origin redirect targets guarded by
 // KARU_HTTP_HEADERS.
 #include "credential_support.hpp"
 #include "karu/karu.hpp"
@@ -114,10 +114,10 @@ void tls_and_proxy_options() {
     }
 }
 
-void redirect_origin_parser() {
+void redirect_origin_validation() {
     // With KARU_HTTP_HEADERS set, a redirect that leaves the origin is refused
-    // before the target is contacted. Each route below stresses a different arm
-    // of the authority parser; every one of them must be rejected.
+    // before the target is contacted. Every malformed or different-origin
+    // target below must fail closed.
     static constexpr std::array<const char*, 8> blocked{
         "/redirect/ipv6",           // bracketed IPv6 host with a port
         "/redirect/ipv6-unclosed",  // '[' with no closing ']'
@@ -218,7 +218,7 @@ void test_transport_options() {
     size_probe_without_credentials();
     tls_and_proxy_options();
     negotiated_http_versions();
-    redirect_origin_parser();
+    redirect_origin_validation();
 }
 
 } // namespace karu::test

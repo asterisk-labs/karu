@@ -73,82 +73,44 @@ bool ascii_equal(std::string_view left, std::string_view right) noexcept {
     });
 }
 
-struct HttpOrigin {
-    std::string_view scheme;
-    std::string_view host;
-    unsigned port = 0;
-};
-
-std::optional<HttpOrigin> http_origin(std::string_view url,
-                                      std::string_view inherited_scheme = {}) noexcept {
-    std::size_t authority_start = 0;
-    std::string_view scheme;
-    if (url.starts_with("//")) {
-        scheme = inherited_scheme;
-        authority_start = 2;
-    } else {
-        const std::size_t marker = url.find("://");
-        if (marker == std::string_view::npos)
-            return std::nullopt;
-        scheme = url.substr(0, marker);
-        authority_start = marker + 3;
-    }
-    if (!ascii_equal(scheme, "http") && !ascii_equal(scheme, "https"))
-        return std::nullopt;
-
-    const std::size_t authority_end = url.find_first_of("/?#", authority_start);
-    const std::string_view authority = url.substr(authority_start, authority_end - authority_start);
-    if (authority.empty() || authority.find('@') != std::string_view::npos)
-        return std::nullopt;
-
-    std::string_view host = authority;
-    std::string_view port_text;
-    if (authority.starts_with('[')) {
-        const std::size_t closing = authority.find(']');
-        if (closing == std::string_view::npos)
-            return std::nullopt;
-        host = authority.substr(0, closing + 1);
-        const std::string_view suffix = authority.substr(closing + 1);
-        if (!suffix.empty()) {
-            if (!suffix.starts_with(':'))
-                return std::nullopt;
-            port_text = suffix.substr(1);
-        }
-    } else if (const std::size_t colon = authority.rfind(':'); colon != std::string_view::npos) {
-        host = authority.substr(0, colon);
-        port_text = authority.substr(colon + 1);
-    }
-    if (host.empty())
-        return std::nullopt;
-
-    unsigned port = ascii_equal(scheme, "https") ? 443u : 80u;
-    if (!port_text.empty()) {
-        unsigned parsed = 0;
-        const auto result =
-            std::from_chars(port_text.data(), port_text.data() + port_text.size(), parsed);
-        if (result.ec != std::errc{} || result.ptr != port_text.data() + port_text.size() ||
-            parsed > 65'535) {
-            return std::nullopt;
-        }
-        port = parsed;
-    } else if (authority.ends_with(':')) {
-        return std::nullopt;
-    }
-    return HttpOrigin{scheme, host, port};
-}
-
 bool same_origin_redirect(std::string_view original, std::string_view location) noexcept {
-    const auto source = http_origin(original);
-    if (!source || location.empty())
-        return false;
+    // Resolve the Location with the same URL implementation that follows it.
+    // Besides avoiding two subtly different parsers, this correctly handles
+    // colons in relative paths, queries and fragments.
+    try {
+        const std::string original_copy(original);
+        const std::string location_copy(location);
+        std::unique_ptr<CURLU, decltype(&curl_url_cleanup)> url(curl_url(), curl_url_cleanup);
+        if (!url || curl_url_set(url.get(), CURLUPART_URL, original_copy.c_str(), 0) != CURLUE_OK) {
+            return false;
+        }
 
-    if (!location.starts_with("//") && location.find("://") == std::string_view::npos) {
-        // Relative references cannot change the origin.
-        return location.find(':') == std::string_view::npos;
+        using CurlText = std::unique_ptr<char, decltype(&curl_free)>;
+        const auto part = [&](CURLUPart requested, unsigned flags) -> CurlText {
+            char* value = nullptr;
+            if (curl_url_get(url.get(), requested, &value, flags) != CURLUE_OK)
+                value = nullptr;
+            return CurlText(value, curl_free);
+        };
+        CurlText source_scheme = part(CURLUPART_SCHEME, 0);
+        CurlText source_host = part(CURLUPART_HOST, 0);
+        CurlText source_port = part(CURLUPART_PORT, CURLU_DEFAULT_PORT);
+        if (!source_scheme || !source_host || !source_port ||
+            curl_url_set(url.get(), CURLUPART_URL, location_copy.c_str(), 0) != CURLUE_OK) {
+            return false;
+        }
+
+        CurlText target_scheme = part(CURLUPART_SCHEME, 0);
+        CurlText target_host = part(CURLUPART_HOST, 0);
+        CurlText target_port = part(CURLUPART_PORT, CURLU_DEFAULT_PORT);
+        return target_scheme && target_host && target_port &&
+               ascii_equal(source_scheme.get(), target_scheme.get()) &&
+               ascii_equal(source_host.get(), target_host.get()) &&
+               std::string_view(source_port.get()) == target_port.get();
+    } catch (...) {
+        // Allocation failure while validating a redirect must fail closed.
+        return false;
     }
-    const auto target = http_origin(location, source->scheme);
-    return target && ascii_equal(source->scheme, target->scheme) &&
-           ascii_equal(source->host, target->host) && source->port == target->port;
 }
 
 long response_status(std::string_view line) noexcept {

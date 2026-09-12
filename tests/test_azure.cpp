@@ -2,6 +2,8 @@
 #include "locator.hpp"
 #include "test_support.hpp"
 
+#include <array>
+
 namespace karu::test {
 
 void test_azure_request() {
@@ -59,18 +61,30 @@ void test_azure_request() {
     if (!ambiguous)
         EQ(ambiguous.error().status, KARU_ERR_CONFIG);
 
-    // A shared key arrives base64-encoded and both padding lengths have to
-    // decode to the right number of bytes, or the HMAC is computed over a key
-    // with stray trailing zeros and every signature is silently wrong.
-    for (const char* padded : {"a2U=", "aw=="}) {
-        karu::ConfigBuilder padded_builder(false);
-        OK(padded_builder.set("AZURE_STORAGE_ACCOUNT", "account"));
-        OK(padded_builder.set("AZURE_STORAGE_ACCESS_KEY", padded));
-        karu::RequestBuilder padded_request_builder(must_freeze(padded_builder));
-        auto padded_request = padded_request_builder.prepare(azure, 0, 4);
+    // Use keys at and above SHA-256's 64-byte HMAC block size. Short keys with
+    // extra trailing zero bytes are HMAC-equivalent, so they cannot expose a
+    // decoder that forgets to remove base64 padding.
+    struct PaddedKeyCase {
+        const char* encoded;
+        const char* authorization;
+    };
+    constexpr std::array<PaddedKeyCase, 2> padded_keys{{
+        {"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2traw==",
+         "SharedKey account:wgCHM5hctsmdLxixnafE0zEgKvF9zyjUOaSEwFIl3ig="},
+        {"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=",
+         "SharedKey account:fSLuNynDfl8We3K3JtneyqYamNRzwJhyxngGFiZIo5I="},
+    }};
+    for (const PaddedKeyCase& padded : padded_keys) {
+        ProviderCredentials padded_credentials;
+        padded_credentials.account_name = "account";
+        padded_credentials.secret_access_key = padded.encoded;
+        const backends::RequestContext padded_context{
+            exact_config, exact_object, &padded_credentials, "bytes=3-9",
+            {},           "\"etag\"",   1'440'938'160};
+        auto padded_request = backends::azure_provider().prepare_request(padded_context);
         OK(padded_request.has_value());
         if (padded_request)
-            OK(header(*padded_request, "Authorization").starts_with("SharedKey account:"));
+            EQS(header(*padded_request, "Authorization"), padded.authorization);
     }
 
     // With no AZURE_STORAGE_ENDPOINT the connection string supplies the host,

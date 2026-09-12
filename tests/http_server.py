@@ -144,7 +144,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 Location=f"http://127.0.0.1:{self.server.server_port}/require-secret",
             )
             return
+        if path == "/redirect-relative-colon":
+            self.reply(
+                302,
+                Location="/require-secret:variant?next=https://example.test/a:b",
+            )
+            return
         if path == "/require-secret" and self.headers.get("X-Karu-Secret") != "sentinel":
+            self.reply(400, b"missing redirect header")
+            return
+        if path == "/require-secret:variant" and self.headers.get("X-Karu-Secret") != "sentinel":
             self.reply(400, b"missing redirect header")
             return
         if path == "/redirect-ftp":

@@ -245,9 +245,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/size/length-only":
             self.send_body(200, DATA, "application/octet-stream")
             return
-        # Cross-origin redirect targets whose authority exercises each arm of
-        # the origin parser. None of them is ever contacted: the header check
-        # rejects the redirect before libcurl opens a connection.
+        # Cross-origin or malformed redirect targets. None of them is ever
+        # contacted: the header check rejects the redirect before libcurl opens
+        # a connection.
         if path == "/redirect/ipv6":
             self.send_body(302, b"", "text/plain", Location=Handler.ipv6_redirect)
             return
