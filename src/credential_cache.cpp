@@ -114,9 +114,9 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
         if (found != entries_.end())
             return found->second.credentials;
         if (const auto current = flights_.find(flight_key); current != flights_.end()) {
-            flight = current->second;
-            flight->ready.wait(lock, [&] { return flight->done; });
-            return *flight->result;
+            auto current_flight = current->second;
+            current_flight->ready.wait(lock, [&] { return current_flight->done; });
+            return *current_flight->result;
         }
         flight = std::make_shared<Flight>();
         flights_.emplace(flight_key, flight);
@@ -144,7 +144,10 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
 
     {
         std::unique_lock lock(mutex_);
-        if (refreshed && !refreshed->cache_prefix.empty() && !flight->invalidated) {
+        // Declared after the lock so the final Flight owner is released while
+        // the mutex is still held, including while copying the return value.
+        auto completed = std::move(flight);
+        if (refreshed && !refreshed->cache_prefix.empty() && !completed->invalidated) {
             try {
                 entries_.insert_or_assign(
                     credential_key(family, refreshed->cache_prefix),
@@ -153,14 +156,13 @@ CredentialCache::custom(const ConfigSnapshot& config, karu_credentials_kind kind
                 // A cache insertion must not strand waiters or fail a usable credential load.
             }
         }
-        flight->result.emplace(std::move(refreshed));
-        flight->done = true;
+        completed->result.emplace(std::move(refreshed));
+        completed->done = true;
         const auto current = flights_.find(flight_key);
-        if (current != flights_.end() && current->second == flight)
+        if (current != flights_.end() && current->second == completed)
             flights_.erase(current);
-        // Copy the result before a waiter can release the last Flight.
-        flight->ready.notify_all();
-        return *flight->result;
+        completed->ready.notify_all();
+        return *completed->result;
     }
 }
 
@@ -176,9 +178,9 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
         if (found != entries_.end() && reusable(found->second, checked_at))
             return found->second.credentials;
         if (const auto current = flights_.find(key); current != flights_.end()) {
-            flight = current->second;
-            flight->ready.wait(lock, [&] { return flight->done; });
-            return *flight->result;
+            auto current_flight = current->second;
+            current_flight->ready.wait(lock, [&] { return current_flight->done; });
+            return *current_flight->result;
         }
         flight = std::make_shared<Flight>();
         flights_.emplace(key, flight);
@@ -196,9 +198,11 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
                    !loaded->sas_token.empty());
     {
         std::unique_lock lock(mutex_);
+        // See custom(): the Flight lifetime remains inside the locked scope.
+        auto completed = std::move(flight);
         // Never negative-cache credential discovery. One anonymous/missing lookup
         // must not poison later signed requests.
-        if (loaded && present && !flight->invalidated) {
+        if (loaded && present && !completed->invalidated) {
             try {
                 entries_.insert_or_assign(key,
                                           Entry{*loaded, refresh_time(*loaded, loaded_at, true)});
@@ -206,13 +210,13 @@ CredentialCache::native(const ConfigSnapshot& config, const backends::CloudProvi
                 // A cache insertion must not strand waiters or fail a usable credential load.
             }
         }
-        flight->result.emplace(std::move(loaded));
-        flight->done = true;
+        completed->result.emplace(std::move(loaded));
+        completed->done = true;
         const auto current = flights_.find(key);
-        if (current != flights_.end() && current->second == flight)
+        if (current != flights_.end() && current->second == completed)
             flights_.erase(current);
-        flight->ready.notify_all();
-        return *flight->result;
+        completed->ready.notify_all();
+        return *completed->result;
     }
 }
 
