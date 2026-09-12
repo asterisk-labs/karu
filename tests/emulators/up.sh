@@ -23,8 +23,8 @@ WHICH="${1:-all}"
 S3_PORT="${KARU_TEST_S3_PORT:-9000}"
 AZURE_PORT="${KARU_TEST_AZURE_PORT:-10000}"
 GCS_PORT="${KARU_TEST_GCS_PORT:-4443}"
-S3_KEY_ID=karuemulator
-S3_SECRET=karuemulator-secret
+S3_KEY_ID="${KARU_TEST_S3_KEY_ID:-karuemulator}"
+S3_SECRET="${KARU_TEST_S3_SECRET:-karuemulator-secret}"
 
 mkdir -p "$STATE"
 
@@ -62,9 +62,9 @@ start_s3() {
     # Seed through MinIO's own client so no signing code of ours stands between
     # the fixture and the server.
     python3 "$ROOT/fixture.py" > "$STATE/fixture.bin"
-    docker run --rm --network host -v "$STATE:/seed" --entrypoint /bin/sh \
+    docker run --rm --network container:karu-minio -v "$STATE:/seed" --entrypoint /bin/sh \
         minio/mc:latest -c "
-            mc alias set karu http://127.0.0.1:$S3_PORT $S3_KEY_ID $S3_SECRET >/dev/null &&
+            mc alias set karu http://127.0.0.1:9000 $S3_KEY_ID $S3_SECRET >/dev/null &&
             mc mb --ignore-existing karu/karu >/dev/null &&
             mc cp /seed/fixture.bin karu/karu/fixture.bin >/dev/null
         " >/dev/null

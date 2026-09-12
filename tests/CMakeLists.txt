@@ -84,6 +84,7 @@ endif()
 # until tests/emulators/up.sh has been run.
 add_executable(karu_emulator_test test_emulators.cpp)
 target_link_libraries(karu_emulator_test PRIVATE karu::karu)
+karu_instrument_test(karu_emulator_test)
 target_compile_options(karu_emulator_test PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4;/utf-8>
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic;-Wshadow>

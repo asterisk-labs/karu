@@ -27,6 +27,9 @@ container runtime. Anything that does not start is left down, and
 `karu_emulators` skips the backends it cannot reach. When none of them answers
 the test reports ctest's skip status, so `make test` is unaffected.
 
+CI sets `KARU_TEST_REQUIRE_ALL_EMULATORS=1`, which turns a missing backend into
+a failure. Local runs remain best-effort.
+
 ## Endpoints
 
 Override any of these if the defaults collide with something you already run:
@@ -36,6 +39,11 @@ Override any of these if the defaults collide with something you already run:
 | `KARU_TEST_S3_ENDPOINT` | `127.0.0.1:9000` |
 | `KARU_TEST_AZURE_ENDPOINT` | `http://127.0.0.1:10000/devstoreaccount1` |
 | `KARU_TEST_GCS_ENDPOINT` | `http://127.0.0.1:4443` |
+| `KARU_TEST_S3_PORT` | `9000` |
+| `KARU_TEST_AZURE_PORT` | `10000` |
+| `KARU_TEST_GCS_PORT` | `4443` |
+| `KARU_TEST_S3_KEY_ID` | `karuemulator` |
+| `KARU_TEST_S3_SECRET` | `karuemulator-secret` |
 | `KARU_EMULATOR_STATE` | `$TMPDIR/karu-emulators` |
 
 The Azure account is Azurite's documented development account, and the MinIO

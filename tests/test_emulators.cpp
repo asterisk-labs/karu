@@ -179,7 +179,6 @@ void run_s3(const std::vector<std::byte>& object) {
              {"AWS_ACCESS_KEY_ID", "karuemulator"},
              {"AWS_SECRET_ACCESS_KEY", "definitely-not-the-secret"},
              {"KARU_MAX_ATTEMPTS", "1"}}) {
-        static_cast<void>(config.set(name, value));
         static_cast<void>(wrong.set(name, value));
     }
     auto wrong_client = karu::Client::create(wrong).value();
@@ -256,6 +255,11 @@ int main() {
     run_azure(object);
     run_gcs(object);
 
+    const bool require_all = environment("KARU_TEST_REQUIRE_ALL_EMULATORS", "0") == "1";
+    if (require_all && backends_run != 3) {
+        std::printf("se requieren los 3 emuladores, pero solo respondieron %d\n", backends_run);
+        return 1;
+    }
     if (backends_run == 0) {
         std::printf("ningún emulador disponible; arranca tests/emulators/up.sh\n");
         return kSkipExitCode;
