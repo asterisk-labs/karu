@@ -153,6 +153,55 @@ jobs:
           TSAN_OPTIONS: halt_on_error=1
         run: ctest --test-dir build --output-on-failure
 
+  emulators:
+    name: Storage emulators
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out Karu
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install native dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+            /etc/apt/sources.list.d/google-chrome.sources
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libcurl4-openssl-dev libssl-dev
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DKARU_BUILD_TESTS=ON
+          -DKARU_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --parallel 4
+
+      # MinIO, Azurite and fake-gcs-server are independent implementations of
+      # the three protocols. They verify our signatures and compose their own
+      # responses, which tests/credential_server.py cannot do because we wrote
+      # it. The same script runs on a developer machine.
+      - name: Start storage emulators
+        run: tests/emulators/up.sh
+
+      - name: Read from the emulators
+        run: ctest --test-dir build -R karu_emulators --output-on-failure
+
+      - name: Emulator logs
+        if: failure()
+        run: |
+          docker logs karu-minio 2>&1 | tail -50 || true
+          docker logs karu-gcs 2>&1 | tail -50 || true
+          cat "${TMPDIR:-/tmp}/karu-emulators/azurite.log" 2>/dev/null | tail -50 || true
+
+      - name: Stop storage emulators
+        if: always()
+        run: tests/emulators/down.sh
+
   coverage:
     name: Coverage
     runs-on: ubuntu-24.04
