@@ -87,23 +87,6 @@ std::int64_t now_seconds() {
     return static_cast<std::int64_t>(std::time(nullptr));
 }
 
-// The fixture records every request it answers. Clearing the log first keeps
-// the reply small and keeps the earlier suites out of the assertions.
-void reset_request_log() {
-    auto response = backends::credential_request("GET", fixture_url("/_reset"), {}, {}, 2);
-    if (!response)
-        fail(__LINE__, "could not reset the fixture request log: " + response.error().message);
-}
-
-std::string request_log() {
-    auto response = backends::credential_request("GET", fixture_url("/_requests"), {}, {}, 2);
-    if (!response) {
-        fail(__LINE__, "could not read the fixture request log: " + response.error().message);
-        return {};
-    }
-    return response->body;
-}
-
 // Entries are json.dumps output, so quoting the whole field value anchors both
 // ends of the match: a stray extra path segment or form parameter cannot slip
 // past a substring search.
@@ -287,7 +270,7 @@ void azure_service_principal() {
     // authority, the form-encoded tenant in the URL, the parameter order and
     // encoding of the body, and the Content-Type oauth_token appends.
     {
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         const auto config = frozen({{"AZURE_TENANT_ID", "sp/one"},
                                     {"AZURE_CLIENT_ID", "app id"},
                                     {"AZURE_CLIENT_SECRET", "s3cr3t/+="},
@@ -299,7 +282,7 @@ void azure_service_principal() {
             EQS(credentials->bearer_token, "oauth-access-token");
             expect_expiry_near(__LINE__, credentials->expires_at, now_seconds() + 3600);
         }
-        const std::string log = request_log();
+        const std::string log = fixture_request_body(__LINE__, "/_requests");
         // The tenant carries a slash, so the %2F is what proves form_encode was
         // applied to it: an unencoded "sp/one" would still reach this route.
         expect_logged(__LINE__, log,
@@ -349,7 +332,7 @@ void azure_service_principal() {
     {
         TempTree tree("azure_federated");
         const std::string token_file = tree.write("federated.jwt", "fed.token.value\n");
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         const auto config = frozen({{"AZURE_TENANT_ID", "fed"},
                                     {"AZURE_CLIENT_ID", "app"},
                                     {"AZURE_FEDERATED_TOKEN_FILE", token_file},
@@ -358,7 +341,7 @@ void azure_service_principal() {
         OK(credentials.has_value());
         if (credentials)
             EQS(credentials->bearer_token, "oauth-access-token");
-        const std::string log = request_log();
+        const std::string log = fixture_request_body(__LINE__, "/_requests");
         expect_logged(__LINE__, log, logged_path("/oauth/ok?authority=/fed/oauth2/v2.0/token"));
         expect_logged(
             __LINE__, log,
@@ -456,7 +439,7 @@ void azure_app_service_identity() {
     // Endpoint without a query, default resource, object selector, identity
     // header, and an expires_on the server computes per request.
     {
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         const auto config = frozen({{"IDENTITY_ENDPOINT", identity_ok},
                                     {"IDENTITY_HEADER", "secret-header"},
                                     {"AZURE_IMDS_OBJECT_ID", "my object"}});
@@ -466,7 +449,7 @@ void azure_app_service_identity() {
             EQS(credentials->bearer_token, "azure-identity-token");
             expect_expiry_near(__LINE__, credentials->expires_at, now_seconds() + 3600);
         }
-        const std::string log = request_log();
+        const std::string log = fixture_request_body(__LINE__, "/_requests");
         expect_logged(__LINE__, log,
                       logged_path("/azure/identity/ok?api-version=2019-08-01"
                                   "&resource=https%3A%2F%2Fstorage.azure.com%2F"
@@ -477,7 +460,7 @@ void azure_app_service_identity() {
     // Endpoint that already carries a query, a resource override, the resource
     // ID selector, no identity header, and no expires_on in the response.
     {
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         const auto config =
             frozen({{"IDENTITY_ENDPOINT", fixture_url("/azure/identity/no-expiry?existing=1")},
                     {"AZURE_IMDS_MSI_RES_ID", "/subscriptions/x/y"},
@@ -488,7 +471,7 @@ void azure_app_service_identity() {
             EQS(credentials->bearer_token, "azure-identity-token");
             expect_expiry_near(__LINE__, credentials->expires_at, now_seconds() + 3600);
         }
-        const std::string log = request_log();
+        const std::string log = fixture_request_body(__LINE__, "/_requests");
         expect_logged(__LINE__, log,
                       logged_path("/azure/identity/no-expiry?existing=1&api-version=2019-08-01"
                                   "&resource=https%3A%2F%2Fcustom.resource.test%2F"
@@ -500,7 +483,7 @@ void azure_app_service_identity() {
     // principal: it falls through to managed identity, and the client ID
     // becomes the selector. The closed authority keeps a regression offline.
     {
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         const auto config = frozen({{"AZURE_TENANT_ID", "tenant"},
                                     {"AZURE_CLIENT_ID", "app"},
                                     {"AZURE_AUTHORITY_HOST", "http://127.0.0.1:9"},
@@ -509,7 +492,7 @@ void azure_app_service_identity() {
         OK(credentials.has_value());
         if (credentials)
             EQS(credentials->bearer_token, "azure-identity-token");
-        expect_logged(__LINE__, request_log(),
+        expect_logged(__LINE__, fixture_request_body(__LINE__, "/_requests"),
                       logged_path("/azure/identity/ok?api-version=2019-08-01"
                                   "&resource=https%3A%2F%2Fstorage.azure.com%2F&client_id=app"));
     }
@@ -517,7 +500,7 @@ void azure_app_service_identity() {
     // An explicit IMDS client ID overrides the AZURE_CLIENT_ID fallback, and
     // both names collapsing into one selector keeps the conflict count at one.
     {
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         const auto config = frozen({{"AZURE_CLIENT_ID", "app-fallback"},
                                     {"AZURE_IMDS_CLIENT_ID", "imds-explicit"},
                                     {"IDENTITY_ENDPOINT", identity_ok}});
@@ -527,7 +510,7 @@ void azure_app_service_identity() {
             EQS(credentials->bearer_token, "azure-identity-token");
             expect_expiry_near(__LINE__, credentials->expires_at, now_seconds() + 3600);
         }
-        expect_logged(__LINE__, request_log(),
+        expect_logged(__LINE__, fixture_request_body(__LINE__, "/_requests"),
                       logged_path("/azure/identity/ok?api-version=2019-08-01"
                                   "&resource=https%3A%2F%2Fstorage.azure.com%2F"
                                   "&client_id=imds-explicit"));
@@ -536,7 +519,7 @@ void azure_app_service_identity() {
     // A tenant and secret without a client ID is not a service principal
     // either, and leaves no selector at all on the identity URL.
     {
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         const auto config = frozen({{"AZURE_TENANT_ID", "tenant"},
                                     {"AZURE_CLIENT_SECRET", "secret"},
                                     {"AZURE_AUTHORITY_HOST", "http://127.0.0.1:9"},
@@ -545,7 +528,7 @@ void azure_app_service_identity() {
         OK(credentials.has_value());
         if (credentials)
             EQS(credentials->bearer_token, "azure-identity-token");
-        expect_logged(__LINE__, request_log(),
+        expect_logged(__LINE__, fixture_request_body(__LINE__, "/_requests"),
                       logged_path("/azure/identity/ok?api-version=2019-08-01"
                                   "&resource=https%3A%2F%2Fstorage.azure.com%2F"));
     }
@@ -585,7 +568,7 @@ void azure_imds_endpoint() {
     // A configured IMDS endpoint uses the older api-version and carries the
     // Metadata header that a real instance metadata service demands.
     {
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         const auto config = frozen({{"IMDS_ENDPOINT", fixture_url("/azure/identity/ok")}});
         auto credentials = backends::load_azure_credentials(config, azure_path);
         OK(credentials.has_value());
@@ -593,7 +576,7 @@ void azure_imds_endpoint() {
             EQS(credentials->bearer_token, "azure-identity-token");
             expect_expiry_near(__LINE__, credentials->expires_at, now_seconds() + 3600);
         }
-        const std::string log = request_log();
+        const std::string log = fixture_request_body(__LINE__, "/_requests");
         expect_logged(__LINE__, log,
                       logged_path("/azure/identity/ok?api-version=2018-02-01"
                                   "&resource=https%3A%2F%2Fstorage.azure.com%2F"));
@@ -601,7 +584,7 @@ void azure_imds_endpoint() {
     }
 
     {
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         const auto config = frozen({{"IMDS_ENDPOINT", fixture_url("/azure/identity/ok?probe=1")},
                                     {"AZURE_IMDS_MSI_RES_ID", "/subscriptions/x/y"},
                                     {"AZURE_STORAGE_RESOURCE", "https://custom.resource.test/"}});
@@ -609,7 +592,7 @@ void azure_imds_endpoint() {
         OK(credentials.has_value());
         if (credentials)
             EQS(credentials->bearer_token, "azure-identity-token");
-        expect_logged(__LINE__, request_log(),
+        expect_logged(__LINE__, fixture_request_body(__LINE__, "/_requests"),
                       logged_path("/azure/identity/ok?probe=1&api-version=2018-02-01"
                                   "&resource=https%3A%2F%2Fcustom.resource.test%2F"
                                   "&msi_res_id=%2Fsubscriptions%2Fx%2Fy"));
@@ -667,14 +650,14 @@ void azure_default_imds_endpoint() {
     // So is a non-2xx: the fixture has no route for the link-local path and
     // answers 404, which must still fall through to the empty credentials.
     {
-        reset_request_log();
+        reset_fixture_requests(__LINE__);
         auto credentials = probe_through_proxy(fixture_url(""));
         OK(credentials.has_value());
         if (credentials) {
             OK(credentials->bearer_token.empty());
             EQ(credentials->expires_at, 0);
         }
-        expect_logged(__LINE__, request_log(),
+        expect_logged(__LINE__, fixture_request_body(__LINE__, "/_requests"),
                       logged_path("http://169.254.169.254/metadata/identity/oauth2/token"
                                   "?api-version=2018-02-01"
                                   "&resource=https%3A%2F%2Fstorage.azure.com%2F"));

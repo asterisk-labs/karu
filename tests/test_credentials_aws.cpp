@@ -69,23 +69,6 @@ void expect_credentials(int line, const Loaded& result, std::string_view key,
     string_at(line, result->region, region, "region");
 }
 
-// Everything the loopback fixture has been asked for, as the JSON array it
-// serves. Cases that must prove what went out on the wire read it back rather
-// than relying on a route that echoes, which the fixture does not offer.
-std::string fixture_requests() {
-    auto response = backends::credential_request("GET", fixture_url("/_requests"), {}, {}, 5, {});
-    if (!response)
-        return {};
-    return response->body;
-}
-
-// Clears that log. Every "what went out on the wire" assertion below resets
-// first: the log is shared with every other case and suite, so without a reset
-// an earlier request satisfies the contains() and the check can no longer fail.
-void reset_fixture_log() {
-    static_cast<void>(backends::credential_request("GET", fixture_url("/_reset"), {}, {}, 5, {}));
-}
-
 void contains(int line, const std::string& haystack, std::string_view needle) {
     if (haystack.find(needle) == std::string::npos)
         fail(line, "the fixture never saw '" + std::string(needle) + "'");
@@ -461,7 +444,7 @@ void web_identity_success() {
     // The failure cases above already posted a well-formed AssumeRole form to
     // this fixture. Without the reset, every contains() below would be
     // satisfied by one of those and could not fail for this exchange.
-    reset_fixture_log();
+    reset_fixture_requests(__LINE__);
     auto generated = load(from_profile);
     expect_credentials(__LINE__, generated, "ASIASTSFIXTURE", "sts-secret", "sts-session",
                        "us-east-2");
@@ -470,7 +453,7 @@ void web_identity_success() {
 
     // Read the fixture log before the explicit-name exchange below. After the
     // reset it holds exactly this one exchange, so each assertion names it.
-    const std::string after_generated = fixture_requests();
+    const std::string after_generated = fixture_request_body(__LINE__, "/_requests");
     contains(__LINE__, after_generated, "Action=AssumeRoleWithWebIdentity&Version=2011-06-15");
     lacks(__LINE__, after_generated, "RoleSessionName=karu-test-session");
     // The padding in the token file must not reach the wire.
@@ -501,7 +484,7 @@ void web_identity_success() {
     OK(from_options.set("AWS_WEB_IDENTITY_TOKEN_FILE", plain_token.c_str()));
     OK(from_options.set("AWS_ROLE_SESSION_NAME", "karu-test-session"));
     OK(from_options.set("AWS_STS_ENDPOINT", fixture_url("/aws/sts/ok").c_str()));
-    reset_fixture_log();
+    reset_fixture_requests(__LINE__);
     auto explicit_session = load(from_options);
     // The profile region is empty, so the success path assigns "" over whatever
     // the exchange produced.
@@ -510,7 +493,7 @@ void web_identity_success() {
     if (explicit_session)
         OK(explicit_session->expires_at > static_cast<std::int64_t>(std::time(nullptr)));
 
-    const std::string after_explicit = fixture_requests();
+    const std::string after_explicit = fixture_request_body(__LINE__, "/_requests");
     contains(__LINE__, after_explicit, "RoleSessionName=karu-test-session");
     // '+' and '/' in the role ARN have to arrive percent-encoded.
     contains(__LINE__, after_explicit,
@@ -607,13 +590,13 @@ void container_requests() {
     // Each of the two requests is read back on its own. Both send the same
     // header, so a shared log would let either one satisfy the assertion for
     // the other and the trim below could regress unnoticed.
-    reset_fixture_log();
+    reset_fixture_requests(__LINE__);
     auto with_token = load(from_file);
     expect_credentials(__LINE__, with_token, "ASIACONTAINER", "container-secret", "container-token",
                        "");
     if (with_token)
         OK(with_token->expires_at > static_cast<std::int64_t>(std::time(nullptr)));
-    const std::string after_file_token = fixture_requests();
+    const std::string after_file_token = fixture_request_body(__LINE__, "/_requests");
     contains(__LINE__, after_file_token, "\"authorization\": \"Bearer fixture-token\"");
     lacks(__LINE__, after_file_token, "  Bearer fixture-token");
 
@@ -625,12 +608,13 @@ void container_requests() {
     OK(direct_token.set("AWS_CONTAINER_AUTHORIZATION_TOKEN", "Bearer fixture-token"));
     OK(direct_token.set("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
                         tree.absent("absent-token").c_str()));
-    reset_fixture_log();
+    reset_fixture_requests(__LINE__);
     expect_credentials(__LINE__, load(direct_token), "ASIACONTAINER", "container-secret",
                        "container-token", "");
     // A direct token is never trimmed, so this one proves the header survived
     // the round trip rather than that trim() ran.
-    contains(__LINE__, fixture_requests(), "\"authorization\": \"Bearer fixture-token\"");
+    contains(__LINE__, fixture_request_body(__LINE__, "/_requests"),
+             "\"authorization\": \"Bearer fixture-token\"");
 
     ConfigBuilder absent_token_file = empty_builder();
     OK(absent_token_file.set("AWS_CONTAINER_CREDENTIALS_FULL_URI", "http://127.0.0.1:9/creds"));

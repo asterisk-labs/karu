@@ -125,28 +125,6 @@ struct ProxiedTransport {
     ScopedEnvironment upper_bypass{"NO_PROXY", nullptr};
 };
 
-// The fixture records every request it receives. Reading that log back is how
-// this suite inspects what credential_request actually put on the wire without
-// adding echo routes to tests/credential_server.py.
-//
-// The reset has to be checked: every assertion below reads entry 0 of the log,
-// and a silently failed reset would leave an earlier suite's entry there, so a
-// stale request could satisfy the assertion instead of the one under test.
-void reset_recorded_requests(int line) {
-    auto cleared = backends::credential_request("GET", fixture_url("/_reset"), "", {}, 5, {});
-    if (!cleared)
-        fail(line, "could not reset the fixture request log: " + cleared.error().message);
-    else
-        ok_at(line, cleared->status == 200, "request log reset");
-}
-
-std::string recorded_requests() {
-    auto listed = backends::credential_request("GET", fixture_url("/_requests"), "", {}, 5, {});
-    if (!listed)
-        return {};
-    return listed->body;
-}
-
 // ---------------------------------------------------------------------------
 // path_exists and read_text_file
 // ---------------------------------------------------------------------------
@@ -686,7 +664,7 @@ void test_credential_request_transport() {
     const DirectTransport direct;
     const TempTree tree("helpers_transport");
 
-    reset_recorded_requests(__LINE__);
+    reset_fixture_requests(__LINE__);
     HttpRequestOptions options;
     options.version = HttpVersion::Automatic;
     options.user_agent = "karu-test/1";
@@ -701,7 +679,7 @@ void test_credential_request_transport() {
         expect_text(__LINE__, backends::json_string(fetched->body, "access_token"),
                     "oauth-access-token");
     }
-    const std::string sent = recorded_requests();
+    const std::string sent = fixture_request_body(__LINE__, "/_requests");
     expect_text(__LINE__, backends::json_string(sent, "method"), "GET");
     expect_text(__LINE__, backends::json_string(sent, "x-karu-test"), "abc");
     expect_text(__LINE__, backends::json_string(sent, "user-agent"), "karu-test/1");
@@ -730,23 +708,23 @@ void test_credential_request_transport() {
     // A method that is neither GET nor POST goes to CURLOPT_CUSTOMREQUEST. The
     // method is a string_view, so passing a temporary is the regression guard
     // for the stable_method copy the implementation keeps.
-    reset_recorded_requests(__LINE__);
+    reset_fixture_requests(__LINE__);
     auto put = backends::credential_request(std::string("PUT"), fixture_url("/oauth/ok"),
                                             "payload-123", {}, 5, {});
     OK(put.has_value());
     if (put)
         EQ(put->status, 200);
-    const std::string put_log = recorded_requests();
+    const std::string put_log = fixture_request_body(__LINE__, "/_requests");
     expect_text(__LINE__, backends::json_string(put_log, "method"), "PUT");
     expect_text(__LINE__, backends::json_string(put_log, "body"), "payload-123");
 
     // The same custom-method path with an empty body never sets POSTFIELDS.
-    reset_recorded_requests(__LINE__);
+    reset_fixture_requests(__LINE__);
     auto bodiless = backends::credential_request("PUT", fixture_url("/oauth/ok"), "", {}, 5, {});
     OK(bodiless.has_value());
     if (bodiless)
         EQ(bodiless->status, 200);
-    const std::string bodiless_log = recorded_requests();
+    const std::string bodiless_log = fixture_request_body(__LINE__, "/_requests");
     expect_text(__LINE__, backends::json_string(bodiless_log, "method"), "PUT");
     expect_text(__LINE__, backends::json_string(bodiless_log, "body"), "");
 }
@@ -777,7 +755,7 @@ void test_oauth_token() {
     SECTION("oauth token exchange");
     const DirectTransport direct;
 
-    reset_recorded_requests(__LINE__);
+    reset_fixture_requests(__LINE__);
     const std::int64_t before = now_seconds();
     auto token =
         backends::oauth_token(fixture_url("/oauth/ok"), "grant_type=client_credentials&scope=a+b",
@@ -797,7 +775,7 @@ void test_oauth_token() {
     }
     // The form body reaches the endpoint intact and oauth_token appends the
     // form content type itself.
-    const std::string sent = recorded_requests();
+    const std::string sent = fixture_request_body(__LINE__, "/_requests");
     expect_text(__LINE__, backends::json_string(sent, "method"), "POST");
     expect_text(__LINE__, backends::json_string(sent, "body"),
                 "grant_type=client_credentials&scope=a+b");
@@ -1193,13 +1171,16 @@ void test_credentials_from_profile() {
 
 void test_credential_process() {
     SECTION("AWS credential_process");
+    // Sanitized binaries can take several seconds to start on a busy runner.
+    // Only the dedicated hang case below is meant to exercise a short timeout.
+    constexpr long helper_timeout = 15;
     // The helper is this test binary re-invoked through the platform shell,
     // which is the only spelling that behaves the same under sh and cmd.exe.
     backends::AwsProfile helper =
         profile_with("credential_process", credential_process_command("ok"));
     helper.values.emplace("region", "sa-east-1");
     const std::int64_t before = now_seconds();
-    auto produced = backends::credentials_from_aws_profile(helper, "AWS", 5);
+    auto produced = backends::credentials_from_aws_profile(helper, "AWS", helper_timeout);
     OK(produced.has_value());
     if (produced) {
         EQS(produced->access_key_id, "AKIAHELPER");
@@ -1216,17 +1197,19 @@ void test_credential_process() {
     // the only way to evaluate the first one. "echo hello" is the same string
     // under sh and cmd.exe, so it needs no #ifdef.
     auto incomplete = backends::credentials_from_aws_profile(
-        profile_with("credential_process", credential_process_command("incomplete")), "AWS", 5);
+        profile_with("credential_process", credential_process_command("incomplete")), "AWS",
+        helper_timeout);
     expect_error(__LINE__, incomplete, KARU_ERR_CREDENTIALS,
                  "AWS credential_process response is incomplete");
 
     auto not_a_document = backends::credentials_from_aws_profile(
-        profile_with("credential_process", "echo hello"), "AWS", 5);
+        profile_with("credential_process", "echo hello"), "AWS", helper_timeout);
     expect_error(__LINE__, not_a_document, KARU_ERR_CREDENTIALS,
                  "AWS credential_process response is incomplete");
 
     auto failed = backends::credentials_from_aws_profile(
-        profile_with("credential_process", credential_process_command("fail")), "AWS", 5);
+        profile_with("credential_process", credential_process_command("fail")), "AWS",
+        helper_timeout);
     expect_error(__LINE__, failed, KARU_ERR_CREDENTIALS,
                  "AWS credential_process exited with status 3");
 
@@ -1235,12 +1218,13 @@ void test_credential_process() {
     const TempTree tree("helpers_process");
     auto not_found = backends::credentials_from_aws_profile(
         profile_with("credential_process", "\"" + tree.absent("karu-no-such-helper") + "\""), "AWS",
-        5);
+        helper_timeout);
     expect_error_prefix(__LINE__, not_found, KARU_ERR_CREDENTIALS,
                         "AWS credential_process exited with status ");
 
     auto flooded = backends::credentials_from_aws_profile(
-        profile_with("credential_process", credential_process_command("flood")), "AWS", 5);
+        profile_with("credential_process", credential_process_command("flood")), "AWS",
+        helper_timeout);
     expect_error(__LINE__, flooded, KARU_ERR_CREDENTIALS,
                  "AWS credential_process returned more than 1 MiB");
 

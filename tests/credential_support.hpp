@@ -50,6 +50,10 @@ void set_program_path(const char* argv0);
 void set_fixture_port(int port);
 [[nodiscard]] int fixture_port();
 [[nodiscard]] std::string fixture_url(std::string_view route);
+// Checked access to the fixture's shared request log. Keeping this here avoids
+// per-provider reset implementations that can silently accept stale requests.
+[[nodiscard]] std::string fixture_request_body(int line, std::string_view route);
+void reset_fixture_requests(int line);
 
 // Convenience builders used by the per-provider suites.
 [[nodiscard]] ConfigBuilder empty_builder();

@@ -92,23 +92,13 @@ void check_empty(int line, const Loaded& result) {
     }
 }
 
-std::string fixture_get(const std::string& route) {
-    const std::string url = fixture_url(route);
-    auto response = backends::credential_request("GET", url, {}, {});
-    if (!response || response->status != 200)
-        return {};
-    return response->body;
-}
-
-void reset_requests() {
-    (void)fixture_get("/_reset");
-}
-
 // How many times the fixture has served a route. Cases that must prove a
 // request never left the process read this before and after, which stays
 // correct however the suites are ordered.
 std::int64_t route_hits(std::string_view route) {
-    return backends::json_integer(fixture_get(concat("/_count?path=", route)), "hits").value_or(-1);
+    return backends::json_integer(fixture_request_body(__LINE__, concat("/_count?path=", route)),
+                                  "hits")
+        .value_or(-1);
 }
 
 // The baseline for a "this route was never hit" assertion. route_hits() reports
@@ -126,7 +116,7 @@ std::int64_t route_baseline(int line, std::string_view route) {
 // The recorded requests are serialised in arrival order, so one entry runs from
 // its own opening brace to the next one.
 std::vector<std::string> recorded_requests() {
-    const std::string document = fixture_get("/_requests");
+    const std::string document = fixture_request_body(__LINE__, "/_requests");
     constexpr std::string_view opening = "{\"path\":";
     std::vector<std::size_t> starts;
     for (std::size_t at = document.find(opening); at != std::string::npos;
@@ -410,7 +400,7 @@ void service_account_cases() {
     OK(builder.set("GOOGLE_APPLICATION_CREDENTIALS", fixture_file.c_str()));
     OK(builder.set("GCS_SCOPE", scope.c_str()));
 
-    reset_requests();
+    reset_fixture_requests(__LINE__);
     const std::int64_t before = static_cast<std::int64_t>(std::time(nullptr));
     auto signed_in = load(builder);
     OK(signed_in.has_value());
@@ -517,7 +507,7 @@ void authorized_user_cases() {
     OK(builder.set("GOOGLE_APPLICATION_CREDENTIALS", fixture.c_str()));
     OK(builder.set("GCS_CLIENT_ID", "config-client"));
 
-    reset_requests();
+    reset_fixture_requests(__LINE__);
     const std::int64_t before = static_cast<std::int64_t>(std::time(nullptr));
     auto refreshed = load(builder);
     OK(refreshed.has_value());
@@ -638,7 +628,7 @@ void external_account_subject_cases() {
         tree.write("file.json", external_account_json(token_url, "", file_source));
     auto file_builder = empty_builder();
     OK(file_builder.set("GOOGLE_APPLICATION_CREDENTIALS", file_fixture.c_str()));
-    reset_requests();
+    reset_fixture_requests(__LINE__);
     auto exchanged = load(file_builder);
     OK(exchanged.has_value());
     if (exchanged)
@@ -665,7 +655,7 @@ void external_account_subject_cases() {
         external_account_json(token_url, R"("subject_token_field_name":"",)", file_source));
     auto empty_field_builder = empty_builder();
     OK(empty_field_builder.set("GOOGLE_APPLICATION_CREDENTIALS", empty_field.c_str()));
-    reset_requests();
+    reset_fixture_requests(__LINE__);
     auto raw_subject = load(empty_field_builder);
     OK(raw_subject.has_value());
     if (raw_subject)
@@ -694,7 +684,7 @@ void external_account_subject_cases() {
                               concat(R"("url":")", fixture_url("/gcs/subject/text"), "\"")));
     auto url_builder = empty_builder();
     OK(url_builder.set("GOOGLE_APPLICATION_CREDENTIALS", url_fixture.c_str()));
-    reset_requests();
+    reset_fixture_requests(__LINE__);
     auto from_url = load(url_builder);
     OK(from_url.has_value());
     if (from_url)
@@ -707,7 +697,7 @@ void external_account_subject_cases() {
                               concat(R"("url":")", fixture_url("/gcs/subject/json"), "\"")));
     auto field_builder = empty_builder();
     OK(field_builder.set("GOOGLE_APPLICATION_CREDENTIALS", field_fixture.c_str()));
-    reset_requests();
+    reset_fixture_requests(__LINE__);
     auto from_field = load(field_builder);
     OK(from_field.has_value());
     if (from_field)
@@ -773,7 +763,7 @@ void external_account_impersonation_cases() {
     OK(builder.set("GOOGLE_APPLICATION_CREDENTIALS", ok_fixture.c_str()));
     OK(builder.set("GCS_SCOPE", scope.c_str()));
 
-    reset_requests();
+    reset_fixture_requests(__LINE__);
     const std::int64_t before = static_cast<std::int64_t>(std::time(nullptr));
     auto impersonated = load(builder);
     OK(impersonated.has_value());
@@ -937,7 +927,7 @@ void metadata_cases() {
     // endpoint's failures into errors instead of anonymous access.
     auto builder = empty_builder();
     OK(builder.set("GCS_METADATA_ENDPOINT", fixture_url("/gcs/metadata/ok").c_str()));
-    reset_requests();
+    reset_fixture_requests(__LINE__);
     const std::int64_t before = static_cast<std::int64_t>(std::time(nullptr));
     auto from_metadata = load(builder);
     OK(from_metadata.has_value());

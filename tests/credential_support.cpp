@@ -1,6 +1,8 @@
 #include "credential_support.hpp"
 
+#include "backends/credentials.hpp"
 #include "platform.hpp"
+#include "test_support.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -146,6 +148,25 @@ int fixture_port() {
 
 std::string fixture_url(std::string_view route) {
     return "http://127.0.0.1:" + std::to_string(g_fixture_port) + std::string(route);
+}
+
+std::string fixture_request_body(int line, std::string_view route) {
+    auto response = backends::credential_request("GET", fixture_url(route), {}, {}, 5, {});
+    if (!response) {
+        fail(line, "could not read fixture route " + std::string(route) + ": " +
+                       response.error().message);
+        return {};
+    }
+    if (response->status != 200) {
+        fail(line, "fixture route " + std::string(route) + " returned HTTP " +
+                       std::to_string(response->status));
+        return {};
+    }
+    return response->body;
+}
+
+void reset_fixture_requests(int line) {
+    static_cast<void>(fixture_request_body(line, "/_reset"));
 }
 
 ConfigBuilder empty_builder() {
