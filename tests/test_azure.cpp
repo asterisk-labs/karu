@@ -58,6 +58,69 @@ void test_azure_request() {
     OK(!ambiguous);
     if (!ambiguous)
         EQ(ambiguous.error().status, KARU_ERR_CONFIG);
+
+    // A shared key arrives base64-encoded and both padding lengths have to
+    // decode to the right number of bytes, or the HMAC is computed over a key
+    // with stray trailing zeros and every signature is silently wrong.
+    for (const char* padded : {"a2U=", "aw=="}) {
+        karu::ConfigBuilder padded_builder(false);
+        OK(padded_builder.set("AZURE_STORAGE_ACCOUNT", "account"));
+        OK(padded_builder.set("AZURE_STORAGE_ACCESS_KEY", padded));
+        karu::RequestBuilder padded_request_builder(must_freeze(padded_builder));
+        auto padded_request = padded_request_builder.prepare(azure, 0, 4);
+        OK(padded_request.has_value());
+        if (padded_request)
+            OK(header(*padded_request, "Authorization").starts_with("SharedKey account:"));
+    }
+
+    // With no AZURE_STORAGE_ENDPOINT the connection string supplies the host,
+    // and Data Lake paths read a different key than blob paths.
+    karu::ConfigBuilder blob_endpoint(false);
+    OK(blob_endpoint.set("AZURE_STORAGE_CONNECTION_STRING",
+                         "AccountName=dev;AccountKey=a2V5;BlobEndpoint=https://blob.example.test"));
+    karu::RequestBuilder blob_request_builder(must_freeze(blob_endpoint));
+    auto blob_request = blob_request_builder.prepare(azure, 0, 1);
+    OK(blob_request.has_value());
+    if (blob_request)
+        EQS(blob_request->url, "https://blob.example.test/container/a%20b");
+
+    karu::ConfigBuilder dfs_endpoint(false);
+    OK(dfs_endpoint.set("AZURE_STORAGE_CONNECTION_STRING",
+                        "AccountName=dev;AccountKey=a2V5;DfsEndpoint=https://dfs.example.test"));
+    karu::RequestBuilder dfs_request_builder(must_freeze(dfs_endpoint));
+    karu::Locator adls{must_resolve("abfs://container/a b")};
+    auto dfs_request = dfs_request_builder.prepare(adls, 0, 1);
+    OK(dfs_request.has_value());
+    if (dfs_request)
+        EQS(dfs_request->url, "https://dfs.example.test/container/a%20b");
+
+    // A query on the endpoint would collide with the SAS token appended below.
+    karu::ConfigBuilder queried_endpoint(false);
+    OK(queried_endpoint.set("AZURE_STORAGE_ACCOUNT", "account"));
+    OK(queried_endpoint.set("AZURE_STORAGE_ACCESS_KEY", "a2V5"));
+    OK(queried_endpoint.set("AZURE_STORAGE_ENDPOINT", "https://host.example.test/?prefix=x"));
+    karu::RequestBuilder queried_request_builder(must_freeze(queried_endpoint));
+    auto queried = queried_request_builder.prepare(azure, 0, 1);
+    OK(!queried);
+    if (!queried)
+        EQ(queried.error().status, KARU_ERR_CONFIG);
+
+    // A SAS token is pasted onto the URL, and the leading separators callers
+    // copy out of the portal have to be stripped rather than doubled.
+    for (const char* sas : {"sv=2021&sig=abc", "?sv=2021&sig=abc", "&sv=2021&sig=abc"}) {
+        karu::ConfigBuilder sas_builder(false);
+        OK(sas_builder.set("AZURE_STORAGE_ACCOUNT", "account"));
+        OK(sas_builder.set("AZURE_STORAGE_SAS_TOKEN", sas));
+        karu::RequestBuilder sas_request_builder(must_freeze(sas_builder));
+        auto sas_request = sas_request_builder.prepare(azure, 0, 1);
+        OK(sas_request.has_value());
+        if (sas_request) {
+            EQS(sas_request->url,
+                "https://account.blob.core.windows.net/container/a%20b?sv=2021&sig=abc");
+            OK(sas_request->headers.empty());
+            OK(!sas_request->http.follow_redirects);
+        }
+    }
 }
 
 } // namespace karu::test

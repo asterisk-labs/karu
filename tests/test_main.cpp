@@ -24,6 +24,7 @@ int main() {
     test_engine_shutdown();
     test_planner_scope();
     test_planner_property();
+    test_status_and_paths();
     test_transport_statuses();
     test_cpp_facade();
 
