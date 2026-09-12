@@ -28,7 +28,12 @@ container runtime. Anything that does not start is left down, and
 the test reports ctest's skip status, so `make test` is unaffected.
 
 CI sets `KARU_TEST_REQUIRE_ALL_EMULATORS=1`, which turns a missing backend into
-a failure. Local runs remain best-effort.
+a failure during both startup and the test itself. Local runs remain
+best-effort.
+
+The emulator versions are pinned in `up.sh`. This keeps registry migrations and
+protocol-routing changes in a new upstream `latest` image from silently changing
+the CI environment.
 
 ## Endpoints
 

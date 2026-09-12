@@ -94,6 +94,8 @@ jobs:
       # paying for a second Linux configure and build.
       - name: Start storage emulators
         if: matrix.name == 'Linux GCC'
+        env:
+          KARU_TEST_REQUIRE_ALL_EMULATORS: 1
         run: tests/emulators/up.sh
 
       - name: Read from the emulators
@@ -107,7 +109,7 @@ jobs:
         run: |
           docker logs karu-minio 2>&1 | tail -50 || true
           docker logs karu-gcs 2>&1 | tail -50 || true
-          cat "${TMPDIR:-/tmp}/karu-emulators/azurite.log" 2>/dev/null | tail -50 || true
+          tail -50 "${TMPDIR:-/tmp}/karu-emulators/azurite.log" 2>/dev/null || true
 
       - name: Stop storage emulators
         if: always() && matrix.name == 'Linux GCC'

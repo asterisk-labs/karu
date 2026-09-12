@@ -25,6 +25,10 @@ AZURE_PORT="${KARU_TEST_AZURE_PORT:-10000}"
 GCS_PORT="${KARU_TEST_GCS_PORT:-4443}"
 S3_KEY_ID="${KARU_TEST_S3_KEY_ID:-karuemulator}"
 S3_SECRET="${KARU_TEST_S3_SECRET:-karuemulator-secret}"
+MINIO_IMAGE="quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
+MINIO_MC_IMAGE="quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z"
+FAKE_GCS_IMAGE="fsouza/fake-gcs-server:1.56.1"
+AZURITE_PACKAGE="azurite@3.37.0"
 
 mkdir -p "$STATE"
 
@@ -50,30 +54,39 @@ have_docker() {
     command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
 }
 
+unavailable() {
+    echo "  $1"
+    [ "${KARU_TEST_REQUIRE_ALL_EMULATORS:-0}" != "1" ]
+}
+
 start_s3() {
-    have_docker || { echo "  S3: sin docker, omitido"; return 0; }
+    if ! have_docker; then
+        unavailable "S3: sin docker, omitido" || return 1
+        return 0
+    fi
     docker rm -f karu-minio >/dev/null 2>&1 || true
     docker run -d --name karu-minio \
         -p "127.0.0.1:$S3_PORT:9000" \
         -e "MINIO_ROOT_USER=$S3_KEY_ID" \
         -e "MINIO_ROOT_PASSWORD=$S3_SECRET" \
-        minio/minio:latest server /data >/dev/null
+        "$MINIO_IMAGE" server /data >/dev/null
     wait_for "MinIO" "http://127.0.0.1:$S3_PORT/minio/health/live" || return 1
     # Seed through MinIO's own client so no signing code of ours stands between
     # the fixture and the server.
     python3 "$ROOT/fixture.py" > "$STATE/fixture.bin"
     docker run --rm --network container:karu-minio -v "$STATE:/seed" --entrypoint /bin/sh \
-        minio/mc:latest -c "
+        "$MINIO_MC_IMAGE" -c "
             mc alias set karu http://127.0.0.1:9000 $S3_KEY_ID $S3_SECRET >/dev/null &&
             mc mb --ignore-existing karu/karu >/dev/null &&
-            mc cp /seed/fixture.bin karu/karu/fixture.bin >/dev/null
+            mc cp /seed/fixture.bin karu/karu/fixture.bin >/dev/null &&
+            mc stat karu/karu/fixture.bin >/dev/null
         " >/dev/null
     echo "  S3 sembrado"
 }
 
 start_azure() {
     if ! command -v npx >/dev/null 2>&1; then
-        echo "  Azure: sin node, omitido"
+        unavailable "Azure: sin node, omitido" || return 1
         return 0
     fi
     mkdir -p "$STATE/azurite"
@@ -82,11 +95,11 @@ start_azure() {
     # synchronously: on a cold cache the download alone outlasts the wait below,
     # and the service would look like it had failed to start.
     echo "  descargando Azurite si hace falta..."
-    if ! npx --yes --package=azurite azurite-blob version >/dev/null 2>&1; then
-        echo "  Azure: no se pudo obtener azurite, omitido"
+    if ! npx --yes --package="$AZURITE_PACKAGE" azurite-blob version >/dev/null 2>&1; then
+        unavailable "Azure: no se pudo obtener azurite, omitido" || return 1
         return 0
     fi
-    npx --yes --package=azurite azurite-blob \
+    npx --yes --package="$AZURITE_PACKAGE" azurite-blob \
         --blobHost 127.0.0.1 --blobPort "$AZURE_PORT" \
         --location "$STATE/azurite" --silent > "$STATE/azurite.log" 2>&1 &
     echo $! > "$STATE/azurite.pid"
@@ -96,7 +109,10 @@ start_azure() {
 }
 
 start_gcs() {
-    have_docker || { echo "  GCS: sin docker, omitido"; return 0; }
+    if ! have_docker; then
+        unavailable "GCS: sin docker, omitido" || return 1
+        return 0
+    fi
     docker rm -f karu-gcs >/dev/null 2>&1 || true
     # fake-gcs-server serves whatever it finds under /data, one directory per
     # bucket, so the fixture needs no upload API and no credentials.
@@ -105,14 +121,27 @@ start_gcs() {
     docker run -d --name karu-gcs \
         -p "127.0.0.1:$GCS_PORT:4443" \
         -v "$STATE/gcs:/data" \
-        fsouza/fake-gcs-server:latest \
-        -scheme http -port 4443 -external-url "http://127.0.0.1:$GCS_PORT" >/dev/null
+        "$FAKE_GCS_IMAGE" \
+        -scheme http -port 4443 \
+        -external-url "http://127.0.0.1:$GCS_PORT" \
+        -public-host "127.0.0.1:$GCS_PORT" >/dev/null
     wait_for "fake-gcs-server" "http://127.0.0.1:$GCS_PORT/storage/v1/b" || return 1
+    curl -fsS --range 0-0 "http://127.0.0.1:$GCS_PORT/karu/fixture.bin" >/dev/null || return 1
     echo "  GCS sembrado"
 }
 
 case "$WHICH" in
-    all)   start_s3 || true; start_azure || true; start_gcs || true ;;
+    all)
+        if [ "${KARU_TEST_REQUIRE_ALL_EMULATORS:-0}" = "1" ]; then
+            start_s3
+            start_azure
+            start_gcs
+        else
+            start_s3 || true
+            start_azure || true
+            start_gcs || true
+        fi
+        ;;
     s3)    start_s3 ;;
     azure) start_azure ;;
     gcs)   start_gcs ;;
