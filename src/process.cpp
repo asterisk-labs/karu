@@ -13,8 +13,11 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+extern char** environ;
 #endif
 
 namespace karu::os {
@@ -92,6 +95,38 @@ void terminate_process(pid_t child, int& status) noexcept {
     ::kill(-child, SIGKILL);
     ::kill(child, SIGKILL);
     wait_for_child(child, status);
+}
+
+std::error_code setup_spawn(posix_spawn_file_actions_t& actions,
+                            posix_spawnattr_t& attributes, int read_descriptor,
+                            int write_descriptor) {
+    int status = posix_spawn_file_actions_init(&actions);
+    if (status != 0)
+        return {status, std::generic_category()};
+
+    status = posix_spawnattr_init(&attributes);
+    if (status != 0) {
+        posix_spawn_file_actions_destroy(&actions);
+        return {status, std::generic_category()};
+    }
+
+    const auto add_action = [&](int result) {
+        if (status == 0 && result != 0)
+            status = result;
+    };
+    add_action(posix_spawn_file_actions_adddup2(&actions, write_descriptor, STDOUT_FILENO));
+    add_action(posix_spawn_file_actions_addclose(&actions, read_descriptor));
+    if (write_descriptor != STDOUT_FILENO)
+        add_action(posix_spawn_file_actions_addclose(&actions, write_descriptor));
+    add_action(posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP));
+    add_action(posix_spawnattr_setpgroup(&attributes, 0));
+
+    if (status != 0) {
+        posix_spawnattr_destroy(&attributes);
+        posix_spawn_file_actions_destroy(&actions);
+        return {status, std::generic_category()};
+    }
+    return {};
 }
 
 #endif
@@ -217,31 +252,36 @@ run_command(std::string_view command, std::size_t output_limit, std::chrono::mil
         return std::unexpected(windows_error());
     result.exit_code = static_cast<int>(exit_code);
 #else
-    const std::string command_copy(command);
+    std::string command_copy(command);
     int descriptors[2]{};
     if (::pipe(descriptors) != 0)
         return std::unexpected(std::error_code(errno, std::generic_category()));
     const int read_descriptor = descriptors[0];
     const int write_descriptor = descriptors[1];
-    const pid_t child = ::fork();
-    if (child < 0) {
-        const std::error_code error(errno, std::generic_category());
+
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attributes;
+    if (const std::error_code error =
+            setup_spawn(actions, attributes, read_descriptor, write_descriptor)) {
         ::close(read_descriptor);
         ::close(write_descriptor);
         return std::unexpected(error);
     }
-    if (child == 0) {
-        ::setpgid(0, 0);
-        if (::dup2(write_descriptor, STDOUT_FILENO) < 0)
-            ::_exit(127);
+
+    std::array<char, 3> shell_name{'s', 'h', '\0'};
+    std::array<char, 3> option{'-', 'c', '\0'};
+    char* arguments[]{shell_name.data(), option.data(), command_copy.data(), nullptr};
+    pid_t child = -1;
+    const int spawn_status =
+        posix_spawn(&child, "/bin/sh", &actions, &attributes, arguments, environ);
+    posix_spawnattr_destroy(&attributes);
+    posix_spawn_file_actions_destroy(&actions);
+    ::close(write_descriptor);
+    if (spawn_status != 0) {
         ::close(read_descriptor);
-        ::close(write_descriptor);
-        ::execl("/bin/sh", "sh", "-c", command_copy.c_str(), static_cast<char*>(nullptr));
-        ::_exit(127);
+        return std::unexpected(std::error_code(spawn_status, std::generic_category()));
     }
 
-    ::close(write_descriptor);
-    ::setpgid(child, child);
     const int flags = ::fcntl(read_descriptor, F_GETFL, 0);
     if (flags < 0 || ::fcntl(read_descriptor, F_SETFL, flags | O_NONBLOCK) < 0) {
         const std::error_code error(errno, std::generic_category());
