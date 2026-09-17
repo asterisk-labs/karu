@@ -42,6 +42,12 @@ target_link_libraries(karu_c_api_test PRIVATE karu::karu)
 karu_instrument_test(karu_c_api_test)
 add_test(NAME karu_c_api COMMAND karu_c_api_test)
 
+# The agent skill in .claude/skills/karu documents one release. This keeps its version
+# line, its .agents link and its internal links honest without any build step.
+add_test(NAME karu_agent_skill
+    COMMAND ${CMAKE_COMMAND} -DKARU_SOURCE_DIR=${PROJECT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/agent_skill.cmake)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_executable(karu_http_test test_http.cpp)

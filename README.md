@@ -76,6 +76,16 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
+## AI agent skill
+
+Install the [Karu skill](https://github.com/asterisk-labs/karu/blob/main/.claude/skills/karu/SKILL.md)
+so coding agents know its path grammar, batch semantics, configuration and credential
+rules.
+
+```sh
+npx skills add asterisk-labs/karu
+```
+
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
