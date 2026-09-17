@@ -198,16 +198,17 @@ tests/emulators/down.sh
   the facade's `read` is a convenience over `fetch`.
 - **Stateless reads.** No object byte or size cache. Only connections, DNS results, TLS
   sessions and credentials are reused.
-- **Blocking work off the I/O thread.** Discovery, callbacks and helper processes run on
-  credential workers; files on file workers.
+- **Blocking work off the I/O thread.** Submitted-read discovery, callbacks and helper
+  processes run on credential workers; files run on file workers. Synchronous size probes
+  do their credential work on the calling thread.
 - **Late, per-attempt requests.** Locators hold no endpoints or secrets; requests are
   rebuilt and signed for each attempt.
 - **Safe transport.** libcurl is mandatory (7.83.0 or newer stops forwarding
   `Authorization` on cross-origin redirects, CVE-2022-27776). Signed requests never follow
   redirects, user headers never cross origins, protocols are HTTP and HTTPS only, and
   messages redact URLs.
-- **A C ABI for bindings.** Python, R and Julia bind to `karu.h`; C++ types and
-  exceptions stop at `src/karu.cpp`.
+- **A C ABI for bindings.** Python, R and Julia bindings should use `karu.h`; C++ types
+  and exceptions stop at `src/karu.cpp`.
 - **Fork safety.** `karu_client` compares the process id and abandons, never destroys,
   inherited engines and mutexes, because `DataLoader` workers fork.
 

@@ -23,7 +23,7 @@ installed karu 0.2.3 and ran on local files, `tests/http_server.py` and `hf://`.
 | Call | Returns |
 | --- | --- |
 | `karu_api_version()` | `KARU_API_VERSION`, currently `1` |
-| `karu_version_string()` | the `VERSION` file, for example `"0.2.3"` |
+| `karu_version_string()` | the exact release string from the `VERSION` file |
 | `karu_http_backend()` | libcurl's `curl_version()`, for example `libcurl/8.7.1 SecureTransport (LibreSSL/3.3.6) zlib/1.2.12 nghttp2/1.68.0` |
 
 - Karu builds only as a static C++23 library (`libkaru.a`, `karu.lib`) with hidden
@@ -45,13 +45,15 @@ set_target_properties(reader PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(reader PRIVATE karu::karu)
 ```
 
-Vendored source (rumi does this with `extern/karu` and links the `karu::internal` alias,
-which exists only for rumi):
+Generic vendored source:
 
 ```cmake
 add_subdirectory(extern/karu ${CMAKE_CURRENT_BINARY_DIR}/karu EXCLUDE_FROM_ALL)
 target_link_libraries(app PRIVATE karu::karu)
 ```
+
+The build tree also exposes `karu::internal` for rumi's private vendored integration;
+that alias is not exported by the installed package.
 
 On macOS, pass `-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)` if CMake cannot find
 OpenSSL. On Windows, CI uses `vcpkg install curl:x64-windows openssl:x64-windows` and the
@@ -93,7 +95,7 @@ vcpkg toolchain file.
 | -7 | `KARU_ERR_HTTP` | `http error` | other HTTP statuses, bad `Content-Range`, ignored `Range` over the limit, blocked or unfollowed redirects |
 | -8 | `KARU_ERR_RANGE` | `range past end of object` | HTTP 416, an object ending inside the request, a read leaving its window |
 | -9 | `KARU_ERR_AUTH` | `not authorized` | HTTP 401 and 403 |
-| -10 | `KARU_ERR_CANCELLED` | `cancelled` | reserved; not produced in 0.2.3 (cancelled work is discarded) |
+| -10 | `KARU_ERR_CANCELLED` | `cancelled` | reserved in this release; cancelled work is discarded |
 | -11 | `KARU_ERR_CONFIG` | `invalid configuration` | unknown options, invalid values, bad endpoints |
 | -12 | `KARU_ERR_CREDENTIALS` | `credentials unavailable` | missing or failed credentials, callback failures |
 | -13 | `KARU_ERR_NOT_FOUND` | `object not found` | HTTP 404 |
@@ -341,9 +343,10 @@ typedef karu_status (*karu_credentials_provider)(void* user_data, karu_credentia
 
 - The callback replaces native discovery for its kind. An explicit
   `*_NO_SIGN_REQUEST=YES` still wins and skips it.
-- It runs on Karu's credential workers, possibly concurrently for different paths, so it
-  and `user_data` must be thread safe. It must not call into the same client, and it
-  must bound its own I/O because Karu cannot interrupt it.
+- For submitted reads it runs on Karu's credential workers, possibly concurrently for
+  different paths. During `karu_client_size` it runs synchronously on the calling thread.
+  It and `user_data` must therefore be thread safe. It must not call into the same client,
+  and it must bound its own I/O because Karu cannot interrupt it.
 - Karu copies every string before the callback returns. `release(user_data)` runs once
   nothing holds the callback any more: no builder, client or live batch.
 - Return `KARU_OK`, or a failure: negative statuses pass through, anything else becomes
@@ -441,9 +444,10 @@ $ python3 tests/http_server.py ./provider
 - One engine per client: one I/O thread driving libcurl multi, 4 credential workers and
   4 file workers. They start on first use and stop when the client and all its batches
   are freed.
-- `karu_client_size` runs its request on the calling thread. Credential callbacks and
-  `credential_process` helpers run on credential workers. There is no background
-  refresh: credentials are renewed lazily by the first request that needs them.
+- `karu_client_size` runs the entire size probe on the calling thread, including native
+  discovery, a custom credential callback and any `credential_process`. Submitted cloud
+  reads use credential workers instead. There is no background refresh: credentials are
+  renewed lazily by the first request that needs them.
 - `karu_client_submit`, `karu_client_fetch` and `karu_client_size` may be called from
   many threads on one client.
 - `fork()`: a client used in a child notices the new process id, abandons the inherited

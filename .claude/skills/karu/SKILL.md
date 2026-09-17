@@ -40,6 +40,9 @@ the `VERSION` file. If they differ, trust the source, `CHANGELOG.md` and
 ```cpp
 #include <karu/karu.hpp>
 
+#include <array>
+#include <cstddef>
+
 auto config = karu::Config::from_environment().value();
 config.set("KARU_CONCURRENCY", "256").value();
 config.set_path("s3://public-bucket/", "AWS_NO_SIGN_REQUEST", "YES").value();
@@ -119,6 +122,9 @@ rebase offsets to zero and reject reads that leave the window.
 - Reuse one client. Each new client starts new threads, cold connections and an empty
   credential cache. After `fork()` a client rebuilds its engine on first use in the
   child, but batches never cross a fork.
+- Submitted cloud reads resolve credentials on credential workers. A synchronous
+  `karu_client_size` call instead performs its credential lookup, custom callback and
+  any `credential_process` on the calling thread.
 - Keep format knowledge out of Karu. Plan ranges above it, submit them in batches, and
   decode completions as they arrive.
 

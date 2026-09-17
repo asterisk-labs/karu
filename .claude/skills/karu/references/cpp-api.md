@@ -222,10 +222,11 @@ auto fetched = client->fetch(reads, exact);
 
 ## 7. Differences from the C API
 
-- The facade never lets Karu allocate: an empty `destination` fails with
-  `KARU_ERR_INVALID` (`read has an empty destination`), and a null `object` with
-  `read has no object`. Use `native_handle()` with `karu_client_submit` and
-  `buffer = NULL` if Karu-owned buffers are needed.
+- The facade never lets Karu allocate. In a batch `Read`, an empty `destination` fails
+  with `KARU_ERR_INVALID` (`read has an empty destination`), and a null `object` with
+  `read has no object`. The convenience calls `Client::read(..., length = 0)` and
+  `read_into` with an empty span instead succeed without I/O. Use `native_handle()` with
+  `karu_client_submit` and `buffer = NULL` if Karu-owned buffers are needed.
 - `Client::read` and `read_into` are `fetch` with one request. Their error message is the
   completion message, for example `...: object ended at byte 4096 while reading [4090, +16)`.
 - `Batch` has no explicit free; its destructor calls `karu_batch_free`.

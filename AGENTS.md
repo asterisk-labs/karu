@@ -11,14 +11,15 @@ ABI in `include/karu/karu.h`; `include/karu/karu.hpp` is a header-only C++ facad
   layers above it (rumi, cozip, GDAL).
 - Keep the hot path batch oriented. Do not add per-file or per-range blocking work, and
   keep credential discovery, callbacks and helper processes off the I/O thread.
-- The C header is the binding surface for Python, R and Julia. C++ types and exceptions
+- Language bindings use the C header; do not bind the C++ facade. C++ types and exceptions
   stop at `src/karu.cpp`. Changing `karu_req`, `karu_done` or `karu_credentials` breaks
   the ABI; `karu_submit_options` grows through `struct_size`.
 - Build requests late and per attempt. Locators never hold endpoints or secrets, signed
   requests never follow redirects, user headers never cross origins, and messages redact
   URLs.
-- Treat `build/` and `build-*/` as build artifacts. `docs/` is hand-written HTML, and
-  `CONFIGURATION.md` and `docs/configuration.html` describe the same options.
+- Treat `build/` and `build-*/` as build artifacts. `docs/` is hand-written HTML;
+  `CONFIGURATION.md` and `docs/configuration.html` describe the same options, and
+  `karu_agent_skill` checks that neither option inventory falls behind the source.
 - A new or changed option goes into `src/config_options.hpp`, `CONFIGURATION.md`,
   `docs/configuration.html` and `CHANGELOG.md` together.
 - Tests stay hermetic: use `karu_config_create_empty()` or `ConfigBuilder(false)` and
@@ -26,9 +27,10 @@ ABI in `include/karu/karu.h`; `include/karu/karu.hpp` is a header-only C++ facad
 
 ## Validation
 
-- `make test` builds with warnings as errors and runs the component, C API, loopback HTTP
-  and credential suites (the last two need Python 3). If CMake cannot find OpenSSL on
-  macOS, add `CMAKE_FLAGS=-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)`.
+- `make test` builds with warnings as errors and runs the component, C API, agent-skill,
+  loopback HTTP and credential suites (the last two need Python 3). The emulator suite
+  skips unless a service is active. If CMake cannot find OpenSSL on macOS, add
+  `CMAKE_FLAGS=-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)`.
 - Run `make test-asan` and `make test-tsan` for changes to the engine, batches,
   transport, the credential cache or process handling, and `make package-test` when
   headers or CMake packaging change.

@@ -154,7 +154,9 @@ Native chain, first match wins:
    explicitly.
 
 - OAuth scope: `GCS_SCOPE`, default `https://www.googleapis.com/auth/devstorage.read_only`.
-- Token lifetime comes from `expires_in` (default 3600 seconds, at least 60).
+- OAuth exchanges take the token lifetime from `expires_in`, default it to 3600 seconds
+  and clamp it to at least 60. The metadata loader uses the lifetime reported by the
+  metadata service, also defaulting a missing value to 3600.
 - `GCS_USER_PROJECT` adds `x-goog-user-project` for requester-pays buckets, signed or not.
 - `GCS_ENDPOINT` (default `https://storage.googleapis.com`) is the XML API root; requests go
   to `<endpoint>/bucket/key`.
