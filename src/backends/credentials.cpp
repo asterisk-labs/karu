@@ -414,38 +414,26 @@ std::expected<void, RequestError> add_configured_headers(const ConfigSnapshot& c
                 RequestError{KARU_ERR_CONFIG, "a generated HTTP header is invalid"});
         }
     }
-    std::string text = config.option(path, "KARU_HTTP_HEADERS");
-    std::size_t start = 0;
-    while (start < text.size()) {
-        const std::size_t end = text.find_first_of("\r\n", start);
-        std::string line = trim(text.substr(start, end - start));
-        if (!line.empty()) {
-            const std::size_t colon = line.find(':');
-            if (colon == std::string::npos || colon == 0) {
-                return std::unexpected(
-                    RequestError{KARU_ERR_CONFIG, "KARU_HTTP_HEADERS contains a malformed header"});
-            }
-            std::string name = trim(line.substr(0, colon));
-            const std::string normalized = lower(name);
-            const bool duplicate = std::ranges::any_of(
-                headers, [&](const Header& current) { return lower(current.first) == normalized; });
-            const bool protected_header =
-                protect_authentication &&
-                (normalized == "authorization" || normalized == "date" ||
-                 normalized == "if-match" || normalized.starts_with("x-amz-") ||
-                 normalized.starts_with("x-goog-") || normalized.starts_with("x-ms-"));
-            if (normalized == "host" || normalized == "range" || duplicate || protected_header) {
-                return std::unexpected(RequestError{
-                    KARU_ERR_CONFIG,
-                    "KARU_HTTP_HEADERS cannot override Karu-managed header '" + name + "'"});
-            }
-            headers.emplace_back(std::move(name), trim(line.substr(colon + 1)));
+    static_cast<void>(path);
+    for (const ConfiguredHeader& configured : config.configured_headers()) {
+        if (configured.malformed) {
+            return std::unexpected(
+                RequestError{KARU_ERR_CONFIG, "KARU_HTTP_HEADERS contains a malformed header"});
         }
-        if (end == std::string::npos)
-            break;
-        start = text.find_first_not_of("\r\n", end);
-        if (start == std::string::npos)
-            break;
+        const std::string& normalized = configured.lowercase_name;
+        const bool duplicate = std::ranges::any_of(
+            headers, [&](const Header& current) { return lower(current.first) == normalized; });
+        const bool protected_header =
+            protect_authentication &&
+            (normalized == "authorization" || normalized == "date" || normalized == "if-match" ||
+             normalized.starts_with("x-amz-") || normalized.starts_with("x-goog-") ||
+             normalized.starts_with("x-ms-"));
+        if (normalized == "host" || normalized == "range" || duplicate || protected_header) {
+            return std::unexpected(RequestError{
+                KARU_ERR_CONFIG,
+                "KARU_HTTP_HEADERS cannot override Karu-managed header '" + configured.name + "'"});
+        }
+        headers.emplace_back(configured.name, configured.value);
     }
     return {};
 }

@@ -33,6 +33,55 @@ std::expected<Integer, std::string> parse_integer(std::string_view name, std::st
     return value;
 }
 
+std::string trim_text(std::string_view value) {
+    const auto whitespace = [](unsigned char c) { return std::isspace(c) != 0; };
+    std::size_t first = 0;
+    std::size_t last = value.size();
+    while (first < last && whitespace(static_cast<unsigned char>(value[first])))
+        ++first;
+    while (last > first && whitespace(static_cast<unsigned char>(value[last - 1])))
+        --last;
+    return std::string(value.substr(first, last - first));
+}
+
+std::string lower_text(std::string value) {
+    std::ranges::transform(value, value.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+// Defer malformed-header errors to request construction.
+std::vector<ConfiguredHeader> parse_configured_headers(std::string_view text) {
+    std::vector<ConfiguredHeader> result;
+    std::size_t start = 0;
+    while (start < text.size()) {
+        const std::size_t end = text.find_first_of("\r\n", start);
+        const std::string line = trim_text(text.substr(
+            start, end == std::string_view::npos ? std::string_view::npos : end - start));
+        if (!line.empty()) {
+            const std::size_t colon = line.find(':');
+            if (colon == std::string::npos || colon == 0) {
+                result.push_back(ConfiguredHeader{
+                    .name = {}, .lowercase_name = {}, .value = {}, .malformed = true});
+                break;
+            }
+            std::string name = trim_text(std::string_view(line).substr(0, colon));
+            std::string lowercase_name = lower_text(name);
+            result.push_back(
+                ConfiguredHeader{.name = std::move(name),
+                                 .lowercase_name = std::move(lowercase_name),
+                                 .value = trim_text(std::string_view(line).substr(colon + 1)),
+                                 .malformed = false});
+        }
+        if (end == std::string_view::npos)
+            break;
+        start = text.find_first_not_of("\r\n", end);
+        if (start == std::string_view::npos)
+            break;
+    }
+    return result;
+}
+
 const std::string* find(const OptionMap& values, const std::string& name) {
     const auto iterator = values.find(name);
     return iterator == values.end() ? nullptr : &iterator->second;
@@ -382,7 +431,14 @@ std::string ConfigSnapshot::hugging_face_token_path(std::string_view path) const
     return home_directory_ + "/.cache/huggingface/token";
 }
 
-HttpRequestOptions ConfigSnapshot::http_options(std::string_view path) const {
+HttpRequestOptions ConfigSnapshot::default_http_options() {
+    HttpRequestOptions result;
+    result.user_agent = "karu/" KARU_VERSION_STRING;
+    return result;
+}
+
+HttpRequestOptions ConfigSnapshot::compute_http_options() const {
+    const std::string_view path;
     HttpRequestOptions result;
     const std::string version = uppercase(option(path, "KARU_HTTP_VERSION", "1.1"));
     if (version == "AUTO")
@@ -486,6 +542,10 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
                                    .connect_timeout_seconds = *connect,
                                    .low_speed_time_seconds = *low_time,
                                    .low_speed_limit = *low_limit};
+    result.http_ = result.compute_http_options();
+    const std::string headers = global("KARU_HTTP_HEADERS", {});
+    result.has_configured_headers_ = !headers.empty();
+    result.configured_headers_ = parse_configured_headers(headers);
     return result;
 }
 

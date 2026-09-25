@@ -8,13 +8,11 @@
 namespace karu {
 namespace {
 
-void apply_http_options(const ConfigSnapshot& config, std::string_view path,
-                        PreparedRequest& request) {
+void apply_http_options(const ConfigSnapshot& config, PreparedRequest& request) {
     const bool follow_redirects = request.http.follow_redirects;
-    const bool configured_headers = !config.option(path, "KARU_HTTP_HEADERS").empty();
-    request.http = config.http_options(path);
+    request.http = config.http_options();
     request.http.follow_redirects = follow_redirects;
-    request.http.same_origin_redirects_only = configured_headers;
+    request.http.same_origin_redirects_only = config.has_configured_headers();
 }
 
 } // namespace
@@ -81,7 +79,7 @@ RequestBuilder::materialize(const Locator& locator, const ResolvedCredentials& c
                             : backends::prepare_hugging_face(config_, object, if_match);
         if (prepared) {
             prepared->range = range;
-            apply_http_options(config_, object.canonical_uri, *prepared);
+            apply_http_options(config_, *prepared);
         }
         return prepared;
     }
@@ -108,7 +106,7 @@ RequestBuilder::materialize(const Locator& locator, const ResolvedCredentials& c
         return std::unexpected(headers.error());
     }
     prepared->range = range;
-    apply_http_options(config_, object.canonical_uri, *prepared);
+    apply_http_options(config_, *prepared);
     return prepared;
 }
 

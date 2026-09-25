@@ -30,6 +30,8 @@ struct HttpRequestOptions {
     std::string proxy;
     std::string proxy_user_password;
     std::string user_agent;
+
+    bool operator==(const HttpRequestOptions&) const = default;
 };
 
 struct PreparedRequest {

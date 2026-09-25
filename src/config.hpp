@@ -32,6 +32,16 @@ struct CredentialCallback {
     ~CredentialCallback();
 };
 
+// A parsed KARU_HTTP_HEADERS entry, or the error that stopped parsing.
+struct ConfiguredHeader {
+    std::string name;
+    std::string lowercase_name;
+    std::string value;
+    bool malformed = false;
+
+    bool operator==(const ConfiguredHeader&) const = default;
+};
+
 struct PathOptions {
     std::string prefix;
     OptionMap values;
@@ -101,7 +111,15 @@ class ConfigSnapshot {
     [[nodiscard]] bool discover_default_credentials() const noexcept {
         return discover_default_credentials_;
     }
-    [[nodiscard]] HttpRequestOptions http_options(std::string_view path) const;
+    // HTTP options are client-wide and computed by freeze(); path is unused.
+    [[nodiscard]] HttpRequestOptions http_options(std::string_view path = {}) const {
+        static_cast<void>(path);
+        return http_;
+    }
+    [[nodiscard]] const std::vector<ConfiguredHeader>& configured_headers() const noexcept {
+        return configured_headers_;
+    }
+    [[nodiscard]] bool has_configured_headers() const noexcept { return has_configured_headers_; }
     [[nodiscard]] const ClientOptions& client_options() const noexcept { return client_; }
     [[nodiscard]] bool operator==(const ConfigSnapshot&) const noexcept = default;
 
@@ -116,6 +134,12 @@ class ConfigSnapshot {
     std::string system_ca_bundle_;
     bool discover_default_credentials_ = false;
     ClientOptions client_;
+    HttpRequestOptions http_ = default_http_options();
+    std::vector<ConfiguredHeader> configured_headers_;
+    bool has_configured_headers_ = false;
+
+    [[nodiscard]] static HttpRequestOptions default_http_options();
+    [[nodiscard]] HttpRequestOptions compute_http_options() const;
 
     friend class ConfigBuilder;
 };
