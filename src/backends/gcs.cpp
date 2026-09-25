@@ -43,7 +43,9 @@ prepare_gcs(const ConfigSnapshot& config, const Resolved& object, const Provider
         return std::unexpected(
             RequestError{KARU_ERR_CONFIG, "GCS_ENDPOINT cannot contain a query"});
     std::string url = append_object(endpoint, object.container, object.key);
-    std::vector<Header> headers;
+    // Keep GCS from decompressing gzip objects and ignoring Range. A manual
+    // Accept-Encoding header leaves libcurl's automatic decoding disabled.
+    std::vector<Header> headers{{"Accept-Encoding", "gzip"}};
     if (!if_match.empty())
         headers.emplace_back("If-Match", if_match);
     const std::string user_project = config.option(path, "GCS_USER_PROJECT");

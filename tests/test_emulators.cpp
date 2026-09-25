@@ -126,6 +126,22 @@ void exercise(const char* name, const karu::Client& client, const karu::Object& 
                   (size ? " (dio " + std::to_string(*size) + ")" : " -> " + size.error().message));
     }
 
+    // Use the probed ETag in a signed read to check it against the real protocol.
+    {
+        auto info = client.stat(blob);
+        check(info.has_value() && info->size == kObjectSize && !info->etag.empty(),
+              std::string(name) + ": stat() con tamaño y ETag" +
+                  (info ? " (etag " + info->etag + ")" : " -> " + info.error().message));
+        if (info && !info->etag.empty()) {
+            std::vector<std::byte> got(512);
+            auto read = client.read_into(blob, 1000, got, info->etag);
+            const bool correct =
+                read.has_value() && std::equal(got.begin(), got.end(), object.begin() + 1000);
+            check(correct, std::string(name) + ": lectura fijada con el ETag de stat()" +
+                               (read ? "" : " -> " + read.error().message));
+        }
+    }
+
     // Past the end must be reported, never silently truncated.
     {
         std::vector<std::byte> got(16);
@@ -167,6 +183,14 @@ void run_s3(const std::vector<std::byte>& object) {
     auto client = karu::Client::create(config).value();
     auto blob = karu::Object::parse("s3://karu/fixture.bin").value();
     exercise("S3 (MinIO)", client, blob, object);
+
+    // A stale ETag must fail even when the request signature is valid.
+    {
+        std::vector<std::byte> got(16);
+        auto read = client.read_into(blob, 0, got, "\"not-the-etag\"");
+        check(!read.has_value() && read.error().status == KARU_ERR_PRECONDITION,
+              "S3 (MinIO): If-Match incorrecto");
+    }
 
     // A wrong secret has to be rejected by the server. Our own fixture cannot
     // prove this, because it never verifies a signature.

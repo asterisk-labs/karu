@@ -51,12 +51,13 @@ struct PathOptions {
 
 struct ClientOptions {
     int concurrency = 64;
+    int io_threads = 4;
     std::uint64_t coalesce_gap = 1u << 20;
     std::uint64_t coalesce_limit = 64u << 20;
     std::size_t coalesce_parts = 1024;
     std::uint64_t coalesce_amplification = 16;
     std::uint64_t range_fallback_limit = 8u << 20;
-    int max_attempts = 3;
+    int max_attempts = 8;
     long request_timeout_seconds = 120;
     long connect_timeout_seconds = 30;
     long low_speed_time_seconds = 60;

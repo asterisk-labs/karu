@@ -154,6 +154,36 @@ int main(void) {
     karu_batch_free(batch);
     batch = NULL;
 
+    karu_batch_stats stats = KARU_BATCH_STATS_INIT;
+    if (karu_client_submit(client, NULL, 0, &batch) != KARU_OK || batch == NULL)
+        return 58;
+    if (karu_batch_get_stats(batch, &stats) != KARU_OK || stats.transfers != 0 ||
+        stats.requested_bytes != 0)
+        return 59;
+    if (karu_batch_get_stats(NULL, &stats) != KARU_ERR_INVALID ||
+        karu_batch_get_stats(batch, NULL) != KARU_ERR_INVALID)
+        return 60;
+    karu_batch_stats too_small_stats = KARU_BATCH_STATS_INIT;
+    too_small_stats.struct_size = sizeof(size_t);
+    if (karu_batch_get_stats(batch, &too_small_stats) != KARU_ERR_INVALID)
+        return 61;
+    karu_batch_free(batch);
+    batch = NULL;
+
+    karu_object_info info = KARU_OBJECT_INFO_INIT;
+    if (info.struct_size != sizeof(karu_object_info) || info.size != 0 || info.etag[0] != '\0')
+        return 53;
+    if (karu_client_stat(NULL, locator, &info) != KARU_ERR_INVALID)
+        return 54;
+    if (karu_client_stat(client, NULL, &info) != KARU_ERR_INVALID)
+        return 55;
+    if (karu_client_stat(client, locator, NULL) != KARU_ERR_INVALID)
+        return 56;
+    karu_object_info too_small = KARU_OBJECT_INFO_INIT;
+    too_small.struct_size = sizeof(size_t);
+    if (karu_client_stat(client, locator, &too_small) != KARU_ERR_INVALID)
+        return 57;
+
     karu_locator_free(locator);
     karu_free(NULL);
     karu_client_free(client);

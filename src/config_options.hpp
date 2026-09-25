@@ -9,17 +9,10 @@ namespace karu::config_options {
 // spelling wins. Explicit API values and path-scoped values are separate,
 // higher-precedence layers.
 inline constexpr std::array CORE{
-    "KARU_CONCURRENCY",
-    "KARU_COALESCE_GAP",
-    "KARU_COALESCE_LIMIT",
-    "KARU_COALESCE_PARTS",
-    "KARU_COALESCE_AMPLIFICATION",
-    "KARU_RANGE_FALLBACK_LIMIT",
-    "KARU_MAX_ATTEMPTS",
-    "KARU_MAX_RETRIES",
-    "KARU_REQUEST_TIMEOUT",
-    "KARU_CONNECT_TIMEOUT",
-    "KARU_LOW_SPEED_TIME",
+    "KARU_CONCURRENCY",          "KARU_IO_THREADS",      "KARU_COALESCE_GAP",
+    "KARU_COALESCE_LIMIT",       "KARU_COALESCE_PARTS",  "KARU_COALESCE_AMPLIFICATION",
+    "KARU_RANGE_FALLBACK_LIMIT", "KARU_MAX_ATTEMPTS",    "KARU_MAX_RETRIES",
+    "KARU_REQUEST_TIMEOUT",      "KARU_CONNECT_TIMEOUT", "KARU_LOW_SPEED_TIME",
     "KARU_LOW_SPEED_LIMIT",
 };
 

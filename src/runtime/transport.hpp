@@ -11,6 +11,7 @@
 #include <curl/curl.h>
 #include <expected>
 #include <string>
+#include <string_view>
 
 namespace karu::transport {
 
@@ -29,14 +30,30 @@ void store_payload(Transfer& transfer, const void* data, std::size_t size) noexc
 [[nodiscard]] std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
                                                          const ClientOptions& options);
 
+// Keep a partial response only if the retry can request the same version.
+void plan_resume(Transfer& transfer);
+// Prefer the caller's condition over an ETag saved for resumption.
+[[nodiscard]] std::string_view version_pin(const Transfer& transfer) noexcept;
+
 [[nodiscard]] bool succeeded(const Transfer& transfer, CURLcode code) noexcept;
 [[nodiscard]] bool retryable(const Transfer& transfer, CURLcode code) noexcept;
 [[nodiscard]] Failure failure(const Transfer& transfer, CURLcode code);
 
-[[nodiscard]] std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy,
-                                                            CURLSH* share,
-                                                            RequestBuilder& request_builder,
-                                                            const ClientOptions& options);
+// Limit DNS and connection failures separately from server-side retries.
+// Connection and request timeouts still bound how long each attempt can take.
+inline constexpr int kUnreachableAttempts = 3;
+[[nodiscard]] bool unreachable(CURLcode code) noexcept;
+
+struct ObjectInfo {
+    std::uint64_t size = 0;
+    // Strong entity tag with its quotes, or empty.
+    std::string etag;
+};
+
+[[nodiscard]] std::expected<ObjectInfo, Failure> object_info(const Locator& locator, CURL* easy,
+                                                             CURLSH* share,
+                                                             RequestBuilder& request_builder,
+                                                             const ClientOptions& options);
 
 } // namespace karu::transport
 

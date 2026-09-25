@@ -12,7 +12,9 @@
 #include <ctime>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -377,6 +379,101 @@ int main(int argc, char** argv) {
     karu_batch_free(truncated_batch);
     karu_locator_free(truncated);
 
+    // Resume only with a strong ETag; otherwise reread the full range.
+    const auto resume_verdict = [&](const char* scenario) {
+        std::array<unsigned char, 1> verdict{};
+        return fetch(client, base + "/resume-verdict/" + scenario, 0, verdict) == KARU_OK &&
+               verdict[0] == 1;
+    };
+    std::array<unsigned char, 300> resumed{};
+    check(fetch(client, base + "/resume/strong", 100, resumed) == KARU_OK,
+          "interrupted body resumes");
+    check_bytes(resumed, 100, "resumed contents");
+    check(resume_verdict("strong"), "resume asks for the missing bytes with If-Match");
+
+    resumed.fill(0);
+    check(fetch(client, base + "/resume/caller", 100, resumed, "\"v1\"") == KARU_OK,
+          "interrupted body resumes under the caller's if_match");
+    check_bytes(resumed, 100, "caller-pinned resumed contents");
+    check(resume_verdict("caller"), "resume keeps the caller's If-Match");
+
+    resumed.fill(0);
+    check(fetch(client, base + "/resume/weak", 100, resumed) == KARU_OK,
+          "interrupted body with a weak ETag restarts");
+    check_bytes(resumed, 100, "restarted contents");
+    check(resume_verdict("weak"), "a weak ETag restarts the whole range unpinned");
+
+    resumed.fill(0);
+    check(fetch(client, base + "/resume/invalid", 100, resumed) == KARU_OK,
+          "an unquoted ETag cannot pin a resumed read");
+    check_bytes(resumed, 100, "restarted contents after an invalid ETag");
+    check(resume_verdict("invalid"), "invalid ETag restarts the whole range unpinned");
+
+    // Both versions satisfy these conditions, but their bytes must not be mixed.
+    for (const auto& [scenario, pin] :
+         std::array{std::pair{"wildcard", "*"}, std::pair{"list", "\"v1\", \"v2\""}}) {
+        resumed.fill(0);
+        check(fetch(client, base + "/resume/" + scenario, 100, resumed, pin) == KARU_OK,
+              "a condition allowing multiple versions restarts the read");
+        check_bytes(resumed, 100, "all bytes come from the replacement version");
+        check(resume_verdict(scenario),
+              "retry preserves the condition and requests the full range");
+    }
+
+    karu_locator* resume_object = nullptr;
+    check(karu_resolve((base + "/resume/scatter").c_str(), &resume_object) == KARU_OK,
+          "resolve coalesced resume object");
+    std::array<unsigned char, 50> resume_first{};
+    std::array<unsigned char, 100> resume_second{};
+    const std::array<karu_req, 2> resume_reads{{
+        {resume_object, 100, resume_first.size(), resume_first.data(), nullptr, nullptr},
+        {resume_object, 150, resume_second.size(), resume_second.data(), nullptr, nullptr},
+    }};
+    check(karu_client_fetch(client, resume_reads.data(), resume_reads.size()) == KARU_OK,
+          "coalesced transfer resumes");
+    check_bytes(resume_first, 100, "first part before the cut");
+    check_bytes(resume_second, 150, "second part across the cut");
+    check(resume_verdict("scatter"), "coalesced transfer resumes from the cut");
+    karu_locator_free(resume_object);
+
+    karu_config* changed_config = nullptr;
+    karu_client* changed_client = nullptr;
+    check(karu_config_create_empty(&changed_config) == KARU_OK, "create replaced-object config");
+    check(karu_config_set_option(changed_config, "KARU_MAX_ATTEMPTS", "3") == KARU_OK,
+          "set replaced-object attempts");
+    check(karu_client_create(changed_config, &changed_client) == KARU_OK,
+          "create replaced-object client");
+    karu_config_free(changed_config);
+    resumed.fill(0);
+    check(fetch(changed_client, base + "/resume/changed", 100, resumed) == KARU_OK,
+          "object replaced during a resumed read");
+    // The replacement must overwrite the old prefix too.
+    check_bytes(resumed, 100, "replaced object read whole from the new version");
+    karu_client_free(changed_client);
+    {
+        std::array<unsigned char, 1> verdict{};
+        check(fetch(client, base + "/resume-verdict/changed", 0, verdict) == KARU_OK &&
+                  verdict[0] == 1,
+              "a replaced object is read again from the start");
+    }
+
+    // On a full-body retry, only the original offset counts toward the
+    // fallback limit. Adding the retained prefix would reject this read.
+    karu_config* ignored_config = nullptr;
+    karu_client* ignored_client = nullptr;
+    check(karu_config_create_empty(&ignored_config) == KARU_OK, "create ignored-range config");
+    check(karu_config_set_option(ignored_config, "KARU_RANGE_FALLBACK_LIMIT", "200") == KARU_OK,
+          "set ignored-range fallback limit");
+    check(karu_client_create(ignored_config, &ignored_client) == KARU_OK,
+          "create ignored-range client");
+    karu_config_free(ignored_config);
+    resumed.fill(0);
+    check(fetch(ignored_client, base + "/resume/ignored", 100, resumed) == KARU_OK,
+          "resumed attempt answered with the whole object");
+    check_bytes(resumed, 100, "range taken again from the whole object");
+    karu_client_free(ignored_client);
+    check(resume_verdict("ignored"), "the retry still asks for the rest with If-Match");
+
     struct BackendCase {
         const char* root;
         const char* endpoint;
@@ -456,6 +553,210 @@ int main(int argc, char** argv) {
           "large ignored Range rejected");
     karu_client_free(strict_client);
     karu_config_free(strict_config);
+
+    // Cover one loop, several loops, and a loop count capped by concurrency.
+    for (const auto& [loops, concurrency] :
+         {std::pair{"1", "8"}, std::pair{"16", "3"}, std::pair{"4", "64"}}) {
+        karu_config* loop_config = nullptr;
+        karu_client* loop_client = nullptr;
+        check(karu_config_create_empty(&loop_config) == KARU_OK, "create loop config");
+        check(karu_config_set_option(loop_config, "KARU_IO_THREADS", loops) == KARU_OK,
+              "set event loops");
+        check(karu_config_set_option(loop_config, "KARU_CONCURRENCY", concurrency) == KARU_OK,
+              "set loop concurrency");
+        check(karu_config_set_option(loop_config, "KARU_COALESCE_GAP", "0") == KARU_OK,
+              "keep loop reads separate");
+        check(karu_client_create(loop_config, &loop_client) == KARU_OK, "create loop client");
+        karu_config_free(loop_config);
+        karu_locator* loop_object = nullptr;
+        check(karu_resolve((base + "/object").c_str(), &loop_object) == KARU_OK,
+              "resolve loop object");
+        constexpr std::size_t loop_reads = 48;
+        std::array<std::array<unsigned char, 17>, loop_reads> loop_buffers{};
+        std::array<karu_req, loop_reads> loop_requests{};
+        for (std::size_t index = 0; index < loop_reads; ++index) {
+            loop_requests[index] = karu_req{loop_object,
+                                            index * 80,
+                                            loop_buffers[index].size(),
+                                            loop_buffers[index].data(),
+                                            reinterpret_cast<void*>(index + 1),
+                                            nullptr};
+        }
+        karu_batch* loop_batch = nullptr;
+        check(karu_client_submit(loop_client, loop_requests.data(), loop_requests.size(),
+                                 &loop_batch) == KARU_OK,
+              "submit across event loops");
+        check(drain_success(loop_batch, "event loop completion") == static_cast<int>(loop_reads),
+              "every event loop read completes");
+        karu_batch_free(loop_batch);
+        for (std::size_t index = 0; index < loop_reads; ++index)
+            check_bytes(loop_buffers[index], index * 80, "event loop contents");
+        karu_locator_free(loop_object);
+        karu_client_free(loop_client);
+    }
+
+    // Batch counters: a throttled attempt, a resumed body and fresh connections.
+    {
+        karu_config* stats_config = nullptr;
+        karu_client* stats_client = nullptr;
+        check(karu_config_create_empty(&stats_config) == KARU_OK, "create stats config");
+        check(karu_config_set_option(stats_config, "KARU_COALESCE_GAP", "0") == KARU_OK,
+              "keep stats reads separate");
+        check(karu_client_create(stats_config, &stats_client) == KARU_OK, "create stats client");
+        karu_config_free(stats_config);
+        karu_locator* throttled = nullptr;
+        karu_locator* cut = nullptr;
+        check(karu_resolve((base + "/scatter-retry").c_str(), &throttled) == KARU_OK &&
+                  karu_resolve((base + "/resume/stats").c_str(), &cut) == KARU_OK,
+              "resolve stats objects");
+        std::array<unsigned char, 40> first_stats{};
+        std::array<unsigned char, 300> second_stats{};
+        const std::array<karu_req, 2> stats_reads{{
+            {throttled, 300, first_stats.size(), first_stats.data(), nullptr, nullptr},
+            {cut, 100, second_stats.size(), second_stats.data(), nullptr, nullptr},
+        }};
+        karu_batch* stats_batch = nullptr;
+        check(karu_client_submit(stats_client, stats_reads.data(), stats_reads.size(),
+                                 &stats_batch) == KARU_OK,
+              "submit stats batch");
+        check(drain_success(stats_batch, "stats batch completion") == 2, "stats batch completes");
+        karu_batch_stats stats = KARU_BATCH_STATS_INIT;
+        check(karu_batch_get_stats(stats_batch, &stats) == KARU_OK, "read batch stats");
+        check(stats.transfers == 2 && stats.transfers_finished == 2, "stats count transfers");
+        check(stats.requested_bytes == 340, "stats count requested bytes");
+        // Each attempt delivered 150 bytes; the retry did not repeat the prefix.
+        check(stats.received_bytes == 340, "stats count every received body byte");
+        check(stats.retries == 2 && stats.throttled == 1 && stats.resumed == 1,
+              "stats count retries, throttling and resumes");
+        check(stats.new_connections >= 2, "stats count opened connections");
+        check(stats.credential_refreshes == 0, "stats count credential refreshes");
+        karu_batch_free(stats_batch);
+        karu_locator_free(throttled);
+        karu_locator_free(cut);
+        karu_client_free(stats_client);
+        check_bytes(first_stats, 300, "throttled stats contents");
+        check_bytes(second_stats, 100, "resumed stats contents");
+    }
+
+    // A refused connection stops after three attempts even when the client
+    // allows eight attempts for other transient failures.
+    {
+        karu_config* refused_config = nullptr;
+        karu_client* refused_client = nullptr;
+        check(karu_config_create_empty(&refused_config) == KARU_OK, "create refused config");
+        check(karu_client_create(refused_config, &refused_client) == KARU_OK,
+              "create refused client");
+        karu_config_free(refused_config);
+        karu_locator* refused = nullptr;
+        check(karu_resolve("http://127.0.0.1:1/object", &refused) == KARU_OK,
+              "resolve refused object");
+        std::array<unsigned char, 16> refused_buffer{};
+        const karu_req refused_read{refused, 0,      refused_buffer.size(), refused_buffer.data(),
+                                    nullptr, nullptr};
+        karu_batch* refused_batch = nullptr;
+        check(karu_client_submit(refused_client, &refused_read, 1, &refused_batch) == KARU_OK,
+              "submit refused read");
+        karu_done refused_done{};
+        check(karu_batch_next(refused_batch, &refused_done, -1) == KARU_OK &&
+                  refused_done.status == KARU_ERR_NETWORK,
+              "a refused connection fails the read");
+        karu_batch_stats refused_stats = KARU_BATCH_STATS_INIT;
+        check(karu_batch_get_stats(refused_batch, &refused_stats) == KARU_OK &&
+                  refused_stats.retries == 2,
+              "a refused connection gets three attempts");
+        karu_batch_free(refused_batch);
+        karu_locator_free(refused);
+        karu_client_free(refused_client);
+    }
+
+    // Use stat's ETag to pin the next read.
+    const auto stat = [&](const std::string& uri, karu_object_info& info) {
+        karu_locator* locator = nullptr;
+        if (karu_resolve(uri.c_str(), &locator) != KARU_OK)
+            return KARU_ERR_URI;
+        info = karu_object_info{};
+        info.struct_size = sizeof(info);
+        const karu_status status = karu_client_stat(client, locator, &info);
+        karu_locator_free(locator);
+        return status;
+    };
+    karu_object_info info{};
+    check(stat(base + "/etag", info) == KARU_OK && info.size == 4096 &&
+              std::string(info.etag) == "\"e1\"",
+          "stat reports size and strong ETag");
+    check(fetch(client, base + "/etag", 10, small, info.etag) == KARU_OK, "stat ETag pins a read");
+    check(fetch(client, base + "/etag", 10, small, "\"e0\"") == KARU_ERR_PRECONDITION,
+          "a stale ETag fails the read");
+    // Check the response ETag even when the server ignores If-Match.
+    check(fetch(client, base + "/ignores-if-match", 10, small, "\"e2\"") == KARU_OK,
+          "a pin that matches the response ETag");
+    check(fetch(client, base + "/ignores-if-match", 10, small, "\"e1\"") == KARU_ERR_PRECONDITION &&
+              std::string_view(karu_last_error()).find("ignored If-Match") !=
+                  std::string_view::npos,
+          "a server that ignores If-Match cannot hide a changed object");
+    check(fetch(client, base + "/ignores-if-match", 10, small, "*") == KARU_OK,
+          "a wildcard pin is left to the server");
+    check(stat(base + "/weak-etag", info) == KARU_OK && info.size == 4096 && info.etag[0] == '\0',
+          "a weak ETag is not reported");
+    check(stat(base + "/invalid-etag", info) == KARU_OK && info.size == 4096 &&
+              info.etag[0] == '\0',
+          "an unquoted ETag is not reported");
+    check(stat(base + "/object", info) == KARU_OK && info.size == 4096 && info.etag[0] == '\0',
+          "a missing ETag is empty");
+    check(stat("/vsisubfile/100_50," + base + "/etag", info) == KARU_OK && info.size == 50 &&
+              std::string(info.etag) == "\"e1\"",
+          "a bounded window still asks the server for the ETag");
+    {
+        // Simulate an older caller with a shorter output struct.
+        struct {
+            std::size_t struct_size;
+            std::uint64_t size;
+        } older{sizeof(older), 0};
+        karu_locator* locator = nullptr;
+        check(karu_resolve((base + "/etag").c_str(), &locator) == KARU_OK, "resolve stat object");
+        check(karu_client_stat(client, locator, reinterpret_cast<karu_object_info*>(&older)) ==
+                      KARU_OK &&
+                  older.size == 4096,
+              "stat honours a shorter struct_size");
+        karu_locator_free(locator);
+    }
+
+    // GCS transcoding changes byte offsets. Verify reads and size use the stored bytes.
+    karu_config* stored_config = nullptr;
+    karu_client* stored_client = nullptr;
+    check(karu_config_create_empty(&stored_config) == KARU_OK, "create stored-bytes config");
+    check(karu_config_set_option(stored_config, "GCS_ENDPOINT", base.c_str()) == KARU_OK,
+          "set stored-bytes endpoint");
+    check(karu_config_set_option(stored_config, "GCS_NO_SIGN_REQUEST", "YES") == KARU_OK,
+          "set anonymous stored-bytes reads");
+    check(karu_client_create(stored_config, &stored_client) == KARU_OK,
+          "create stored-bytes client");
+    karu_config_free(stored_config);
+    std::array<unsigned char, 29> stored{};
+    check(fetch(stored_client, "gs://bucket/gzip-stored", 1000, stored) == KARU_OK,
+          "GCS reads a gzip-stored object");
+    check_bytes(stored, 1000, "GCS gzip-stored contents are the stored bytes");
+    karu_locator* stored_object = nullptr;
+    check(karu_resolve("gs://bucket/gzip-stored", &stored_object) == KARU_OK,
+          "resolve gzip-stored object");
+    check(karu_client_size(stored_client, stored_object, &size) == KARU_OK && size == 4096,
+          "GCS size of a gzip-stored object is its stored size");
+    karu_locator_free(stored_object);
+    karu_client_free(stored_client);
+
+    const karu_status decoded = fetch(client, base + "/bucket/gzip-stored", 0, stored);
+    const std::string decoded_detail = karu_last_error();
+    check(decoded == KARU_ERR_HTTP, "decoded response rejected");
+    check(decoded_detail.find("decompressive transcoding") != std::string::npos,
+          "decoded response explained");
+    karu_locator* decoded_object = nullptr;
+    check(karu_resolve((base + "/bucket/gzip-stored").c_str(), &decoded_object) == KARU_OK,
+          "resolve decoded object");
+    check(karu_client_size(client, decoded_object, &size) == KARU_ERR_HTTP,
+          "decoded size rejected");
+    karu_locator_free(decoded_object);
+    check(fetch(client, base + "/transformed", 10, small) == KARU_ERR_HTTP,
+          "transformed response rejected");
 
     karu_config* signed_config = nullptr;
     karu_client* signed_client = nullptr;

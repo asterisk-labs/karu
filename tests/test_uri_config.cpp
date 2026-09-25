@@ -187,6 +187,19 @@ void test_config_precedence() {
     OK(invalid_timeout.set("KARU_REQUEST_TIMEOUT", "86401"));
     OK(!invalid_timeout.freeze());
 
+    // Check the default, bounds and client-wide scope of KARU_IO_THREADS.
+    EQ(must_freeze(karu::ConfigBuilder(false)).client_options().io_threads, 4);
+    karu::ConfigBuilder one_loop(false);
+    OK(one_loop.set("KARU_IO_THREADS", "1"));
+    EQ(must_freeze(one_loop).client_options().io_threads, 1);
+    for (const char* rejected : {"0", "65", "four"}) {
+        karu::ConfigBuilder invalid_loops(false);
+        OK(invalid_loops.set("KARU_IO_THREADS", rejected));
+        OK(!invalid_loops.freeze());
+    }
+    karu::ConfigBuilder scoped_loops(false);
+    OK(!scoped_loops.set_path("/vsis3/bucket/", "KARU_IO_THREADS", "2"));
+
 #ifdef _WIN32
     constexpr const char* home_name = "USERPROFILE";
 #else

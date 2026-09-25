@@ -649,6 +649,44 @@ void test_cpp_facade() {
     OK(matches.has_value() && !*matches);
     EQ(client->concurrency(), 3);
     OK(!object->is_remote());
+    auto info = client->stat(*object);
+    OK(info.has_value());
+    if (info) {
+        EQ(info->size, std::filesystem::file_size(fixture_path));
+        OK(info->etag.empty());
+    }
+    auto window = karu::Object::parse("/vsisubfile/100_50," + fixture_path);
+    OK(window.has_value());
+    if (window) {
+        auto window_info = client->stat(*window);
+        OK(window_info.has_value() && window_info->size == 50);
+    }
+    // Contiguous reads count as one transfer after coalescing.
+    {
+        std::array<std::byte, 10> a{};
+        std::array<std::byte, 20> b{};
+        std::array<std::byte, 30> c{};
+        const std::array<karu::Read, 3> touching{{{&*object, 100, a, nullptr, {}},
+                                                  {&*object, 110, b, nullptr, {}},
+                                                  {&*object, 130, c, nullptr, {}}}};
+        auto merged = client->submit(touching);
+        OK(merged.has_value());
+        if (merged) {
+            for (auto event = merged->next(); event && event->state != karu::BatchState::end;
+                 event = merged->next()) {
+            }
+            auto stats = merged->stats();
+            OK(stats.has_value());
+            if (stats) {
+                EQ(stats->transfers, 1u);
+                EQ(stats->transfers_finished, 1u);
+                EQ(stats->requested_bytes, 60u);
+                EQ(stats->received_bytes, 60u);
+                EQ(stats->retries, 0u);
+                EQ(stats->new_connections, 0u);
+            }
+        }
+    }
     auto bytes = client->read(*object, 17, 23);
     OK(bytes.has_value());
     if (bytes)

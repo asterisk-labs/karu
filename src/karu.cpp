@@ -9,7 +9,9 @@
 #include "text.hpp"
 #include "uri.hpp"
 
+#include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
@@ -461,6 +463,37 @@ karu_status karu_client_size(karu_client* client, const karu_locator* locator, u
     }
 }
 
+karu_status karu_client_stat(karu_client* client, const karu_locator* locator,
+                             karu_object_info* out) {
+    karu::clear_error();
+    if (client == nullptr || locator == nullptr || out == nullptr) {
+        karu::set_error("karu_client_stat: null argument");
+        return KARU_ERR_INVALID;
+    }
+    if (out->struct_size < offsetof(karu_object_info, size) + sizeof(out->size)) {
+        karu::set_error("karu_client_stat: struct_size is too small");
+        return KARU_ERR_INVALID;
+    }
+    try {
+        std::uint64_t size = 0;
+        std::string etag;
+        const karu_status status = client->acquire_engine()->object_info(*locator, size, etag);
+        if (status != KARU_OK)
+            return status;
+        out->size = size;
+        if (out->struct_size >= offsetof(karu_object_info, etag) + sizeof(out->etag)) {
+            // Return an empty ETag rather than a truncated, unusable validator.
+            const bool fits = etag.size() < sizeof(out->etag);
+            if (fits)
+                std::memcpy(out->etag, etag.data(), etag.size());
+            out->etag[fits ? etag.size() : 0] = '\0';
+        }
+        return KARU_OK;
+    } catch (...) {
+        return exception_status("karu_client_stat");
+    }
+}
+
 karu_status karu_client_submit(karu_client* client, const karu_req* requests, size_t count,
                                karu_batch** out_batch) {
     karu::clear_error();
@@ -508,6 +541,43 @@ karu_status karu_batch_next(karu_batch* batch, karu_done* out, int timeout_ms) {
     } catch (...) {
         return exception_status("karu_batch_next");
     }
+}
+
+karu_status karu_batch_get_stats(const karu_batch* batch, karu_batch_stats* out) {
+    karu::clear_error();
+    if (batch == nullptr || out == nullptr) {
+        karu::set_error("karu_batch_get_stats: null argument");
+        return KARU_ERR_INVALID;
+    }
+    if (batch->inherited()) {
+        karu::set_error("karu_batch_get_stats: the batch was submitted by another process; "
+                        "batches do not cross fork()");
+        return KARU_ERR_INVALID;
+    }
+    if (out->struct_size < offsetof(karu_batch_stats, transfers) + sizeof(out->transfers)) {
+        karu::set_error("karu_batch_get_stats: struct_size is too small");
+        return KARU_ERR_INVALID;
+    }
+    const auto& counters = batch->counters;
+    const auto copy = [out](std::size_t offset, std::uint64_t& field,
+                            const std::atomic<std::uint64_t>& counter) {
+        if (out->struct_size >= offset + sizeof(field))
+            field = counter.load(std::memory_order_relaxed);
+    };
+    copy(offsetof(karu_batch_stats, transfers), out->transfers, counters.transfers);
+    copy(offsetof(karu_batch_stats, transfers_finished), out->transfers_finished,
+         counters.transfers_finished);
+    copy(offsetof(karu_batch_stats, requested_bytes), out->requested_bytes,
+         counters.requested_bytes);
+    copy(offsetof(karu_batch_stats, received_bytes), out->received_bytes, counters.received_bytes);
+    copy(offsetof(karu_batch_stats, retries), out->retries, counters.retries);
+    copy(offsetof(karu_batch_stats, throttled), out->throttled, counters.throttled);
+    copy(offsetof(karu_batch_stats, new_connections), out->new_connections,
+         counters.new_connections);
+    copy(offsetof(karu_batch_stats, resumed), out->resumed, counters.resumed);
+    copy(offsetof(karu_batch_stats, credential_refreshes), out->credential_refreshes,
+         counters.credential_refreshes);
+    return KARU_OK;
 }
 
 void karu_batch_free(karu_batch* batch) {

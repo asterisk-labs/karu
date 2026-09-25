@@ -37,6 +37,13 @@ struct Part {
     OwnedBuffer owned_buffer;
 };
 
+// A transformed body may no longer use the stored object's byte offsets.
+struct EncodingHeaders {
+    std::string content;
+    std::string stored;
+    bool transformation_warning = false;
+};
+
 struct HttpBuffers {
     std::array<char, kErrorBodyCapacity> error_body{};
     std::array<char, CURL_ERROR_SIZE> error{};
@@ -65,6 +72,14 @@ struct Transfer {
     ResolvedCredentials credentials;
     bool credentials_ready = false;
 
+    // Keep partial data only when a strong ETag pins it to one version.
+    // resumed counts bytes retained; resume_etag supplies the pin when the
+    // caller gave none. version_changed marks a mismatched response ETag.
+    std::uint64_t resumed = 0;
+    std::string resume_etag;
+    std::string response_etag;
+    bool version_changed = false;
+
     std::uint64_t received = 0;
     std::uint64_t skip = 0;
     std::int64_t body_length = -1;
@@ -82,10 +97,13 @@ struct Transfer {
     bool content_range_has_total = false;
     std::uint64_t range_fallback_limit = 0;
     bool range_fallback_rejected = false;
+    EncodingHeaders encoding{};
     std::string response_region;
     bool region_retried = false;
     bool credentials_retried = false;
     int attempt = 0;
+    // Attempts that failed to resolve the host or to connect to it.
+    int unreachable_attempts = 0;
     RequestDeadline deadline;
 
     int retry_after = 0;

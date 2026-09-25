@@ -53,14 +53,19 @@ std::optional<std::size_t> callback_size(std::size_t size, std::size_t count) no
     return size * count;
 }
 
+// HTTP case comparisons must not depend on the application's locale.
+constexpr unsigned char ascii_lower(unsigned char value) noexcept {
+    return value >= 'A' && value <= 'Z' ? static_cast<unsigned char>(value + ('a' - 'A')) : value;
+}
+
 bool header_name_is(std::string_view line, std::string_view name) noexcept {
     if (line.size() < name.size())
         return false;
     for (std::size_t index = 0; index < name.size(); ++index) {
-        const auto left = static_cast<unsigned char>(line[index]);
-        const auto right = static_cast<unsigned char>(name[index]);
-        if (std::tolower(left) != std::tolower(right))
+        if (ascii_lower(static_cast<unsigned char>(line[index])) !=
+            ascii_lower(static_cast<unsigned char>(name[index]))) {
             return false;
+        }
     }
     return true;
 }
@@ -69,7 +74,7 @@ bool ascii_equal(std::string_view left, std::string_view right) noexcept {
     if (left.size() != right.size())
         return false;
     return std::ranges::equal(left, right, [](unsigned char a, unsigned char b) {
-        return std::tolower(a) == std::tolower(b);
+        return ascii_lower(a) == ascii_lower(b);
     });
 }
 
@@ -174,7 +179,7 @@ bool parse_unsatisfied_content_range(std::string_view value, std::uint64_t& tota
 
 bool valid_content_range(const Transfer& transfer) noexcept {
     if (!transfer.content_range_seen || !transfer.content_range_valid ||
-        transfer.content_range_start != transfer.offset) {
+        transfer.content_range_start != transfer.offset + transfer.resumed) {
         return false;
     }
     const std::uint64_t requested_end = transfer.offset + transfer.length - 1;
@@ -183,6 +188,21 @@ bool valid_content_range(const Transfer& transfer) noexcept {
     return transfer.content_range_end == requested_end ||
            (transfer.content_range_has_total &&
             transfer.content_range_end + 1 == transfer.content_range_total);
+}
+
+bool is_strong_etag(std::string_view value) noexcept {
+    if (value.size() < 2 || value.front() != '"' || value.back() != '"')
+        return false;
+    value.remove_prefix(1);
+    value.remove_suffix(1);
+    return std::ranges::all_of(value,
+                               [](unsigned char c) { return c >= 0x21 && c != '"' && c != 0x7f; });
+}
+
+// Catch servers that ignore a single-tag If-Match. The server evaluates lists and "*".
+bool contradicts_pin(const Transfer& transfer) noexcept {
+    const std::string_view pin = version_pin(transfer);
+    return is_strong_etag(pin) && !transfer.response_etag.empty() && transfer.response_etag != pin;
 }
 
 template <std::size_t Capacity>
@@ -195,8 +215,26 @@ void capture_error_body(std::array<char, Capacity>& destination, std::size_t& us
     }
 }
 
+void record_encoding(EncodingHeaders& encoding, std::string_view line) {
+    // Bound storage for untrusted encoding headers.
+    constexpr std::size_t kLimit = 64;
+    if (header_name_is(line, "content-encoding:")) {
+        encoding.content = std::string(header_value(line, "content-encoding:").substr(0, kLimit));
+    } else if (header_name_is(line, "x-goog-stored-content-encoding:")) {
+        encoding.stored =
+            std::string(header_value(line, "x-goog-stored-content-encoding:").substr(0, kLimit));
+    } else if (header_name_is(line, "warning:")) {
+        // GCS still uses Warning 214 for transcoding despite RFC 9111 retiring it.
+        const std::string_view value = header_value(line, "warning:");
+        if (value == "214" || value.starts_with("214 "))
+            encoding.transformation_warning = true;
+    }
+}
+
 void reset_response(Transfer& transfer) noexcept {
-    transfer.received = 0;
+    transfer.received = transfer.resumed;
+    transfer.response_etag.clear();
+    transfer.version_changed = false;
     transfer.scatter_cursor = 0;
     transfer.skip = 0;
     transfer.body_length = -1;
@@ -213,6 +251,7 @@ void reset_response(Transfer& transfer) noexcept {
     transfer.content_range_total = 0;
     transfer.content_range_has_total = false;
     transfer.range_fallback_rejected = false;
+    transfer.encoding = {};
     transfer.response_region.clear();
     transfer.retry_after = 0;
     transfer.error_body_size = 0;
@@ -227,30 +266,52 @@ std::size_t write_callback(char* data, std::size_t size, std::size_t count,
     auto& transfer = *static_cast<Transfer*>(userdata);
     std::size_t remaining = *incoming;
 
-    if (transfer.satisfied)
+    if (transfer.satisfied) {
+        transfer.batch->counters.add(transfer.batch->counters.received_bytes, *incoming);
         return *incoming;
+    }
 
     if (!transfer.checked_status) {
         transfer.checked_status = true;
         curl_easy_getinfo(transfer.easy.get(), CURLINFO_RESPONSE_CODE, &transfer.http_status);
+        if (transfer.http_status >= 200 && transfer.http_status < 300 &&
+            detail::transformed(transfer.encoding)) {
+            return 0;
+        }
+        if (transfer.http_status >= 200 && transfer.http_status < 300 &&
+            contradicts_pin(transfer)) {
+            // Reject the new version before copying any of its bytes.
+            transfer.version_changed = true;
+            return 0;
+        }
         if (transfer.http_status == 206 && !valid_content_range(transfer)) {
             return 0;
         }
-        if (transfer.http_status == 200 && transfer.offset > 0) {
-            if (transfer.offset > transfer.range_fallback_limit) {
+        if (transfer.http_status == 200 && transfer.resumed > 0) {
+            // Range was ignored. Restart from this full body so the fallback
+            // limit applies to the original offset, not offset + resumed.
+            transfer.resumed = 0;
+            transfer.received = 0;
+        }
+        const std::uint64_t first = transfer.offset + transfer.resumed;
+        if (transfer.http_status == 200 && first > 0) {
+            if (first > transfer.range_fallback_limit) {
                 transfer.range_fallback_rejected = true;
                 return 0;
             }
-            transfer.skip = transfer.offset;
+            transfer.skip = first;
         }
         curl_off_t body_length = -1;
         curl_easy_getinfo(transfer.easy.get(), CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &body_length);
         transfer.body_length = body_length;
-        transfer.consume =
-            transfer.skip > std::numeric_limits<std::uint64_t>::max() - transfer.length
-                ? std::numeric_limits<std::uint64_t>::max()
-                : transfer.skip + transfer.length;
+        const std::uint64_t wanted = transfer.length - transfer.resumed;
+        transfer.consume = transfer.skip > std::numeric_limits<std::uint64_t>::max() - wanted
+                               ? std::numeric_limits<std::uint64_t>::max()
+                               : transfer.skip + wanted;
     }
+
+    if (transfer.http_status >= 200 && transfer.http_status < 300)
+        transfer.batch->counters.add(transfer.batch->counters.received_bytes, *incoming);
 
     if (transfer.http_status >= 300 && transfer.http_status < 400 &&
         transfer.http->follow_redirects) {
@@ -328,6 +389,13 @@ std::size_t header_callback(char* data, std::size_t size, std::size_t count,
     } else if (header_name_is(line, "retry-after:")) {
         transfer.retry_after =
             detail::retry_after_seconds(header_value(line, "retry-after:"), std::time(nullptr));
+    } else if (header_name_is(line, "etag:")) {
+        // Only a strong validator can pin a resumed range with If-Match.
+        const std::string_view value = header_value(line, "etag:");
+        if (value.size() <= 255 && is_strong_etag(value))
+            transfer.response_etag = std::string(value);
+    } else {
+        record_encoding(transfer.encoding, line);
     }
     return *bytes;
 }
@@ -397,6 +465,22 @@ std::expected<void, std::string> restrict_to_http(CURL* easy) {
 #endif
 }
 
+// libcurl shuffles on resolution. Bypass its DNS cache so new connections
+// get a fresh order; existing connections need no lookup.
+std::expected<void, std::string> spread_connections(CURL* easy) {
+    return set_options(easy, CURLOPT_DNS_SHUFFLE_ADDRESSES, 1L, CURLOPT_DNS_CACHE_TIMEOUT, 0L);
+}
+
+// libcurl 8.7.0 shares one receive buffer per multi handle. Older
+// versions allocate one per transfer, so use a smaller buffer there.
+long receive_buffer_size() noexcept {
+    static const long size = [] {
+        const curl_version_info_data* info = curl_version_info(CURLVERSION_NOW);
+        return info != nullptr && info->version_num >= 0x080700 ? 256L << 10 : 64L << 10;
+    }();
+    return size;
+}
+
 std::expected<void, std::string> apply_http_options(CURL* easy, const HttpRequestOptions& options) {
     if (auto result = set_options(easy, CURLOPT_FOLLOWLOCATION, options.follow_redirects ? 1L : 0L,
                                   CURLOPT_HTTP_VERSION, curl_http_version(options.version),
@@ -435,6 +519,8 @@ struct SizeState {
     std::string_view original_url;
     int retry_after = 0;
     std::string response_region;
+    std::string etag{};
+    EncodingHeaders encoding{};
     std::array<char, kErrorBodyCapacity> error_body{};
     std::size_t error_body_size = 0;
     std::uint64_t error_body_received = 0;
@@ -452,6 +538,8 @@ void reset_response(SizeState& state) noexcept {
     state.http_status = 0;
     state.retry_after = 0;
     state.response_region.clear();
+    state.etag.clear();
+    state.encoding = {};
     state.error_body_size = 0;
     state.error_body_received = 0;
 }
@@ -528,11 +616,50 @@ std::size_t size_header_callback(char* data, std::size_t size, std::size_t count
     } else if (header_name_is(line, "retry-after:")) {
         state.retry_after =
             detail::retry_after_seconds(header_value(line, "retry-after:"), std::time(nullptr));
+    } else if (header_name_is(line, "etag:")) {
+        // A weak validator cannot be used with If-Match, so it is not reported.
+        const std::string_view value = header_value(line, "etag:");
+        if (value.size() <= 255 && is_strong_etag(value))
+            state.etag = std::string(value);
+    } else {
+        record_encoding(state.encoding, line);
     }
     return *bytes;
 }
 
 } // namespace
+
+std::string_view version_pin(const Transfer& transfer) noexcept {
+    return transfer.if_match.empty() ? std::string_view(transfer.resume_etag)
+                                     : std::string_view(transfer.if_match);
+}
+
+void plan_resume(Transfer& transfer) {
+    if (!transfer.if_match.empty() && !is_strong_etag(transfer.if_match)) {
+        // Lists and "*" may accept a different version. Restart the full range.
+        transfer.resumed = 0;
+        transfer.resume_etag.clear();
+        return;
+    }
+    if (transfer.version_changed || (transfer.http_status == 412 && transfer.if_match.empty())) {
+        // Discard the old prefix before retrying after a version change.
+        transfer.resumed = 0;
+        transfer.resume_etag.clear();
+        return;
+    }
+    const bool data = transfer.http_status == 200 || transfer.http_status == 206;
+    if (!data || transfer.received <= transfer.resumed || transfer.received >= transfer.length)
+        return;
+    if (transfer.if_match.empty() && transfer.resume_etag.empty()) {
+        if (transfer.response_etag.empty()) {
+            // Nothing identifies this version, so the retry starts over.
+            transfer.resumed = 0;
+            return;
+        }
+        transfer.resume_etag = transfer.response_etag;
+    }
+    transfer.resumed = transfer.received;
+}
 
 bool ensure_sink(Transfer& transfer) noexcept {
     if (transfer.sink != nullptr)
@@ -618,6 +745,13 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
         CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
     if (!configured)
         return configured;
+    configured = spread_connections(transfer.easy.get());
+    if (!configured)
+        return configured;
+    // Older libcurl may reject resizing a pooled handle's buffer. Its
+    // existing buffer remains usable, so this failure is harmless.
+    static_cast<void>(
+        curl_easy_setopt(transfer.easy.get(), CURLOPT_BUFFERSIZE, receive_buffer_size()));
     if (auto protocols = restrict_to_http(transfer.easy.get()); !protocols)
         return protocols;
     if (auto http = apply_http_options(transfer.easy.get(), *transfer.http); !http)
@@ -628,9 +762,9 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
     return {};
 }
 
-std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy, CURLSH* share,
-                                              RequestBuilder& request_builder,
-                                              const ClientOptions& options) {
+std::expected<ObjectInfo, Failure> object_info(const Locator& locator, CURL* easy, CURLSH* share,
+                                               RequestBuilder& request_builder,
+                                               const ClientOptions& options) {
     // A one-byte GET is more dependable than HEAD across object stores; the
     // total comes from Content-Range and no object metadata is retained.
     std::array<char, CURL_ERROR_SIZE> error_buffer{};
@@ -644,6 +778,8 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
                     CURLOPT_MAXREDIRS, 10L, CURLOPT_CONNECTTIMEOUT, options.connect_timeout_seconds,
                     CURLOPT_LOW_SPEED_LIMIT, options.low_speed_limit, CURLOPT_LOW_SPEED_TIME,
                     options.low_speed_time_seconds, CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
+    if (configured)
+        configured = spread_connections(easy);
     if (!configured) {
         return std::unexpected(Failure{KARU_ERR_NETWORK, configured.error()});
     }
@@ -658,6 +794,7 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
     bool credentials_retried = false;
     RequestDeadline deadline;
     deadline.start(options.request_timeout_seconds);
+    int unreachable_attempts = 0;
     for (int attempt = 0; attempt < options.max_attempts;) {
         if (deadline.expired())
             return std::unexpected(timeout_failure(locator.resolved.canonical_uri));
@@ -724,7 +861,7 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
 
         if (code == CURLE_OK && http_status == 416) {
             if (state.unsatisfied_content_range_valid && state.total == 0)
-                return std::uint64_t{0};
+                return ObjectInfo{0, state.etag};
             if (!state.unsatisfied_content_range_valid) {
                 return std::unexpected(
                     Failure{KARU_ERR_HTTP, concat(redact_url(request->url),
@@ -738,13 +875,20 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
                         concat(redact_url(request->url), ": size response exceeded bytes 0-0")});
         }
 
+        if (code == CURLE_OK && http_status >= 200 && http_status < 300 &&
+            detail::transformed(state.encoding)) {
+            return std::unexpected(
+                Failure{KARU_ERR_HTTP,
+                        detail::transformation_detail(redact_url(request->url), state.encoding)});
+        }
+
         if (code == CURLE_OK && http_status == 206) {
             if (!state.content_range_valid || !state.have_total || state.body_received != 1) {
                 return std::unexpected(
                     Failure{KARU_ERR_HTTP, concat(redact_url(request->url),
                                                   ": partial response has no valid object size")});
             }
-            return state.total;
+            return ObjectInfo{state.total, state.etag};
         }
 
         if (code == CURLE_OK && http_status == 200) {
@@ -761,7 +905,7 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
                     Failure{KARU_ERR_HTTP,
                             concat(redact_url(request->url), ": the server reported no size")});
             }
-            return state.total;
+            return ObjectInfo{state.total, state.etag};
         }
 
         if (code == CURLE_OK && http_status >= 200 && http_status < 300) {
@@ -774,9 +918,11 @@ std::expected<std::uint64_t, Failure> size_of(const Locator& locator, CURL* easy
             return std::unexpected(timeout_failure(request->url));
 
         ++attempt;
+        if (unreachable(code))
+            ++unreachable_attempts;
         const bool request_timeout =
             http_status == 400 && error_body.find("RequestTimeout") != std::string_view::npos;
-        if (attempt < options.max_attempts &&
+        if (attempt < options.max_attempts && unreachable_attempts < kUnreachableAttempts &&
             (detail::transient(code, http_status) || request_timeout)) {
             const auto wait = detail::retry_delay(attempt, state.retry_after, random);
             if (!deadline.can_wait_for(wait))

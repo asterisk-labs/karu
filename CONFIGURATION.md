@@ -28,17 +28,21 @@ for `SOURCE_ENDPOINT`. `CURL_CA_BUNDLE` and `SSL_CERT_FILE` are aliases for
 
 | Option | Default | Purpose |
 |---|---:|---|
-| `KARU_CONCURRENCY` | `64` | maximum simultaneous transfers |
+| `KARU_CONCURRENCY` | `64` | maximum simultaneous remote transfers per client |
+| `KARU_IO_THREADS` | `4` | libcurl event loops per client, each on its own thread; `KARU_CONCURRENCY` is split between them |
 | `KARU_COALESCE_GAP` | `1048576` | largest gap, in bytes, considered for merging ranges; `0` disables merging |
 | `KARU_COALESCE_LIMIT` | `67108864` | largest merged transfer span |
 | `KARU_COALESCE_PARTS` | `1024` | largest number of requests in one merged transfer |
 | `KARU_COALESCE_AMPLIFICATION` | `16` | largest ratio of transferred bytes to requested bytes in a merge |
 | `KARU_RANGE_FALLBACK_LIMIT` | `8388608` | largest prefix Karu may discard when a server ignores `Range`; `0` disables nonzero-offset fallback |
-| `KARU_MAX_ATTEMPTS` / `KARU_MAX_RETRIES` | `3` | total attempts for transient failures |
+| `KARU_MAX_ATTEMPTS` / `KARU_MAX_RETRIES` | `8` | total attempts for transient failures, subject to the request deadline; DNS resolution and connection failures get at most 3 attempts |
 | `KARU_REQUEST_TIMEOUT` | `120` | total seconds available to one remote transfer and the limit applied to each `credential_process`; `0` disables both deadlines |
 | `KARU_CONNECT_TIMEOUT` | `30` | connection timeout in seconds |
 | `KARU_LOW_SPEED_TIME` | `60` | seconds below the low-speed threshold before aborting |
 | `KARU_LOW_SPEED_LIMIT` | `1024` | low-speed threshold in bytes per second |
+
+Limits apply per client. With multiple worker processes, compare
+`KARU_IO_THREADS=1` and `4` on the full workload, including decoding.
 
 The coalescing ceilings split a sparse batch into bounded transfers. They do
 not persist object data or metadata beyond that batch.

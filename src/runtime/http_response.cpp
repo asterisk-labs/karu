@@ -14,6 +14,22 @@ namespace detail {
 constexpr std::size_t kErrorSummaryLimit = 200;
 constexpr int kMaximumRetryAfterSeconds = 60;
 
+std::string_view coding(std::string_view value) noexcept {
+    return value.empty() ? std::string_view("identity") : value;
+}
+
+bool same_coding(std::string_view left, std::string_view right) noexcept {
+    // Content codings are ASCII tokens; compare them without the locale.
+    const auto fold = [](unsigned char value) {
+        return value >= 'A' && value <= 'Z' ? static_cast<unsigned char>(value + ('a' - 'A'))
+                                            : value;
+    };
+    left = coding(left);
+    right = coding(right);
+    return std::ranges::equal(left, right,
+                              [&](unsigned char a, unsigned char b) { return fold(a) == fold(b); });
+}
+
 std::string summarize(std::string_view body) {
     std::string result;
     result.reserve(std::min(body.size(), kErrorSummaryLimit));
@@ -124,25 +140,60 @@ std::chrono::milliseconds retry_delay(int attempt, int retry_after, std::mt19937
     return std::chrono::milliseconds(base + jitter(random));
 }
 
+bool transformed(const EncodingHeaders& encoding) noexcept {
+    return encoding.transformation_warning ||
+           (!encoding.stored.empty() && !same_coding(encoding.content, encoding.stored));
+}
+
+std::string transformation_detail(std::string_view url, const EncodingHeaders& encoding) {
+    if (!encoding.stored.empty() && encoding.content.empty()) {
+        return concat(url, ": the server decoded an object stored with Content-Encoding ",
+                      encoding.stored,
+                      " (GCS decompressive transcoding), so the body is not the stored bytes; "
+                      "read it through gs:// or send 'Accept-Encoding: ",
+                      encoding.stored, "' with KARU_HTTP_HEADERS");
+    }
+    if (!encoding.stored.empty() && !same_coding(encoding.content, encoding.stored)) {
+        return concat(url, ": the server sent Content-Encoding ", encoding.content,
+                      " for an object stored as ", coding(encoding.stored),
+                      ", so the body is not the stored bytes");
+    }
+    return concat(url, ": the response carries Warning 214 (transformation applied), so the "
+                       "body is not the stored bytes");
+}
+
 } // namespace detail
 
 bool succeeded(const Transfer& transfer, CURLcode code) noexcept {
     const bool transport_ok = code == CURLE_OK || transfer.satisfied;
     if (!transport_ok || transfer.http_status < 200 || transfer.http_status >= 300)
         return false;
+    if (detail::transformed(transfer.encoding))
+        return false;
     if (transfer.http_status != 206)
         return true;
     if (!transfer.content_range_matches) {
         return false;
     }
-    return transfer.received == transfer.content_range_end - transfer.content_range_start + 1;
+    return transfer.received - transfer.resumed ==
+           transfer.content_range_end - transfer.content_range_start + 1;
 }
 
 bool retryable(const Transfer& transfer, CURLcode code) noexcept {
     if (detail::transient(code, transfer.http_status))
         return true;
+    // Karu may restart on a new version, but must honor a caller's if_match.
+    if (transfer.if_match.empty() &&
+        (transfer.version_changed ||
+         (transfer.http_status == 412 && !transfer.resume_etag.empty()))) {
+        return true;
+    }
     const std::string_view body(transfer.http_buffers->error_body.data(), transfer.error_body_size);
     return transfer.http_status == 400 && body.find("RequestTimeout") != std::string_view::npos;
+}
+
+bool unreachable(CURLcode code) noexcept {
+    return code == CURLE_COULDNT_RESOLVE_HOST || code == CURLE_COULDNT_CONNECT;
 }
 
 Failure failure(const Transfer& transfer, CURLcode code) {
@@ -151,24 +202,39 @@ Failure failure(const Transfer& transfer, CURLcode code) {
         return {KARU_ERR_HTTP,
                 concat(url, ": cross-origin redirect blocked because KARU_HTTP_HEADERS is set")};
     }
+    if (transfer.http_status >= 200 && transfer.http_status < 300 &&
+        detail::transformed(transfer.encoding)) {
+        return {KARU_ERR_HTTP, detail::transformation_detail(url, transfer.encoding)};
+    }
+    if (transfer.version_changed && !transfer.if_match.empty()) {
+        return {KARU_ERR_PRECONDITION,
+                concat(url, ": the server ignored If-Match and sent ETag ", transfer.response_etag,
+                       ", so the object no longer matches if_match")};
+    }
+    if (transfer.version_changed || (transfer.http_status == 412 && transfer.if_match.empty() &&
+                                     !transfer.resume_etag.empty())) {
+        return {KARU_ERR_HTTP,
+                concat(url, ": the object changed while an interrupted read was being resumed")};
+    }
     if (transfer.range_fallback_rejected) {
         return {KARU_ERR_HTTP,
                 concat(url, ": server ignored Range; refusing to discard ", transfer.offset,
                        " bytes (limit ", transfer.range_fallback_limit, ")")};
     }
     if (transfer.http_status == 206 && !transfer.content_range_matches) {
+        const std::uint64_t requested_first = transfer.offset + transfer.resumed;
         const std::uint64_t requested_end = transfer.offset + transfer.length - 1;
         if (!transfer.content_range_seen) {
             return {KARU_ERR_HTTP, concat(url, ": missing Content-Range for requested [",
-                                          transfer.offset, ", ", requested_end, "]")};
+                                          requested_first, ", ", requested_end, "]")};
         }
         if (!transfer.content_range_valid) {
             return {KARU_ERR_HTTP, concat(url, ": malformed Content-Range for requested [",
-                                          transfer.offset, ", ", requested_end, "]")};
+                                          requested_first, ", ", requested_end, "]")};
         }
         return {KARU_ERR_HTTP, concat(url, ": Content-Range [", transfer.content_range_start, ", ",
                                       transfer.content_range_end, "] does not satisfy requested [",
-                                      transfer.offset, ", ", requested_end, "]")};
+                                      requested_first, ", ", requested_end, "]")};
     }
     if (code != CURLE_OK && transfer.http_status >= 300 && transfer.http_status < 400 &&
         transfer.http->follow_redirects) {

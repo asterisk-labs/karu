@@ -486,6 +486,9 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
         parse_integer<int>("KARU_CONCURRENCY", global("KARU_CONCURRENCY", "64"), 1, 4096);
     if (!concurrency)
         return std::unexpected(concurrency.error());
+    auto io_threads = parse_integer<int>("KARU_IO_THREADS", global("KARU_IO_THREADS", "4"), 1, 64);
+    if (!io_threads)
+        return std::unexpected(io_threads.error());
     auto gap =
         parse_integer<std::uint64_t>("KARU_COALESCE_GAP", global("KARU_COALESCE_GAP", "1048576"), 0,
                                      std::numeric_limits<std::uint64_t>::max());
@@ -510,7 +513,7 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
     if (!range_fallback_limit)
         return std::unexpected(range_fallback_limit.error());
     auto attempts =
-        parse_integer<int>("KARU_MAX_ATTEMPTS", global("KARU_MAX_ATTEMPTS", "3"), 1, 16);
+        parse_integer<int>("KARU_MAX_ATTEMPTS", global("KARU_MAX_ATTEMPTS", "8"), 1, 16);
     if (!attempts)
         return std::unexpected(attempts.error());
     auto request_timeout = parse_integer<long>("KARU_REQUEST_TIMEOUT",
@@ -532,6 +535,7 @@ std::expected<ConfigSnapshot, std::string> ConfigBuilder::freeze() const {
         return std::unexpected(low_limit.error());
 
     result.client_ = ClientOptions{.concurrency = *concurrency,
+                                   .io_threads = *io_threads,
                                    .coalesce_gap = *gap,
                                    .coalesce_limit = *coalesce_limit,
                                    .coalesce_parts = *coalesce_parts,

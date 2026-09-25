@@ -151,6 +151,13 @@ class Object {
     std::unique_ptr<karu_locator, Deleter> handle_;
 };
 
+struct ObjectInfo {
+    std::uint64_t size = 0;
+    // Strong entity tag with its quotes, or empty. Pass it as Read::if_match to
+    // pin later reads to this version of the object.
+    std::string etag;
+};
+
 struct Read {
     const Object* object = nullptr;
     std::uint64_t offset = 0;
@@ -169,6 +176,19 @@ struct SubmitOptions {
 };
 
 enum class BatchState { ready, end, timeout };
+
+// Batch counters; see karu_batch_stats.
+struct BatchStats {
+    std::uint64_t transfers = 0;
+    std::uint64_t transfers_finished = 0;
+    std::uint64_t requested_bytes = 0;
+    std::uint64_t received_bytes = 0;
+    std::uint64_t retries = 0;
+    std::uint64_t throttled = 0;
+    std::uint64_t new_connections = 0;
+    std::uint64_t resumed = 0;
+    std::uint64_t credential_refreshes = 0;
+};
 
 struct BatchEvent {
     BatchState state = BatchState::end;
@@ -211,6 +231,24 @@ class Batch {
                           .message = completed.status == KARU_OK ? "" : karu_last_error()};
     }
 
+    // May be called while other threads drain the batch.
+    [[nodiscard]] Result<BatchStats> stats() const {
+        karu_batch_stats counters{};
+        counters.struct_size = sizeof(counters);
+        const karu_status status = karu_batch_get_stats(handle_.get(), &counters);
+        if (status != KARU_OK)
+            return std::unexpected(current_error(status));
+        return BatchStats{.transfers = counters.transfers,
+                          .transfers_finished = counters.transfers_finished,
+                          .requested_bytes = counters.requested_bytes,
+                          .received_bytes = counters.received_bytes,
+                          .retries = counters.retries,
+                          .throttled = counters.throttled,
+                          .new_connections = counters.new_connections,
+                          .resumed = counters.resumed,
+                          .credential_refreshes = counters.credential_refreshes};
+    }
+
   private:
     friend class Client;
     explicit Batch(karu_batch* handle) : handle_(handle) {}
@@ -250,6 +288,16 @@ class Client {
         if (status != KARU_OK)
             return std::unexpected(current_error(status));
         return value;
+    }
+
+    // Size and ETag from one probe; see karu_client_stat.
+    [[nodiscard]] Result<ObjectInfo> stat(const Object& object) const {
+        karu_object_info info{};
+        info.struct_size = sizeof(info);
+        const karu_status status = karu_client_stat(handle_.get(), object.native_handle(), &info);
+        if (status != KARU_OK)
+            return std::unexpected(current_error(status));
+        return ObjectInfo{.size = info.size, .etag = info.etag};
     }
 
     [[nodiscard]] Result<void> read_into(const Object& object, std::uint64_t offset,

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -91,9 +92,8 @@ Engine::Engine(ConfigSnapshot config)
         throw std::runtime_error(curl_easy_strerror(initialized));
     }
 
-    multi_.reset(curl_multi_init());
     share_.reset(curl_share_init());
-    if (!multi_ || !share_)
+    if (!share_)
         throw std::bad_alloc();
 
     require_share_option(share_.get(), CURLSHOPT_LOCKFUNC, share_lock);
@@ -105,15 +105,35 @@ Engine::Engine(ConfigSnapshot config)
     }
     require_shared_data(share_.get(), CURL_LOCK_DATA_DNS);
     require_shared_data(share_.get(), CURL_LOCK_DATA_SSL_SESSION);
-    require_multi_option(multi_.get(), CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
-    require_multi_option(multi_.get(), CURLMOPT_MAX_TOTAL_CONNECTIONS, 0L);
-    require_multi_option(multi_.get(), CURLMOPT_MAX_HOST_CONNECTIONS, 0L);
-    easy_pool_.reserve(static_cast<std::size_t>(options_.concurrency));
     size_pool_.reserve(static_cast<std::size_t>(options_.concurrency));
-    active_.reserve(static_cast<std::size_t>(options_.concurrency));
+
+    // Split the client-wide limit, with at least one transfer slot per loop.
+    const auto concurrency = static_cast<std::size_t>(options_.concurrency);
+    const std::size_t count = std::clamp<std::size_t>(static_cast<std::size_t>(options_.io_threads),
+                                                      1, std::min<std::size_t>(concurrency, 64));
+    loops_.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        auto loop = std::make_unique<IoLoop>();
+        loop->bit = std::uint64_t{1} << index;
+        loop->limit = concurrency / count + (index < concurrency % count ? 1 : 0);
+        loop->multi.reset(curl_multi_init());
+        if (!loop->multi)
+            throw std::bad_alloc();
+        require_multi_option(loop->multi.get(), CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
+        require_multi_option(loop->multi.get(), CURLMOPT_MAX_TOTAL_CONNECTIONS, 0L);
+        require_multi_option(loop->multi.get(), CURLMOPT_MAX_HOST_CONNECTIONS, 0L);
+        require_multi_option(loop->multi.get(), CURLMOPT_MAXCONNECTS,
+                             static_cast<long>(loop->limit));
+        loop->easy_pool.reserve(loop->limit);
+        loop->active.reserve(loop->limit);
+        loops_.push_back(std::move(loop));
+    }
 
     try {
-        io_thread_ = std::thread([this] { io_loop(); });
+        for (auto& loop : loops_) {
+            IoLoop* owned = loop.get();
+            loop->thread = std::thread([this, owned] { io_loop(*owned); });
+        }
         file_workers_.reserve(kFileWorkers);
         for (int index = 0; index < kFileWorkers; ++index) {
             file_workers_.emplace_back([this] { file_loop(); });
@@ -150,11 +170,13 @@ void Engine::stop_workers() noexcept {
         std::lock_guard lock(queue_mutex_);
         stop_.store(true, std::memory_order_release);
     }
-    queue_cv_.notify_all();
-    if (multi_)
-        curl_multi_wakeup(multi_.get());
-    if (io_thread_.joinable())
-        io_thread_.join();
+    file_cv_.notify_all();
+    credential_cv_.notify_all();
+    wake_loops();
+    for (auto& loop : loops_) {
+        if (loop->thread.joinable())
+            loop->thread.join();
+    }
     for (std::thread& worker : file_workers_) {
         if (worker.joinable())
             worker.join();
@@ -179,31 +201,117 @@ std::unique_ptr<BatchCore> Engine::submit(std::span<const Request> requests,
 
     {
         std::lock_guard lock(batch->mutex);
+        std::uint64_t requested = 0;
         for (const auto& transfer : plan.transfers) {
             batch->pending_parts += transfer->parts.size();
+            for (const Part& part : transfer->parts)
+                requested += part.length;
         }
         batch->pending_parts += plan.immediate.size();
         batch->live_transfers = plan.transfers.size();
+        batch->counters.add(batch->counters.transfers, plan.transfers.size());
+        batch->counters.add(batch->counters.requested_bytes, requested);
     }
     for (Completion& completion : plan.immediate) {
         batch->push(std::move(completion));
     }
 
+    std::deque<std::unique_ptr<Transfer>> ready;
+    std::size_t files = 0;
+    std::size_t lookups = 0;
     {
         std::lock_guard lock(queue_mutex_);
         for (auto& transfer : plan.transfers) {
             if (transfer->locator->resolved.backend == Backend::File) {
                 file_queue_.push_back(std::move(transfer));
+                ++files;
             } else if (backends::cloud_provider(transfer->locator->resolved.backend) != nullptr) {
                 credential_queue_.push_back(std::move(transfer));
+                ++lookups;
             } else {
-                http_queue_.push_back(std::move(transfer));
+                ready.push_back(std::move(transfer));
             }
         }
     }
-    queue_cv_.notify_all();
-    curl_multi_wakeup(multi_.get());
+    // Wake only the workers that can take this batch's queued transfers.
+    const auto notify = [](std::condition_variable& cv, std::size_t count, int workers) {
+        if (count >= static_cast<std::size_t>(workers)) {
+            cv.notify_all();
+            return;
+        }
+        for (std::size_t index = 0; index < count; ++index)
+            cv.notify_one();
+    };
+    notify(file_cv_, files, kFileWorkers);
+    notify(credential_cv_, lookups, kCredentialWorkers);
+    if (!ready.empty()) {
+        const std::size_t count = ready.size();
+        {
+            std::lock_guard lock(http_mutex_);
+            for (auto& transfer : ready)
+                http_queue_.push_back(std::move(transfer));
+            http_backlog_.store(http_queue_.size(), std::memory_order_seq_cst);
+        }
+        wake_idle_loops(count);
+    }
     return batch;
+}
+
+void Engine::wake_loops() noexcept {
+    for (auto& loop : loops_) {
+        if (loop->multi)
+            curl_multi_wakeup(loop->multi.get());
+    }
+}
+
+void Engine::wake_idle_loops(std::size_t count) noexcept {
+    // Prefer the lowest idle loop to reuse connections for serial reads.
+    // Clear its bit first so concurrent producers choose different loops.
+    std::uint64_t idle = idle_loops_.load(std::memory_order_seq_cst);
+    while (count > 0 && idle != 0) {
+        const int index = std::countr_zero(idle);
+        const std::uint64_t bit = std::uint64_t{1} << index;
+        idle &= ~bit;
+        if ((idle_loops_.fetch_and(~bit, std::memory_order_seq_cst) & bit) != 0) {
+            curl_multi_wakeup(loops_[static_cast<std::size_t>(index)]->multi.get());
+            --count;
+        }
+    }
+}
+
+void Engine::queue_http(std::unique_ptr<Transfer> transfer) {
+    {
+        std::lock_guard lock(http_mutex_);
+        if (stop_.load(std::memory_order_acquire)) {
+            discard_transfer(std::move(transfer));
+            return;
+        }
+        http_queue_.push_back(std::move(transfer));
+        http_backlog_.store(http_queue_.size(), std::memory_order_seq_cst);
+    }
+    wake_idle_loops(1);
+}
+
+void Engine::take_http(IoLoop& loop) {
+    if (http_backlog_.load(std::memory_order_acquire) == 0)
+        return;
+    std::lock_guard lock(http_mutex_);
+    while (loop.active.size() + loop.pending.size() < loop.limit && !http_queue_.empty()) {
+        loop.pending.push_back(std::move(http_queue_.front()));
+        http_queue_.pop_front();
+    }
+    http_backlog_.store(http_queue_.size(), std::memory_order_seq_cst);
+}
+
+void Engine::recycle_handle(IoLoop& loop, Transfer& transfer) noexcept {
+    if (!transfer.easy)
+        return;
+    curl_easy_reset(transfer.easy.get());
+    try {
+        loop.easy_pool.push_back(std::move(transfer.easy));
+    } catch (...) {
+        // The handle is dropped with the transfer instead of pooled.
+    }
 }
 
 void Engine::deliver(Transfer& transfer, karu_status status, const std::string& detail) {
@@ -247,16 +355,14 @@ void Engine::finish_transfer(std::unique_ptr<Transfer> transfer, karu_status sta
     BatchCore* batch = transfer->batch;
     // Publish completions before dropping the last live transfer. A waiter may
     // destroy the batch as soon as transfer_finished() reaches zero.
+    // The consumer must see the final count when it receives the last result.
+    batch->counters.add(batch->counters.transfers_finished, 1);
     deliver(*transfer, status, detail);
-    if (transfer->easy) {
-        curl_easy_reset(transfer->easy.get());
-        easy_pool_.push_back(std::move(transfer->easy));
-    }
     transfer.reset();
     batch->transfer_finished();
 }
 
-void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
+void Engine::start_transfer(IoLoop& loop, std::unique_ptr<Transfer> transfer) {
     try {
         transfer->deadline.start(options_.request_timeout_seconds);
         if (transfer->deadline.expired()) {
@@ -280,12 +386,14 @@ void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
                             "internal error: cloud request has no resolved credentials");
             return;
         }
-        auto request =
-            cloud ? request_builder_.materialize(*transfer->locator, transfer->credentials,
-                                                 transfer->offset, transfer->length,
-                                                 transfer->region_hint, transfer->if_match)
-                  : request_builder_.prepare(*transfer->locator, transfer->offset, transfer->length,
-                                             transfer->region_hint, transfer->if_match);
+        const std::uint64_t first = transfer->offset + transfer->resumed;
+        const std::uint64_t length = transfer->length - transfer->resumed;
+        const std::string_view pin = transport::version_pin(*transfer);
+        auto request = cloud
+                           ? request_builder_.materialize(*transfer->locator, transfer->credentials,
+                                                          first, length, transfer->region_hint, pin)
+                           : request_builder_.prepare(*transfer->locator, first, length,
+                                                      transfer->region_hint, pin);
         if (!request) {
             finish_transfer(std::move(transfer), request.error().status,
                             std::move(request.error().message));
@@ -303,11 +411,11 @@ void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
         if (!request->routing_region.empty())
             transfer->region_hint = std::move(request->routing_region);
 
-        if (easy_pool_.empty()) {
+        if (loop.easy_pool.empty()) {
             transfer->easy.reset(curl_easy_init());
         } else {
-            transfer->easy = std::move(easy_pool_.back());
-            easy_pool_.pop_back();
+            transfer->easy = std::move(loop.easy_pool.back());
+            loop.easy_pool.pop_back();
         }
         if (!transfer->easy) {
             finish_transfer(std::move(transfer), KARU_ERR_NOMEM, "curl_easy_init: out of memory");
@@ -323,16 +431,16 @@ void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
         }
 
         CURL* easy = transfer->easy.get();
-        const CURLMcode added = curl_multi_add_handle(multi_.get(), easy);
+        const CURLMcode added = curl_multi_add_handle(loop.multi.get(), easy);
         if (added != CURLM_OK) {
             finish_transfer(std::move(transfer), KARU_ERR_NETWORK,
                             concat("curl_multi_add_handle: ", curl_multi_strerror(added)));
             return;
         }
         Transfer* key = transfer.get();
-        auto [entry, inserted] = active_.try_emplace(key);
+        auto [entry, inserted] = loop.active.try_emplace(key);
         if (!inserted) {
-            curl_multi_remove_handle(multi_.get(), transfer->easy.get());
+            curl_multi_remove_handle(loop.multi.get(), transfer->easy.get());
             finish_transfer(std::move(transfer), KARU_ERR_INVALID,
                             "internal error registering HTTP transfer");
             return;
@@ -341,20 +449,20 @@ void Engine::start_transfer(std::unique_ptr<Transfer> transfer) {
     } catch (const std::bad_alloc&) {
         if (transfer) {
             if (transfer->easy)
-                curl_multi_remove_handle(multi_.get(), transfer->easy.get());
+                curl_multi_remove_handle(loop.multi.get(), transfer->easy.get());
             finish_transfer(std::move(transfer), KARU_ERR_NOMEM, "out of memory preparing request");
         }
     } catch (const std::exception& error) {
         if (transfer) {
             if (transfer->easy)
-                curl_multi_remove_handle(multi_.get(), transfer->easy.get());
+                curl_multi_remove_handle(loop.multi.get(), transfer->easy.get());
             finish_transfer(std::move(transfer), KARU_ERR_INVALID,
                             concat("could not prepare request: ", error.what()));
         }
     } catch (...) {
         if (transfer) {
             if (transfer->easy)
-                curl_multi_remove_handle(multi_.get(), transfer->easy.get());
+                curl_multi_remove_handle(loop.multi.get(), transfer->easy.get());
             finish_transfer(std::move(transfer), KARU_ERR_INVALID,
                             "could not prepare request: unknown C++ exception");
         }
@@ -367,117 +475,116 @@ void Engine::discard_transfer(std::unique_ptr<Transfer> transfer) noexcept {
     batch->transfer_finished();
 }
 
-void Engine::discard_cancelled_http() {
-    for (auto iterator = pending_.begin(); iterator != pending_.end();) {
+void Engine::discard_cancelled_http(IoLoop& loop) {
+    for (auto iterator = loop.pending.begin(); iterator != loop.pending.end();) {
         if (!(*iterator)->batch->is_cancelled()) {
             ++iterator;
             continue;
         }
         auto transfer = std::move(*iterator);
-        iterator = pending_.erase(iterator);
+        iterator = loop.pending.erase(iterator);
         discard_transfer(std::move(transfer));
     }
 
-    for (auto iterator = retries_.begin(); iterator != retries_.end();) {
+    for (auto iterator = loop.retries.begin(); iterator != loop.retries.end();) {
         if (!iterator->transfer->batch->is_cancelled()) {
             ++iterator;
             continue;
         }
         auto transfer = std::move(iterator->transfer);
-        iterator = retries_.erase(iterator);
+        iterator = loop.retries.erase(iterator);
         discard_transfer(std::move(transfer));
     }
 
-    for (auto iterator = active_.begin(); iterator != active_.end();) {
+    for (auto iterator = loop.active.begin(); iterator != loop.active.end();) {
         if (!iterator->second->batch->is_cancelled()) {
             ++iterator;
             continue;
         }
-        curl_multi_remove_handle(multi_.get(), iterator->second->easy.get());
+        curl_multi_remove_handle(loop.multi.get(), iterator->second->easy.get());
         auto transfer = std::move(iterator->second);
-        iterator = active_.erase(iterator);
+        iterator = loop.active.erase(iterator);
         discard_transfer(std::move(transfer));
     }
 }
 
-void Engine::io_loop() {
-    // pending_, retries_, active_, and easy_pool_ belong to this thread. Other
-    // threads hand work over through http_queue_.
-    std::mt19937 random = retry_generator(this);
+void Engine::io_loop(IoLoop& loop) {
+    std::mt19937 random = retry_generator(&loop);
+    CURLM* const multi = loop.multi.get();
 
     while (!stop_.load(std::memory_order_acquire)) {
-        std::deque<std::unique_ptr<Transfer>> incoming;
-        {
-            std::lock_guard lock(queue_mutex_);
-            incoming.swap(http_queue_);
-        }
-        for (auto& transfer : incoming)
-            pending_.push_back(std::move(transfer));
-        if (cancellation_pending_.exchange(false, std::memory_order_acq_rel))
-            discard_cancelled_http();
+        take_http(loop);
+        if (loop.cancellation_pending.exchange(false, std::memory_order_acq_rel))
+            discard_cancelled_http(loop);
 
         const auto now = SteadyClock::now();
-        for (auto iterator = retries_.begin(); iterator != retries_.end();) {
+        for (auto iterator = loop.retries.begin(); iterator != loop.retries.end();) {
             if (iterator->due > now) {
                 ++iterator;
                 continue;
             }
-            pending_.push_back(std::move(iterator->transfer));
-            iterator = retries_.erase(iterator);
+            loop.pending.push_back(std::move(iterator->transfer));
+            iterator = loop.retries.erase(iterator);
         }
 
-        const auto limit = static_cast<std::size_t>(options_.concurrency);
-        if (limit != last_connection_limit_) {
-            last_connection_limit_ = limit;
-            curl_multi_setopt(multi_.get(), CURLMOPT_MAXCONNECTS, static_cast<long>(limit));
-        }
-        while (active_.size() < limit && !pending_.empty()) {
-            auto transfer = std::move(pending_.front());
-            pending_.pop_front();
+        while (loop.active.size() < loop.limit && !loop.pending.empty()) {
+            auto transfer = std::move(loop.pending.front());
+            loop.pending.pop_front();
             if (transfer->batch->is_cancelled()) {
                 discard_transfer(std::move(transfer));
                 continue;
             }
-            start_transfer(std::move(transfer));
+            start_transfer(loop, std::move(transfer));
         }
 
         int running = 0;
-        const CURLMcode performed = curl_multi_perform(multi_.get(), &running);
+        const CURLMcode performed = curl_multi_perform(multi, &running);
         if (performed != CURLM_OK) {
-            for (auto iterator = active_.begin(); iterator != active_.end();) {
-                curl_multi_remove_handle(multi_.get(), iterator->second->easy.get());
+            for (auto iterator = loop.active.begin(); iterator != loop.active.end();) {
+                curl_multi_remove_handle(multi, iterator->second->easy.get());
                 auto transfer = std::move(iterator->second);
-                iterator = active_.erase(iterator);
+                iterator = loop.active.erase(iterator);
                 finish_transfer(std::move(transfer), KARU_ERR_NETWORK,
                                 concat("curl_multi_perform: ", curl_multi_strerror(performed)));
             }
         }
 
         int remaining_messages = 0;
-        while (CURLMsg* message = curl_multi_info_read(multi_.get(), &remaining_messages)) {
+        while (CURLMsg* message = curl_multi_info_read(multi, &remaining_messages)) {
             if (message->msg != CURLMSG_DONE)
                 continue;
-
             CURL* const easy = message->easy_handle;
             const CURLcode result = message->data.result;
             Transfer* key = nullptr;
             curl_easy_getinfo(easy, CURLINFO_PRIVATE, &key);
-            auto node = active_.extract(key);
+            auto node = loop.active.extract(key);
             if (node.empty())
                 continue;
-            curl_multi_remove_handle(multi_.get(), easy);
+            curl_multi_remove_handle(multi, easy);
             std::unique_ptr<Transfer> transfer = std::move(node.mapped());
 
             if (transfer->http_status == 0) {
                 curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &transfer->http_status);
             }
+            {
+                BatchCounters& counters = transfer->batch->counters;
+                long connects = 0;
+                if (curl_easy_getinfo(easy, CURLINFO_NUM_CONNECTS, &connects) == CURLE_OK &&
+                    connects > 0) {
+                    counters.add(counters.new_connections, static_cast<std::uint64_t>(connects));
+                }
+                if (transfer->http_status == 429 || transfer->http_status == 503)
+                    counters.add(counters.throttled, 1);
+            }
             if (transport::succeeded(*transfer, result)) {
+                recycle_handle(loop, *transfer);
                 finish_transfer(std::move(transfer), KARU_OK);
                 continue;
             }
 
             if (transfer->deadline.expired()) {
                 const std::string detail = timeout_detail(*transfer);
+                recycle_handle(loop, *transfer);
                 finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
                 continue;
             }
@@ -495,9 +602,8 @@ void Engine::io_loop() {
                 transfer->batch->remember_region(transfer->locator->resolved.canonical_uri,
                                                  transfer->response_region);
                 transfer->region_retried = true;
-                curl_easy_reset(transfer->easy.get());
-                easy_pool_.push_back(std::move(transfer->easy));
-                pending_.push_front(std::move(transfer));
+                recycle_handle(loop, *transfer);
+                loop.pending.push_front(std::move(transfer));
                 continue;
             }
 
@@ -506,45 +612,57 @@ void Engine::io_loop() {
                 // Authentication failures get one fresh lookup outside the
                 // ordinary retry budget.
                 request_builder_.invalidate_credentials(*transfer->locator);
+                transfer->batch->counters.add(transfer->batch->counters.credential_refreshes, 1);
                 transfer->credentials_retried = true;
                 transfer->credentials = {};
                 transfer->credentials_ready = false;
-                curl_easy_reset(transfer->easy.get());
-                easy_pool_.push_back(std::move(transfer->easy));
+                recycle_handle(loop, *transfer);
                 {
                     std::lock_guard lock(queue_mutex_);
                     credential_queue_.push_front(std::move(transfer));
                 }
-                queue_cv_.notify_all();
+                credential_cv_.notify_one();
                 continue;
             }
 
+            if (transport::unreachable(result))
+                ++transfer->unreachable_attempts;
             if (transfer->attempt + 1 < options_.max_attempts &&
+                transfer->unreachable_attempts < transport::kUnreachableAttempts &&
                 transport::retryable(*transfer, result)) {
                 ++transfer->attempt;
+                BatchCounters& counters = transfer->batch->counters;
+                counters.add(counters.retries, 1);
+                const std::uint64_t kept = transfer->resumed;
+                transport::plan_resume(*transfer);
+                if (transfer->resumed > kept)
+                    counters.add(counters.resumed, 1);
                 const auto delay = transport::detail::retry_delay(transfer->attempt,
                                                                   transfer->retry_after, random);
                 if (!transfer->deadline.can_wait_for(delay)) {
                     const std::string detail = timeout_detail(
                         *transfer, "request timeout leaves no time for another attempt");
+                    recycle_handle(loop, *transfer);
                     finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
                     continue;
                 }
-                curl_easy_reset(transfer->easy.get());
-                easy_pool_.push_back(std::move(transfer->easy));
-                retries_.push_back(Retry{SteadyClock::now() + delay, std::move(transfer)});
+                recycle_handle(loop, *transfer);
+                loop.retries.push_back(Retry{SteadyClock::now() + delay, std::move(transfer)});
                 continue;
             }
 
             transport::Failure failed = transport::failure(*transfer, result);
+            recycle_handle(loop, *transfer);
             finish_transfer(std::move(transfer), failed.status, std::move(failed.detail));
         }
 
+        // Skip polling when queued work can start now.
+        const bool room = loop.active.size() < loop.limit;
         int timeout_ms = 50;
-        if (!pending_.empty() && active_.size() < limit) {
+        if (room && (!loop.pending.empty() || http_backlog_.load(std::memory_order_acquire) != 0)) {
             timeout_ms = 0;
-        } else if (!retries_.empty()) {
-            const auto next = std::min_element(retries_.begin(), retries_.end(),
+        } else if (!loop.retries.empty()) {
+            const auto next = std::min_element(loop.retries.begin(), loop.retries.end(),
                                                [](const Retry& left, const Retry& right) {
                                                    return left.due < right.due;
                                                })
@@ -553,26 +671,38 @@ void Engine::io_loop() {
                 std::chrono::duration_cast<std::chrono::milliseconds>(next - SteadyClock::now())
                     .count();
             timeout_ms = static_cast<int>(std::clamp<std::int64_t>(remaining, 0, 50));
-        } else if (running == 0 && pending_.empty()) {
+        } else if (running == 0 && loop.pending.empty()) {
             timeout_ms = 200;
         }
+        // Publish the idle bit before checking the queue. With seq_cst on
+        // both sides, either the producer sees the bit and wakes us, or we
+        // see its queued work before polling.
+        bool announced = false;
+        if (room && timeout_ms != 0) {
+            idle_loops_.fetch_or(loop.bit, std::memory_order_seq_cst);
+            announced = true;
+            if (http_backlog_.load(std::memory_order_seq_cst) != 0)
+                timeout_ms = 0;
+        }
         int descriptors = 0;
-        curl_multi_poll(multi_.get(), nullptr, 0, timeout_ms, &descriptors);
+        curl_multi_poll(multi, nullptr, 0, timeout_ms, &descriptors);
+        if (announced)
+            idle_loops_.fetch_and(~loop.bit, std::memory_order_seq_cst);
     }
 
-    while (!active_.empty()) {
-        auto node = active_.extract(active_.begin());
-        curl_multi_remove_handle(multi_.get(), node.mapped()->easy.get());
+    while (!loop.active.empty()) {
+        auto node = loop.active.extract(loop.active.begin());
+        curl_multi_remove_handle(multi, node.mapped()->easy.get());
         discard_transfer(std::move(node.mapped()));
     }
-    for (auto& transfer : pending_) {
+    for (auto& transfer : loop.pending) {
         discard_transfer(std::move(transfer));
     }
-    pending_.clear();
-    for (Retry& retry : retries_) {
+    loop.pending.clear();
+    for (Retry& retry : loop.retries) {
         discard_transfer(std::move(retry.transfer));
     }
-    retries_.clear();
+    loop.retries.clear();
 }
 
 void Engine::file_loop() {
@@ -580,7 +710,7 @@ void Engine::file_loop() {
         std::unique_ptr<Transfer> transfer;
         {
             std::unique_lock lock(queue_mutex_);
-            queue_cv_.wait(lock, [this] {
+            file_cv_.wait(lock, [this] {
                 return stop_.load(std::memory_order_acquire) || !file_queue_.empty();
             });
             if (file_queue_.empty()) {
@@ -624,6 +754,7 @@ void Engine::file_loop() {
             transfer->received += *read;
         }
 
+        transfer->batch->counters.add(transfer->batch->counters.received_bytes, transfer->received);
         if (transfer->batch->is_cancelled()) {
             discard_transfer(std::move(transfer));
         } else if (!failure.empty()) {
@@ -641,7 +772,7 @@ void Engine::credential_loop() {
         std::unique_ptr<Transfer> transfer;
         {
             std::unique_lock lock(queue_mutex_);
-            queue_cv_.wait(lock, [this] {
+            credential_cv_.wait(lock, [this] {
                 return stop_.load(std::memory_order_acquire) || !credential_queue_.empty();
             });
             if (stop_.load(std::memory_order_acquire))
@@ -675,15 +806,7 @@ void Engine::credential_loop() {
 
             transfer->credentials = std::move(*credentials);
             transfer->credentials_ready = true;
-            {
-                std::lock_guard lock(queue_mutex_);
-                if (stop_.load(std::memory_order_acquire)) {
-                    discard_transfer(std::move(transfer));
-                    continue;
-                }
-                http_queue_.push_back(std::move(transfer));
-            }
-            curl_multi_wakeup(multi_.get());
+            queue_http(std::move(transfer));
         } catch (const std::bad_alloc&) {
             finish_transfer(std::move(transfer), KARU_ERR_NOMEM,
                             "out of memory resolving credentials");
@@ -698,6 +821,14 @@ void Engine::credential_loop() {
 }
 
 void Engine::cancel(BatchCore& batch) {
+    {
+        // No live transfers means no workers need cancellation or a wait.
+        std::lock_guard lock(batch.mutex);
+        if (batch.live_transfers == 0) {
+            batch.cancelled.store(true, std::memory_order_release);
+            return;
+        }
+    }
     batch.cancelled.store(true, std::memory_order_release);
     batch.cv.notify_all();
 
@@ -723,9 +854,23 @@ void Engine::cancel(BatchCore& batch) {
         }
     }
 
-    queue_cv_.notify_all();
-    cancellation_pending_.store(true, std::memory_order_release);
-    curl_multi_wakeup(multi_.get());
+    {
+        std::lock_guard lock(http_mutex_);
+        for (auto iterator = http_queue_.begin(); iterator != http_queue_.end();) {
+            if ((*iterator)->batch != &batch) {
+                ++iterator;
+                continue;
+            }
+            auto transfer = std::move(*iterator);
+            iterator = http_queue_.erase(iterator);
+            discard_transfer(std::move(transfer));
+        }
+        http_backlog_.store(http_queue_.size(), std::memory_order_seq_cst);
+    }
+
+    for (auto& loop : loops_)
+        loop->cancellation_pending.store(true, std::memory_order_release);
+    wake_loops();
 
     // Caller-owned destinations are safe to release once every transfer has
     // left its worker or the curl event loop.
@@ -734,11 +879,23 @@ void Engine::cancel(BatchCore& batch) {
 }
 
 karu_status Engine::size_of(const Locator& locator, std::uint64_t& size) {
-    const auto& resolved = locator.resolved;
-    if (resolved.window_length != TO_END) {
-        size = resolved.window_length;
+    // Bounded windows need no size probe.
+    if (locator.resolved.window_length != TO_END) {
+        size = locator.resolved.window_length;
         return KARU_OK;
     }
+    std::string etag;
+    return object_info(locator, size, etag);
+}
+
+karu_status Engine::object_info(const Locator& locator, std::uint64_t& size, std::string& etag) {
+    const auto& resolved = locator.resolved;
+    const auto visible = [&resolved](std::uint64_t total) {
+        if (resolved.window_length != TO_END)
+            return resolved.window_length;
+        return total > resolved.window_offset ? total - resolved.window_offset : 0;
+    };
+    etag.clear();
 
     if (resolved.backend == Backend::File) {
         std::error_code error;
@@ -747,7 +904,7 @@ karu_status Engine::size_of(const Locator& locator, std::uint64_t& size) {
             set_error(concat(resolved.target, ": ", error.message()));
             return KARU_ERR_IO;
         }
-        size = total > resolved.window_offset ? total - resolved.window_offset : 0;
+        size = visible(total);
         return KARU_OK;
     }
 
@@ -757,13 +914,14 @@ karu_status Engine::size_of(const Locator& locator, std::uint64_t& size) {
         return KARU_ERR_NOMEM;
     }
     auto result =
-        transport::size_of(locator, handle.get(), share_.get(), request_builder_, options_);
+        transport::object_info(locator, handle.get(), share_.get(), request_builder_, options_);
     return_size_handle(std::move(handle));
     if (!result) {
         set_error(result.error().detail);
         return result.error().status;
     }
-    size = *result > resolved.window_offset ? *result - resolved.window_offset : 0;
+    size = visible(result->size);
+    etag = std::move(result->etag);
     return KARU_OK;
 }
 

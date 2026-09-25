@@ -144,6 +144,28 @@ KARU_API uint64_t karu_locator_window_length(const karu_locator* locator);
 KARU_API karu_status karu_client_size(karu_client* client, const karu_locator* locator,
                                       uint64_t* out_size);
 
+// Size and version of an object. Initialize struct_size to sizeof this struct;
+// fields beyond struct_size are left untouched.
+typedef struct {
+    size_t struct_size;
+    // Size visible through the locator, as karu_client_size reports it.
+    uint64_t size;
+    // Strong ETag, including quotes. Empty for local files, missing or invalid
+    // tags, weak tags, and tags longer than 255 bytes. Pass as karu_req.if_match
+    // to require this version; a mismatch returns KARU_ERR_PRECONDITION.
+    char etag[256];
+} karu_object_info;
+#define KARU_OBJECT_INFO_INIT                                                                      \
+    {                                                                                              \
+        sizeof(karu_object_info), 0, { 0 }                                                         \
+    }
+
+// Probe size and ETag together. This does not validate format metadata
+// supplied by the caller. Unlike karu_client_size, stat probes even a bounded
+// remote window to obtain the object's ETag.
+KARU_API karu_status karu_client_stat(karu_client* client, const karu_locator* locator,
+                                      karu_object_info* out);
+
 // Positional reads ---------------------------------------------------------
 
 // Per-batch planner overrides. Initialize struct_size to sizeof this struct.
@@ -168,7 +190,10 @@ typedef struct {
     // bytes reported by the completion may be read; the rest is unspecified.
     void* buffer;
     void* tag;
-    // Optional ETag precondition for remote objects. Copied by submit.
+    // Optional If-Match condition for remote objects. Copied by submit.
+    // A 412 or a response ETag contradicting a single strong tag fails with
+    // KARU_ERR_PRECONDITION. Wildcards and lists are evaluated by the server
+    // and do not pin a version; interrupted reads with them restart in full.
     const char* if_match;
 } karu_req;
 
@@ -202,6 +227,35 @@ KARU_API karu_status karu_batch_next(karu_batch* batch, karu_done* out, int time
 // Do not call concurrently with karu_batch_next on the same batch. In a forked
 // child, an inherited batch is left untouched and the call returns at once.
 KARU_API void karu_batch_free(karu_batch* batch);
+// Batch counters. Initialize struct_size to sizeof this struct;
+// fields beyond struct_size are left untouched.
+typedef struct {
+    size_t struct_size;
+    // Transfers after coalescing, and transfers completed.
+    uint64_t transfers;
+    uint64_t transfers_finished;
+    // Requested bytes exclude invalid requests. Received bytes count local data
+    // and accepted response bodies, including gaps, skipped prefixes and retries;
+    // HTTP error bodies are excluded.
+    uint64_t requested_bytes;
+    uint64_t received_bytes;
+    // Ordinary retries, and HTTP 429/503 responses. Credential and region
+    // corrections do not count as retries.
+    uint64_t retries;
+    uint64_t throttled;
+    // Connections opened rather than reused.
+    uint64_t new_connections;
+    // Retries planned with additional bytes kept from a partial response.
+    uint64_t resumed;
+    // Credential refreshes triggered by an authentication failure.
+    uint64_t credential_refreshes;
+} karu_batch_stats;
+#define KARU_BATCH_STATS_INIT                                                                      \
+    { sizeof(karu_batch_stats), 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+
+// Reads independent counters, not an atomic snapshot. May be called while
+// other threads drain the batch, but not concurrently with karu_batch_free.
+KARU_API karu_status karu_batch_get_stats(const karu_batch* batch, karu_batch_stats* out);
 // Blocking batch read. Every request must provide a destination buffer. If the
 // call fails, the contents of every destination buffer are unspecified.
 KARU_API karu_status karu_client_fetch(karu_client* client, const karu_req* requests, size_t count);

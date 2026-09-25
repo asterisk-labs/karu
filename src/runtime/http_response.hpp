@@ -21,6 +21,10 @@ namespace karu::transport::detail {
 [[nodiscard]] int retry_after_seconds(std::string_view value, std::time_t now) noexcept;
 [[nodiscard]] std::chrono::milliseconds retry_delay(int attempt, int retry_after,
                                                     std::mt19937& random);
+// Whether the headers report a transformation of the stored bytes.
+[[nodiscard]] bool transformed(const EncodingHeaders& encoding) noexcept;
+[[nodiscard]] std::string transformation_detail(std::string_view url,
+                                                const EncodingHeaders& encoding);
 
 } // namespace karu::transport::detail
 

@@ -19,6 +19,23 @@ namespace karu {
 
 class Engine;
 
+// Workers update these independently. They do not synchronize payload access.
+struct BatchCounters {
+    std::atomic<std::uint64_t> transfers{0};
+    std::atomic<std::uint64_t> transfers_finished{0};
+    std::atomic<std::uint64_t> requested_bytes{0};
+    std::atomic<std::uint64_t> received_bytes{0};
+    std::atomic<std::uint64_t> retries{0};
+    std::atomic<std::uint64_t> throttled{0};
+    std::atomic<std::uint64_t> new_connections{0};
+    std::atomic<std::uint64_t> resumed{0};
+    std::atomic<std::uint64_t> credential_refreshes{0};
+
+    void add(std::atomic<std::uint64_t>& counter, std::uint64_t value) noexcept {
+        counter.fetch_add(value, std::memory_order_relaxed);
+    }
+};
+
 struct Completion {
     void* tag = nullptr;
     karu_status status = KARU_OK;
@@ -51,6 +68,7 @@ struct karu_batch {
 
     std::shared_ptr<karu::Engine> owner;
     const int owner_process;
+    karu::BatchCounters counters;
 
     mutable std::mutex mutex;
     std::condition_variable cv;

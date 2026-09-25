@@ -4,6 +4,32 @@ Notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- `karu_client_stat` / `Client::stat`: size and strong ETag in one probe.
+- `karu_batch_get_stats` / `Batch::stats`: transfer, byte, retry and connection counters.
+- Interrupted reads resume when a strong ETag pins the object version; otherwise
+  they restart the range.
+
+### Changed
+
+- Clients now use 4 I/O threads. `KARU_IO_THREADS` accepts 1–64, capped by
+  `KARU_CONCURRENCY`; set it to 1 for the previous thread count.
+- `KARU_MAX_ATTEMPTS` defaults to 8 instead of 3. DNS and connection failures
+  still stop after 3 attempts. All attempts share the request deadline.
+- New connections resolve and shuffle addresses, adding DNS lookups.
+- Reduced repeated signing, configuration parsing and worker wakeups. Receive
+  buffers use 256 KiB on libcurl 8.7+ and 64 KiB on older versions.
+
+### Fixed
+
+- GCS range reads preserve stored gzip bytes and reject reported transformations.
+- Reads reject a response ETag that contradicts a single strong `if_match`.
+- Resumed reads handle servers that ignore `Range` without inflating the fallback limit.
+- Response header comparisons no longer depend on the process locale.
+- Inherited batches return `KARU_ERR_INVALID` after `fork()`; freeing them cannot
+  wait for the parent's workers.
+
 ## [0.2.3] - 2026-09-15
 
 ### Fixed
