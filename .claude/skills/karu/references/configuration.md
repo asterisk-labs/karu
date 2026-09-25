@@ -101,12 +101,13 @@ config.set_path("s3://minio-bucket/", "AWS_REGION", "us-east-1").value();
 | Option | Default | Range | Effect |
 | --- | --- | --- | --- |
 | `KARU_CONCURRENCY` | 64 | 1 to 4096 | active remote transfers per client, across all its batches; also libcurl's connection cache size |
+| `KARU_IO_THREADS` | 4 | 1 to 64 | libcurl event loops, each on its own thread; `KARU_CONCURRENCY` is split between them and each keeps its own connections |
 | `KARU_COALESCE_GAP` | 1048576 | 0 and up | largest gap merged between remote ranges; 0 disables merging |
 | `KARU_COALESCE_LIMIT` | 67108864 | 1 and up | largest merged span |
 | `KARU_COALESCE_PARTS` | 1024 | 1 to 1048576 | most requests served by one transfer |
 | `KARU_COALESCE_AMPLIFICATION` | 16 | 1 to 1048576 | most transferred bytes per requested byte |
 | `KARU_RANGE_FALLBACK_LIMIT` | 8388608 | 0 and up | largest prefix discarded when a server ignores `Range`; 0 refuses every nonzero offset |
-| `KARU_MAX_ATTEMPTS` | 3 | 1 to 16 | total attempts for transient failures |
+| `KARU_MAX_ATTEMPTS` | 8 | 1 to 16 | total attempts for transient failures; at most 3 when the host does not resolve or refuses the connection |
 | `KARU_REQUEST_TIMEOUT` | 120 | 0 to 86400 s | whole logical read: credentials, attempts and waits; also kills `credential_process`; 0 disables |
 | `KARU_CONNECT_TIMEOUT` | 30 | 1 to 3600 s | connection setup |
 | `KARU_LOW_SPEED_TIME` | 60 | 0 to 3600 s | abort when slower than the limit for this long |
@@ -114,22 +115,22 @@ config.set_path("s3://minio-bucket/", "AWS_REGION", "us-east-1").value();
 
 Tuning notes:
 
-- Latency, not CPU, bounds remote reads. Raise `KARU_CONCURRENCY` for many small
-  ranges against object stores (hundreds is normal for a data loader) and lower it when
-  the service answers 429 or 503. S3 speaks HTTP/1.1, so concurrency is roughly the
-  number of open connections.
-- Local files always use 4 file workers per client; `KARU_CONCURRENCY` does not apply.
-- The four coalescing values trade requests against wasted bytes. With the defaults,
-  reads spaced up to 16 times their own length apart merge into spans of up to 64 MiB,
-  so a sparse batch can transfer about 16 bytes for every byte it needs. Lower
-  `KARU_COALESCE_AMPLIFICATION` or `KARU_COALESCE_GAP` when bandwidth costs more than
-  requests. Measure with `make benchmark` and compare fetched to requested bytes
-  (`read-path.md`, section 2).
-- Coalescing can be changed per batch without a new client (`SubmitOptions`,
-  `karu_client_submit_with`). Everything else in this table is fixed per client.
-- With independent transient failures at rate `p`, a read fails with probability
-  `p^KARU_MAX_ATTEMPTS`; under heavy throttling, more attempts are cheap insurance.
-  Keep `KARU_REQUEST_TIMEOUT` long enough for the backoff (section 7 of `read-path.md`).
+- `KARU_CONCURRENCY` limits active remote transfers per client. Increase it when
+  requests spend most of their time waiting on the service; reduce it if HTTP 429/503
+  responses rise. `karu_batch_get_stats` reports those responses as `throttled`.
+- `KARU_IO_THREADS` runs TLS, signing and copies on separate cores. Each loop has
+  its own connections. Compare 1 and 4 on the actual workload, counting all clients
+  and leaving CPU time for decoding.
+- Local files use 4 file workers per client; `KARU_CONCURRENCY` does not apply.
+- Coalescing trades fewer requests for extra bytes. Lower
+  `KARU_COALESCE_AMPLIFICATION` or `KARU_COALESCE_GAP` if gaps dominate the data fetched.
+  Compare `received_bytes` with `requested_bytes`, accounting for retries and responses
+  that ignore ranges. `make benchmark` measures the planner, not network throughput.
+- Coalescing can be changed per batch with `karu_client_submit_with` or C++
+  `SubmitOptions`. Other runtime options are fixed per client.
+- More attempts can recover transient failures but delay the final error. Reduce
+  `KARU_MAX_ATTEMPTS` or `KARU_REQUEST_TIMEOUT` when latency matters more.
+  DNS and connection failures stop after 3 attempts. See `read-path.md`, section 7.
 
 ## 5. HTTP options
 

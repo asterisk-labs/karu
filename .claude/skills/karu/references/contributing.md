@@ -34,7 +34,7 @@ src/platform.{hpp,cpp}         process id, timegm, UTF-8 paths, positional file 
 src/process.{hpp,cpp}          credential_process runner (posix_spawn, CreateProcess plus job object)
 src/text.hpp                   concat, redact_url
 src/runtime/planner.*          validation, grouping, coalescing into Transfer and Part
-src/runtime/engine.*           I/O thread, file and credential workers, retries, cancellation, size
+src/runtime/engine.*           event loops, file and credential workers, retries, cancellation, size
 src/runtime/transport.*        curl easy setup, header and body callbacks, scatter, size probe
 src/runtime/http_response.*    status mapping, transient classification, Retry-After, backoff
 src/runtime/batch.*            per-batch completion queue
@@ -196,9 +196,9 @@ tests/emulators/down.sh
 - **Batches first.** The workload is on the order of a million ranges for a data loader,
   and concurrency is the lever. Nothing on the hot path may block per file or per range;
   the facade's `read` is a convenience over `fetch`.
-- **Stateless reads.** No object byte or size cache. Only connections, DNS results, TLS
-  sessions and credentials are reused.
-- **Blocking work off the I/O thread.** Submitted-read discovery, callbacks and helper
+- **Stateless reads.** No object byte or size cache. Connections, TLS sessions and
+  credentials are reused. libcurl's DNS cache is disabled for address shuffling.
+- **Blocking work off the event loops.** Submitted-read discovery, callbacks and helper
   processes run on credential workers; files run on file workers. Synchronous size probes
   do their credential work on the calling thread.
 - **Late, per-attempt requests.** Locators hold no endpoints or secrets; requests are

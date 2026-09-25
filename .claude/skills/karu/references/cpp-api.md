@@ -68,6 +68,7 @@ needs, so the object may be destroyed after `submit` or `fetch` returns.
 | `static Result<Client> create(const Config&)` | validates and freezes; invalid values give `KARU_ERR_CONFIG` |
 | `Result<bool> matches(const Config&) const` | `karu_client_matches_config` |
 | `Result<std::uint64_t> size(const Object&) const` | visible size; one `GET` of byte 0 for remote objects, never cached |
+| `Result<ObjectInfo> stat(const Object&) const` | `size` plus the strong `etag` (empty when unavailable) from the same `GET`; pass `etag` as `Read::if_match` |
 | `Result<void> read_into(object, offset, std::span<std::byte>, if_match = {}) const` | one blocking read into caller memory; an empty span succeeds without I/O |
 | `Result<std::vector<std::byte>> read(object, offset, length, if_match = {}) const` | allocates `length` zeroed bytes, then `read_into`; length 0 gives an empty vector |
 | `Result<void> fetch(std::span<const Read>, const SubmitOptions& = {}) const` | blocking batch; fails with the first failed read; destinations unspecified on failure |
@@ -119,6 +120,8 @@ struct BatchEvent {
 - Several threads may call `next` on one `Batch`. Destroying the `Batch` cancels pending
   work and blocks until workers release the destinations; do not destroy it while
   another thread is inside `next`.
+- `Batch::stats()` returns `Result<BatchStats>` with the counters of `karu_batch_stats`
+  and may be called while other threads drain the batch.
 
 ## 6. Example
 

@@ -23,8 +23,8 @@ Sources: `src/request_builder.cpp`, `src/credential_cache.cpp`,
 
 - Never at `karu_resolve` or `karu_client_create`. Cloud transfers (S3, GCS, Azure,
   Source) first visit a credential worker, which resolves credentials for the transfer's
-  canonical path and then hands it to the I/O thread. Size probes resolve on the calling
-  thread.
+  canonical path before entering the HTTP queue. Size and ETag probes resolve on the
+  calling thread.
 - Plain HTTP needs no credentials. Hugging Face reads its token while each request
   attempt is built, without a cache.
 - The request is signed after the byte range and region are known, again for every

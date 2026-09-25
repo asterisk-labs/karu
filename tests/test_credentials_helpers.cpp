@@ -22,10 +22,8 @@ namespace {
 
 using backends::Header;
 
-// ---------------------------------------------------------------------------
 // Assertion helpers. The suite checks hundreds of small outcomes, and a bare
 // OK() on an expected<> reports nothing useful when it fails.
-// ---------------------------------------------------------------------------
 
 template <typename Value>
 void expect_error(int line, const std::expected<Value, RequestError>& result, karu_status status,
@@ -125,9 +123,7 @@ struct ProxiedTransport {
     ScopedEnvironment upper_bypass{"NO_PROXY", nullptr};
 };
 
-// ---------------------------------------------------------------------------
 // path_exists and read_text_file
-// ---------------------------------------------------------------------------
 
 void test_file_helpers() {
     SECTION("credential file helpers");
@@ -193,9 +189,7 @@ void test_file_helpers() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // json_string and json_integer
-// ---------------------------------------------------------------------------
 
 void test_json_scanner() {
     SECTION("credential JSON scanning");
@@ -250,9 +244,7 @@ void test_json_scanner() {
     expect_no_number(__LINE__, backends::json_integer(R"({"n": })", "n"));
 }
 
-// ---------------------------------------------------------------------------
 // Time and range formatting
-// ---------------------------------------------------------------------------
 
 void test_time_and_range_helpers() {
     SECTION("credential time formatting");
@@ -288,9 +280,7 @@ void test_time_and_range_helpers() {
     EQS(backends::range_header(4'294'967'296ull, 2), "bytes=4294967296-4294967297");
 }
 
-// ---------------------------------------------------------------------------
 // read_ini
-// ---------------------------------------------------------------------------
 
 void test_ini_reader() {
     SECTION("credential ini reader");
@@ -363,9 +353,7 @@ void test_ini_reader() {
         OK(nothing->empty());
 }
 
-// ---------------------------------------------------------------------------
 // copy_callback_credentials
-// ---------------------------------------------------------------------------
 
 std::string g_observed_path;
 karu_credentials_kind g_observed_kind = KARU_CREDENTIALS_AWS;
@@ -460,9 +448,7 @@ void test_callback_credentials() {
                  "/vsiaz/c/b: custom credential provider returned batch drained");
 }
 
-// ---------------------------------------------------------------------------
 // add_configured_headers
-// ---------------------------------------------------------------------------
 
 ConfigSnapshot headers_config(const char* value) {
     ConfigBuilder builder(false);
@@ -593,9 +579,7 @@ void test_configured_headers() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // credential_request: the cases that need no server
-// ---------------------------------------------------------------------------
 
 void test_credential_request_offline() {
     SECTION("credential request validation");
@@ -655,9 +639,7 @@ void test_credential_request_offline() {
     OK(!forwarded && !forwarded.error().message.starts_with("credential endpoint returned HTTP"));
 }
 
-// ---------------------------------------------------------------------------
 // credential_request against the loopback fixture
-// ---------------------------------------------------------------------------
 
 void test_credential_request_transport() {
     SECTION("credential request transport");
@@ -747,9 +729,7 @@ void test_credential_request_proxy() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // oauth_token
-// ---------------------------------------------------------------------------
 
 void test_oauth_token() {
     SECTION("oauth token exchange");
@@ -832,9 +812,7 @@ void test_oauth_token() {
                  "credential endpoint returned HTTP 302");
 }
 
-// ---------------------------------------------------------------------------
 // read_aws_profile
-// ---------------------------------------------------------------------------
 
 backends::AwsProfile must_read_profile(int line, const ConfigSnapshot& config,
                                        std::string_view profile) {
@@ -1058,9 +1036,7 @@ void test_aws_profile_errors() {
                  "AWS shared credentials: file exceeds 1 MiB");
 }
 
-// ---------------------------------------------------------------------------
 // aws_json_credentials and credentials_from_aws_profile
-// ---------------------------------------------------------------------------
 
 void test_aws_json_credentials() {
     SECTION("AWS credential documents");

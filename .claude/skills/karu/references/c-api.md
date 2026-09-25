@@ -99,7 +99,7 @@ vcpkg toolchain file.
 | -11 | `KARU_ERR_CONFIG` | `invalid configuration` | unknown options, invalid values, bad endpoints |
 | -12 | `KARU_ERR_CREDENTIALS` | `credentials unavailable` | missing or failed credentials, callback failures |
 | -13 | `KARU_ERR_NOT_FOUND` | `object not found` | HTTP 404 |
-| -14 | `KARU_ERR_PRECONDITION` | `precondition failed` | HTTP 412 for `if_match` |
+| -14 | `KARU_ERR_PRECONDITION` | `precondition failed` | HTTP 412 for `if_match`, or a response whose strong `ETag` differs from it |
 
 - Compare with `!= KARU_OK`. `KARU_TIMEOUT` is positive and can be a failure.
 - `karu_last_error()` returns thread-local text, truncated to 511 bytes. Every function
@@ -142,6 +142,12 @@ or size call, not at client creation.
   - remote object: a blocking `GET` of byte 0 on the calling thread, with credentials,
     retries and region correction, reading the total from `Content-Range`. The result is
     never cached, and an empty object reports 0.
+- `karu_client_stat(client, locator, &info)` returns size and a quoted strong ETag.
+  Pass `info.etag` as `if_match` on later reads. The tag is empty for local files,
+  absent, weak or invalid tags, and tags longer than 255 bytes. Unlike `size`,
+  `stat` probes bounded remote windows too.
+- Initialize `info` with `KARU_OBJECT_INFO_INIT`. Fields beyond `struct_size`
+  are left untouched.
 
 ## 6. Requests, batches and completions
 
@@ -189,6 +195,18 @@ Draining:
 - `karu_batch_free` marks the batch cancelled, removes queued work, and waits until no
   worker or network transfer still references its buffers. Do not call it concurrently
   with `karu_batch_next` on the same batch.
+
+Counters:
+
+- Initialize `stats` with `KARU_BATCH_STATS_INIT`, then call
+  `karu_batch_get_stats(batch, &stats)`. Fields beyond `struct_size` are untouched.
+  Counters can be read while the batch runs, but are not an atomic snapshot.
+- `transfers` and `transfers_finished` count coalesced transfers. `requested_bytes`
+  counts valid requests; `received_bytes` counts local data and accepted response
+  bodies, including gaps, discarded prefixes and retries. It excludes HTTP error bodies.
+- `retries` excludes credential and region corrections. `throttled` counts HTTP
+  429/503 responses. The remaining counters track new connections, planned resumes
+  and credential refreshes; see `karu_batch_stats` in the C header.
 
 ## 7. Example: submit and drain
 
@@ -441,10 +459,10 @@ $ python3 tests/http_server.py ./provider
 
 ## 10. Threads and fork
 
-- One engine per client: one I/O thread driving libcurl multi, 4 credential workers and
-  4 file workers. They start on first use and stop when the client and all its batches
-  are freed.
-- `karu_client_size` runs the entire size probe on the calling thread, including native
+- One engine per client: `KARU_IO_THREADS` threads each driving a libcurl multi handle
+  (4 by default), 4 credential workers and 4 file workers. They start on first use and
+  stop when the client and all its batches are freed.
+- `karu_client_size` and `karu_client_stat` run the entire probe on the calling thread, including native
   discovery, a custom credential callback and any `credential_process`. Submitted cloud
   reads use credential workers instead. There is no background refresh: credentials are
   renewed lazily by the first request that needs them.
@@ -453,8 +471,9 @@ $ python3 tests/http_server.py ./provider
 - `fork()`: a client used in a child notices the new process id, abandons the inherited
   engine without destroying it, and builds a fresh one. This makes clients safe to
   create before worker processes are forked (PyTorch `DataLoader` with `num_workers > 0`).
-  Batches do not cross a fork: drain and free them in the process that submitted them,
-  and never call `karu_batch_next` or `karu_batch_free` on an inherited batch.
+  Batches do not cross a fork: drain and free them in the process that submitted them.
+  In the child, `karu_batch_next` and `karu_batch_get_stats` return `KARU_ERR_INVALID`;
+  `karu_batch_free` leaves the inherited batch allocated until process exit.
 
 ## 11. Writing bindings
 

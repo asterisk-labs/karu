@@ -54,7 +54,7 @@ KARU_API const char* karu_last_error(void);
 KARU_API void karu_clear_error(void);
 KARU_API void karu_free(void* ptr);
 
-// Configuration ------------------------------------------------------------
+// Configuration
 
 // Configuration builders are mutable and must be externally synchronized.
 // Clients copy the configuration and may be shared between threads.
@@ -127,7 +127,7 @@ KARU_API int karu_client_concurrency(const karu_client* client);
 KARU_API uint64_t karu_client_coalesce_gap(const karu_client* client);
 KARU_API int karu_client_max_attempts(const karu_client* client);
 
-// Locators -----------------------------------------------------------------
+// Locators
 
 typedef struct karu_locator karu_locator;
 
@@ -166,7 +166,7 @@ typedef struct {
 KARU_API karu_status karu_client_stat(karu_client* client, const karu_locator* locator,
                                       karu_object_info* out);
 
-// Positional reads ---------------------------------------------------------
+// Positional reads
 
 // Per-batch planner overrides. Initialize struct_size to sizeof this struct.
 // Fields set to KARU_INHERIT use the corresponding client setting. A zero gap

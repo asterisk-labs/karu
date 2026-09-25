@@ -26,8 +26,9 @@ the `VERSION` file. If they differ, trust the source, `CHANGELOG.md` and
 - **Config builder** (`karu_config`, `karu::Config`): mutable. `karu_config_create`
   snapshots the environment once; `karu_config_create_empty` reads nothing.
 - **Client** (`karu_client`, `karu::Client`): an immutable copy of the configuration that
-  lazily owns one engine: a libcurl multi I/O thread, 4 credential workers, 4 file
-  workers, pooled connections and a credential cache. Share it across threads.
+  lazily owns one engine: `KARU_IO_THREADS` libcurl event loops (4 by default), 4
+  credential workers, 4 file workers, pooled connections and a credential cache. Share it
+  across threads.
 - **Locator** (`karu_locator`, `karu::Object`): a parsed address with a canonical path
   and an optional window. Parsing does no I/O and loads no credentials.
 - **Batch**: submit many requests at once. The planner groups them by object, merges
@@ -91,6 +92,8 @@ rebase offsets to zero and reject reads that leave the window.
 | Karu allocates the buffers | C only: `karu_req.buffer = NULL`, then `karu_free(done.buffer)` |
 | Fail if the object changed | the same `if_match` ETag on every read gives `KARU_ERR_PRECONDITION` |
 | Visible size | `karu_client_size` (a one-byte GET, never cached; bounded windows need no I/O) |
+| Size and ETag to pin reads | `karu_client_stat` / `Client::stat` (the same GET; the ETag goes to `if_match`) |
+| Tune concurrency and coalescing | `karu_batch_get_stats` / `Batch::stats`: retries, 429/503, new connections, received vs requested bytes |
 | Credentials from your own SDK | `karu_config_set_credentials_provider` |
 
 ## Invariants and pitfalls
@@ -121,9 +124,9 @@ rebase offsets to zero and reject reads that leave the window.
 - Requests need a finite, nonzero length. `KARU_TO_END` is only a window length.
 - Reuse one client. Each new client starts new threads, cold connections and an empty
   credential cache. After `fork()` a client rebuilds its engine on first use in the
-  child, but batches never cross a fork.
+  child. Inherited batches return `KARU_ERR_INVALID`; freeing them is a no-op.
 - Submitted cloud reads resolve credentials on credential workers. A synchronous
-  `karu_client_size` call instead performs its credential lookup, custom callback and
+  `karu_client_size` or `karu_client_stat` call performs its credential lookup, callback and
   any `credential_process` on the calling thread.
 - Keep format knowledge out of Karu. Plan ranges above it, submit them in batches, and
   decode completions as they arrive.

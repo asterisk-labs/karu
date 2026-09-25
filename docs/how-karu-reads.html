@@ -88,7 +88,7 @@
             <h3>The boundary of the library</h3>
             <p>Karu resolves addresses, reports visible size, and reads byte ranges. It supports local files, plain HTTP, Amazon S3 and compatible storage, Google Cloud Storage, Azure Blob and Data Lake Storage, Hugging Face, and Source Cooperative.</p>
             <p>It is read only. It does not upload, delete, or list objects. It does not parse file formats and does not cache object data. A layer above Karu decides which bytes have meaning. This narrow contract keeps reads safe to reorder, merge, and retry.</p>
-            <p class="bridge">That boundary is the key mental model. A format library decides what bytes matter. Karu decides how to retrieve them efficiently and safely.</p>
+            <p>Rumi, for example, maps training windows to compressed frames and submits their byte ranges to Karu. As reads complete, Rumi decodes the frames into arrays or tensors. Karu handles the transport; Rumi handles the format.</p>
           </section>
 
           <section class="guide-section" id="address">
@@ -253,13 +253,14 @@
                 <defs><marker id="arrow-route" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10Z"/></marker></defs>
                 <g class="flow-card accent"><rect x="283" y="12" width="194" height="52" rx="5"/><text x="380" y="35">Transfer plan</text><text class="sub" x="380" y="51">local and remote work</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M340 64V91H142V112"/><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M420 64V91H614V112"/>
                 <text class="flow-stage" x="52" y="102">LOCAL PATH</text><g class="flow-card"><rect x="52" y="112" width="180" height="54" rx="5"/><text x="142" y="136">File workers</text><text class="sub" x="142" y="152">positional pread</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M142 166V219"/>
-                <text class="flow-stage" x="508" y="102">REMOTE PATH</text><g class="flow-card"><rect x="508" y="112" width="212" height="54" rx="5"/><text x="614" y="136">Credential workers</text><text class="sub" x="614" y="152">resolve without blocking network progress</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M614 166V184"/><g class="flow-card"><rect x="508" y="184" width="212" height="54" rx="5"/><text x="614" y="207">One I O thread</text><text class="sub" x="614" y="223">libcurl multi and handle pool</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M614 238V257H477"/><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M142 166V257H283"/>
+                <text class="flow-stage" x="508" y="102">REMOTE PATH</text><g class="flow-card"><rect x="508" y="112" width="212" height="54" rx="5"/><text x="614" y="136">Credential workers</text><text class="sub" x="614" y="152">resolve without blocking network progress</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M614 166V184"/><g class="flow-card"><rect x="508" y="184" width="212" height="54" rx="5"/><text x="614" y="207">I/O event loops</text><text class="sub" x="614" y="223">libcurl multi and handle pool</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M614 238V257H477"/><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M142 166V257H283"/>
                 <g class="flow-card accent"><rect x="283" y="240" width="194" height="48" rx="5"/><text x="380" y="262">Completions</text><text class="sub" x="380" y="278">one result per original read</text></g>
               </svg>
-              <figcaption>Work that can block is separated from the event loop. The input output thread stays free to advance every active remote transfer.</figcaption>
+              <figcaption>File reads and cloud credential lookup use worker queues. Event loops advance the remote transfers.</figcaption>
             </figure>
             <h3>A large batch becomes bounded work</h3>
-            <p>Submitting many reads does not create one thread or one connection for every read. The planner may produce more transfers than the engine can run at once. Extra transfers remain pending, the event loop advances only the configured active limit, and every completion opens capacity for another transfer.</p>
+            <p>Submitting many reads does not create one thread or one connection for every read. The planner may produce more transfers than the engine can run at once. Extra transfers remain pending, the event loops advance only the configured active limit, and every completion opens capacity for another transfer.</p>
+            <p><code>KARU_IO_THREADS</code> defaults to four loops, each with its own thread and connections. They share the client's concurrency limit. More loops can help when TLS, signing or copying saturates one core. With multiple worker processes, compare one and four loops on the full workload, including decoding.</p>
             <div class="process-strip" aria-label="How Karu applies backpressure">
               <div><b>Batch</b><span>May contain thousands of independent reads</span></div>
               <div><b>Plan</b><span>Reduces those reads to bounded transfers</span></div>
@@ -306,15 +307,15 @@
             <div class="technical-note">
               <span>Three execution queues</span>
               <p>The engine sends file transfers to four file workers. Cloud transfers first enter a queue served by four credential workers. Plain HTTP transfers can enter the HTTP queue directly. Resolved cloud work joins that same HTTP queue afterward.</p>
-              <p>One input output thread owns the libcurl multi handle, pending work, the retry schedule, the active transfer map, and the reusable easy handle pool. No other thread mutates those structures. Queue handoff is the boundary between blocking work and event driven network progress.</p>
+              <p>Each event loop thread owns its libcurl multi handle, pending work, retry schedule, active transfer map, and reusable easy handle pool. No other thread mutates those structures. Queue handoff is the boundary between blocking work and event driven network progress.</p>
               <p>Each backend produces the same <code>PreparedRequest</code> shape with a URL, headers, closed byte range, HTTP options, and an optional routing region. The transport layer can therefore schedule S3, GCS, Azure, Source, Hugging Face, and plain HTTP without understanding each authentication scheme.</p>
             </div>
             <h3>Connections are meant to survive</h3>
-            <p>The engine reuses libcurl handles so open connections, domain lookups, and TLS sessions can be reused. This matters because establishing a new secure connection can cost more time than transferring a small byte range.</p>
-            <p>A curl share object exposes the domain lookup cache and TLS session cache across handles. Finished easy handles are reset and returned to the pool instead of destroyed. This preserves reusable connections while removing request specific options before the next transfer.</p>
+            <p>Reusing a connection avoids DNS lookup and the TCP and TLS handshakes, which can take longer than a small range read.</p>
+            <p>Each event loop keeps its connections and reusable handles. TLS sessions are shared across loops. Finished handles are reset before reuse so the next transfer starts with its own request options.</p>
             <div class="technical-note">
               <span>Easy, multi, and share</span>
-              <p>An easy handle represents one configured transfer. A multi handle drives many easy handles without assigning one operating system thread to every request. A share handle lets those easy handles reuse selected state such as DNS results and TLS sessions.</p>
+              <p>An easy handle represents one transfer; a multi handle advances many transfers on one thread. A share handle shares TLS sessions. New connections bypass libcurl's DNS cache and shuffle the resolved addresses to vary endpoint selection.</p>
               <p>The multi handle works as an event loop. It asks the operating system which sockets are ready, advances only those transfers, processes completed messages, starts queued work up to the concurrency limit, and sleeps until more progress is possible. This keeps hundreds of waiting requests inexpensive.</p>
             </div>
             <h3>HTTP 1.1 and HTTP 2 organize concurrency differently</h3>
@@ -344,6 +345,8 @@
             </figure>
             <h3>When a server ignores the range</h3>
             <p>Some servers answer with the complete object. Karu may discard a small prefix and still deliver the requested interval. It refuses when the discarded prefix would exceed the configured fallback limit, which is 8 MiB by default. This avoids turning a tiny read into an accidental download of a large object.</p>
+            <h3>When a server rewrites the object</h3>
+            <p>GCS can decompress stored gzip objects and ignore <code>Range</code>. Karu sends <code>Accept-Encoding: gzip</code> to retrieve the stored bytes. It rejects responses that report decompression or another transformation, since their byte offsets may have changed.</p>
             <div class="technical-note">
               <span>What a valid partial response proves</span>
               <p>A partial response must include a parseable <code>Content-Range</code>. Its first byte must equal the transfer offset. Its last byte may equal the requested last byte, or it may be the known final byte of a shorter object. It may never extend beyond the requested interval.</p>
@@ -363,6 +366,8 @@
               <div><b>Object unchanged</b><span>The service returns the requested range</span></div>
               <div><b>Object replaced</b><span>Status 412 becomes a precondition error</span></div>
             </div>
+            <p><code>karu_client_stat</code> returns size and a strong ETag in one probe. Pass that tag as <code>if_match</code> on later reads. Karu also checks the response ETag in case the server ignores the condition; without a strong response tag, enforcement depends on the server.</p>
+            <p>The probe is optional. Rumi can read frame ranges directly from an external header. That header must belong to the requested dataset version; <code>stat</code> cannot verify the pairing.</p>
             <p>The condition is optional and applies only to remote objects. Without it, Karu guarantees correct range delivery for each response but does not create a transactional snapshot across separate requests.</p>
             <div class="takeaway"><b>The important rule</b><p>Karu does not equate transport success with data correctness. The response must match the requested byte interval.</p></div>
           </section>
@@ -373,6 +378,7 @@
             <p class="section-intro">Karu separates ordinary retries from corrections that change the next request. This keeps recovery bounded and prevents permanent failures from looping.</p>
             <h3>Why a read can be retried safely</h3>
             <p>A read is idempotent. Repeating it does not modify the object, so one successful attempt has the same intended effect as another. This property permits retries for selected connection failures and temporary service responses. It does not make every failure retryable. Invalid paths, denied access, failed preconditions, and malformed responses return directly to the caller.</p>
+            <p>Interrupted reads resume with a strong ETag; otherwise they restart the range. Wildcards and tag lists also require a restart because they may accept different versions. If Karu's saved tag stops matching, it discards the partial data. A caller's version mismatch fails the read.</p>
             <h3>Authentication and signing are related but different</h3>
             <p>Authentication tells a service which identity is making the request. A bearer token does this by placing a secret token in a header. Request signing instead combines selected request fields with a secret key to produce a signature. The service recalculates that signature and rejects the request if a signed field changed.</p>
             <p>AWS Signature Version 4 binds the method, path, query, selected headers, payload description, time, service, and region. That is why Karu must know the final byte range and region before signing. Following a redirect with the old signature would be incorrect and could expose authorization to an unintended host, so signed cloud requests are rebuilt rather than blindly redirected.</p>
@@ -390,7 +396,7 @@
               <figcaption>Network faults and busy services consume the retry budget. A discovered region or refreshed credential changes the request and gets one correction.</figcaption>
             </figure>
             <h3>Retries share one deadline</h3>
-            <p>The request timeout covers the complete logical read, including credential lookup, every attempt, and every wait. The default allows three attempts in total. Delays grow with each attempt and include random jitter so many failed requests do not return as one synchronized burst. A server supplied retry delay takes precedence within a bounded limit.</p>
+            <p>The default allows eight attempts, or three for DNS and connection failures. Credential lookup, requests and retry waits share one deadline. Waits increase with each failure and include random jitter; a server's <code>Retry-After</code> can extend them.</p>
             <div class="technical-note">
               <span>Three recovery counters</span>
               <p>The ordinary attempt counter covers retryable network results and HTTP status such as 408, 425, 429, and server errors. A wrong S3 region has its own one time correction because the region changes the signing key. Expired credentials have another one time correction because the next attempt uses a refreshed identity.</p>
@@ -452,11 +458,12 @@
             <p>The same canonical path also limits credential reuse. This alignment prevents an option selected for one resource from silently authorizing another resource with a different scope.</p>
             <h3>Forked processes rebuild safely</h3>
             <p>A child process does not inherit the parent engine threads in a usable form. Karu detects the process change on first use and creates a fresh engine. The child gets its own connections and workers without touching stale thread state.</p>
+            <p>Submit batches in the process that will consume them. Inherited batches return <code>KARU_ERR_INVALID</code> in the child, and freeing one leaves it allocated until process exit.</p>
             <h3>The C ABI and the C++ facade</h3>
             <p>The stable public boundary is a C application binary interface. Opaque pointers hide the C++ implementation, numeric status values cross the boundary without exceptions, and callers release objects through matching Karu functions. This shape is suitable for language bindings because it does not expose the C++ standard library in the binary contract.</p>
             <p>The C++ facade adds move only ownership, spans, optional planner overrides, expected results, and automatic cleanup. It does not create another engine. Both interfaces reach the same client, locator, batch, and completion machinery.</p>
             <h3>What Karu deliberately does not cache</h3>
-            <p>Karu reuses connections, TLS sessions, DNS results, and credentials because they support many reads. It does not cache object bytes or remote size results. A data cache would need eviction, invalidation, memory budgets, and a workload specific policy. Keeping it outside Karu lets the format reader or application choose whether caching is useful.</p>
+            <p>Karu reuses connections, TLS sessions, and credentials because they support many reads. It does not cache object bytes or remote size results. A data cache would need eviction, invalidation, memory budgets, and a workload specific policy. Keeping it outside Karu lets the format reader or application choose whether caching is useful.</p>
             <h3>Measure the two sides of performance</h3>
             <p>Planner benchmarks should report transfer count, fetched bytes, requested bytes, and planning time. Network benchmarks should separate cold connection setup from steady state and use a real remote endpoint. A local server removes the latency that batching and concurrency are designed to hide.</p>
             <h3>Concepts at a glance</h3>

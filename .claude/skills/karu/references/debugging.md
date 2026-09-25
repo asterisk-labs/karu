@@ -110,10 +110,13 @@ All `KARU_ERR_INVALID`, and nothing was submitted:
 | `object not found` | `http://127.0.0.1:PORT/missing: HTTP 404: missing` | wrong key, bucket, revision or endpoint |
 | `not authorized` | `http://127.0.0.1:PORT/unauthorized: HTTP 401: unauthorized` | credentials rejected, see section 7; S3 also answers 403 for a missing key when the caller lacks `s3:ListBucket` |
 | `precondition failed` | `http://127.0.0.1:PORT/precondition: HTTP 412: changed` | the object no longer matches `if_match` |
+| `precondition failed` | `http://127.0.0.1:PORT/ignores-if-match: the server ignored If-Match and sent ETag "e2", so the object no longer matches if_match` | the response ETag differs from the requested version; use the final object's ETag from `karu_client_stat` |
 | `range past end of object`, `got=6` | `http://127.0.0.1:PORT/object: object ended at byte 4096 while reading [4090, +16)` | short object; the prefix is valid |
 | `range past end of object` | `http://127.0.0.1:PORT/object: HTTP 416` | the request starts past the end |
 | `http error` | `.../bad-range: Content-Range [0, 15] does not satisfy requested [100, 115]` | a proxy or server returned other bytes; nothing was delivered |
 | `http error` | `.../ignore-range: server ignored Range; refusing to discard 4000 bytes (limit 1024)` | the server does not support ranges; raise `KARU_RANGE_FALLBACK_LIMIT` only for small objects |
+| `http error` | `.../bucket/gzip-stored: the server decoded an object stored with Content-Encoding gzip (GCS decompressive transcoding), ...` | a GCS object stored gzip-encoded was read over plain HTTPS; use `gs://`, or send `Accept-Encoding: gzip` with `KARU_HTTP_HEADERS` |
+| `http error` | `.../transformed: the response carries Warning 214 (transformation applied), ...` | a proxy rewrote the body; read from the origin |
 | `http error` | `.../bucket/signed-redirect: HTTP 302: ...` | a signed cloud request was redirected; fix the endpoint or region instead of following it |
 | `network error` | `.../truncated: transfer closed with 500 bytes remaining to read` | the connection dropped mid-body on every attempt |
 | `network error` | `http://127.0.0.1:9/object: Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server` | nothing listening, firewall, or wrong endpoint |
@@ -193,16 +196,16 @@ Silent costs worth checking:
   number of transfers with the number of reads (`read-path.md`, section 2).
 - A read that fails only after about 120 seconds hit `KARU_REQUEST_TIMEOUT`; a stalled
   connection trips `KARU_LOW_SPEED_TIME` (60 s below 1024 bytes/s) first.
-- Retries add latency before a final error: 0.6 to 1.2 s with 3 attempts, longer when
-  the server sends `Retry-After`.
+- Retry waits alone total 19 to 38 s for 8 attempts (0.6 to 1.2 s for 3), and can
+  be longer with `Retry-After`. Failed requests take additional time. DNS and connection
+  failures get at most 3 attempts, still subject to resolver and connection timeouts.
 - `karu_batch_free` or a C++ `Batch` destructor blocks until workers release the batch's
   buffers. It can wait for a credential callback or `credential_process` that is already
   running, because Karu cannot interrupt either.
 - A credential callback that calls back into the same client can deadlock the credential
   workers. Resolve credentials with the vendor SDK only.
-- `karu_batch_next(batch, &done, -1)` in a forked child, on a batch the parent submitted,
-  can block forever because the workers that would finish it do not exist in the child;
-  see section 10.
+- `KARU_ERR_INVALID` with `batches do not cross fork()` means the batch belongs to
+  the parent process. Submit a new batch in the child; see section 10.
 
 ## 10. Threads and fork
 
@@ -210,8 +213,9 @@ Silent costs worth checking:
 - A batch may be drained from several threads, but must be freed by one thread after the
   others have stopped calling `next`.
 - After `fork()`, a client used in the child builds a fresh engine automatically. A batch
-  belongs to the process that submitted it: never drain or free it in a child. Create
-  clients before forking or inside each worker, and submit inside the worker.
+  belongs to the process that submitted it: in a child, `karu_batch_next` rejects it
+  with `KARU_ERR_INVALID` and `karu_batch_free` leaves it untouched. Create clients
+  before forking or inside each worker, and submit inside the worker.
 - ThreadSanitizer reports that mention `Engine`, `karu_batch` or the credential cache are
   bugs in Karu; reproduce with `make test-tsan`.
 
