@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <openssl/sha.h>
+#include <openssl/crypto.h>
 #include <ranges>
 #include <span>
 
@@ -39,14 +39,57 @@ std::string hex(std::span<const unsigned char> bytes) {
     return result;
 }
 
-std::expected<std::array<unsigned char, SHA256_DIGEST_LENGTH>, RequestError>
-sha256(std::string_view text) {
-    std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
-    if (SHA256(reinterpret_cast<const unsigned char*>(text.data()), text.size(), digest.data()) ==
-        nullptr) {
-        return std::unexpected(RequestError{KARU_ERR_CREDENTIALS, "OpenSSL SHA256 failed"});
+// For S3, the derived key changes only with the secret, date or region.
+// Cache the last key per thread to avoid four HMACs on each request.
+struct SigningKeyCache {
+    std::string secret;
+    std::string date;
+    std::string region;
+    Sha256Digest key{};
+    bool valid = false;
+
+    SigningKeyCache() = default;
+    SigningKeyCache(const SigningKeyCache&) = delete;
+    SigningKeyCache& operator=(const SigningKeyCache&) = delete;
+    ~SigningKeyCache() { forget(); }
+
+    void forget() noexcept {
+        OPENSSL_cleanse(secret.data(), secret.size());
+        OPENSSL_cleanse(key.data(), key.size());
+        secret.clear();
+        valid = false;
     }
-    return digest;
+};
+
+std::expected<Sha256Digest, RequestError>
+signing_key(std::string_view secret, std::string_view date, std::string_view region) {
+    thread_local SigningKeyCache cache;
+    if (cache.valid && cache.secret == secret && cache.date == date && cache.region == region)
+        return cache.key;
+
+    std::string initial = "AWS4" + std::string(secret);
+    auto date_key = hmac_sha256(
+        std::span(reinterpret_cast<const unsigned char*>(initial.data()), initial.size()), date);
+    OPENSSL_cleanse(initial.data(), initial.size());
+    if (!date_key)
+        return std::unexpected(date_key.error());
+    auto region_key = hmac_sha256(*date_key, region);
+    if (!region_key)
+        return std::unexpected(region_key.error());
+    auto service_key = hmac_sha256(*region_key, "s3");
+    if (!service_key)
+        return std::unexpected(service_key.error());
+    auto key = hmac_sha256(*service_key, "aws4_request");
+    if (!key)
+        return std::unexpected(key.error());
+
+    cache.forget();
+    cache.secret = secret;
+    cache.date = date;
+    cache.region = region;
+    cache.key = *key;
+    cache.valid = true;
+    return *key;
 }
 
 } // namespace
@@ -114,21 +157,10 @@ prepare_s3_get(const S3GetRequest& target, const ProviderCredentials* credential
     const std::string string_to_sign =
         "AWS4-HMAC-SHA256\n" + timestamp + "\n" + scope + "\n" + hex(*request_hash);
 
-    const std::string initial = "AWS4" + credentials->secret_access_key;
-    auto date_key = hmac_sha256(
-        std::span(reinterpret_cast<const unsigned char*>(initial.data()), initial.size()), date);
-    if (!date_key)
-        return std::unexpected(date_key.error());
-    auto region_key = hmac_sha256(*date_key, target.region);
-    if (!region_key)
-        return std::unexpected(region_key.error());
-    auto service_key = hmac_sha256(*region_key, "s3");
-    if (!service_key)
-        return std::unexpected(service_key.error());
-    auto signing_key = hmac_sha256(*service_key, "aws4_request");
-    if (!signing_key)
-        return std::unexpected(signing_key.error());
-    auto signed_request = hmac_sha256(*signing_key, string_to_sign);
+    auto key = signing_key(credentials->secret_access_key, date, target.region);
+    if (!key)
+        return std::unexpected(key.error());
+    auto signed_request = hmac_sha256(*key, string_to_sign);
     if (!signed_request)
         return std::unexpected(signed_request.error());
     const std::string signature = hex(*signed_request);

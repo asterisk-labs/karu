@@ -5,7 +5,12 @@
 #include "process.hpp"
 #include "test_support.hpp"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <span>
+#include <string>
+#include <string_view>
 
 namespace karu::test {
 
@@ -50,6 +55,35 @@ void test_s3_request() {
             "x-amz-security-token, "
             "Signature=a47ce3c9bbb62233c87e37d9e4265301fa0a5d5d0ab60ad9ab9d8baebd8165bc");
     }
+
+    // Each cache-key field must invalidate the derived key. Switching back
+    // must reproduce the original signature.
+    const auto exact_signature = [&](const backends::RequestContext& context) {
+        auto prepared = backends::s3_provider().prepare_request(context);
+        return prepared ? header(*prepared, "Authorization") : std::string();
+    };
+    ProviderCredentials rotated_credentials = exact_credentials;
+    rotated_credentials.secret_access_key = "a-different-secret";
+    const backends::RequestContext rotated_context{
+        exact_config, exact_object, &rotated_credentials, "bytes=10-29",
+        {},           "\"etag\"",   1'440'938'160};
+    const backends::RequestContext next_day_context{
+        exact_config, exact_object, &exact_credentials,    "bytes=10-29",
+        {},           "\"etag\"",   1'440'938'160 + 86'400};
+    const backends::RequestContext other_region_context{
+        exact_config, exact_object, &exact_credentials, "bytes=10-29",
+        "eu-west-1",  "\"etag\"",   1'440'938'160};
+    const std::string reference = exact_request ? header(*exact_request, "Authorization") : "";
+    const std::string rotated = exact_signature(rotated_context);
+    const std::string next_day = exact_signature(next_day_context);
+    const std::string other_region = exact_signature(other_region_context);
+    OK(!rotated.empty() && rotated != reference);
+    OK(!next_day.empty() && next_day != reference &&
+       next_day.find("/20150831/") != std::string::npos);
+    OK(!other_region.empty() && other_region != reference &&
+       other_region.find("/eu-west-1/") != std::string::npos);
+    EQS(exact_signature(exact_context), reference);
+    EQS(exact_signature(rotated_context), rotated);
 
     karu::Locator dotted{must_resolve("s3://bucket.with.dots/key")};
     auto dotted_request = request_builder.prepare(dotted, 0, 1);
@@ -115,6 +149,65 @@ void test_s3_request() {
     OK(!unavailable_hmac);
     if (!unavailable_hmac)
         EQ(unavailable_hmac.error().status, KARU_ERR_CREDENTIALS);
+
+    SECTION("SHA-256 and HMAC-SHA256");
+    const auto hex = [](std::span<const unsigned char> bytes) {
+        static constexpr char digits[] = "0123456789abcdef";
+        std::string result;
+        for (const unsigned char byte : bytes) {
+            result.push_back(digits[byte >> 4]);
+            result.push_back(digits[byte & 0x0f]);
+        }
+        return result;
+    };
+    const auto as_bytes = [](std::string_view text) {
+        return std::span(reinterpret_cast<const unsigned char*>(text.data()), text.size());
+    };
+    const auto empty_digest = karu::backends::sha256("");
+    OK(empty_digest.has_value());
+    if (empty_digest)
+        EQS(hex(*empty_digest), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    const auto abc_digest = karu::backends::sha256("abc");
+    OK(abc_digest.has_value());
+    if (abc_digest)
+        EQS(hex(*abc_digest), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+
+    // RFC 4231 cases 1, 2, 6 and 7 include keys longer than SHA-256's block size.
+    const std::string short_key(20, '\x0b');
+    const std::string long_key(131, '\xaa');
+    struct HmacCase {
+        std::string_view key;
+        std::string_view data;
+        std::string_view expected;
+    };
+    const std::array hmac_cases{
+        HmacCase{short_key, "Hi There",
+                 "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"},
+        HmacCase{"Jefe", "what do ya want for nothing?",
+                 "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"},
+        HmacCase{long_key, "Test Using Larger Than Block-Size Key - Hash Key First",
+                 "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"},
+        HmacCase{long_key,
+                 "This is a test using a larger than block-size key and a larger than "
+                 "block-size data. The key needs to be hashed before being used by the HMAC "
+                 "algorithm.",
+                 "9b09ffa71b942fcb27635fbcd5b0e944bfdc63644f0713938a7f51535c3a35e2"},
+    };
+    for (const HmacCase& entry : hmac_cases) {
+        const auto mac = karu::backends::hmac_sha256(as_bytes(entry.key), entry.data);
+        OK(mac.has_value());
+        if (mac)
+            EQS(hex(*mac), entry.expected);
+    }
+    // Keys around the 64-byte block boundary, checked against OpenSSL's HMAC.
+    for (const std::size_t size : {0u, 1u, 63u, 64u, 65u, 200u}) {
+        const std::string key(size, 'k');
+        const auto fast = karu::backends::hmac_sha256(as_bytes(key), "boundary");
+        const auto openssl = karu::backends::hmac(EVP_sha256(), as_bytes(key), "boundary");
+        OK(fast.has_value() && openssl.has_value());
+        if (fast && openssl)
+            OK(std::ranges::equal(*fast, *openssl));
+    }
 
     SECTION("AWS credential process");
     karu::backends::AwsProfile slow_profile;
