@@ -44,10 +44,13 @@ struct karu_batch {
     void push(karu::Completion completion);
     void transfer_finished();
     [[nodiscard]] bool is_cancelled() const;
+    // An inherited batch has no workers in the child; its mutex may be locked.
+    [[nodiscard]] bool inherited() const;
     [[nodiscard]] std::string region_hint(std::string_view resource) const;
     void remember_region(std::string resource, std::string region);
 
     std::shared_ptr<karu::Engine> owner;
+    const int owner_process;
 
     mutable std::mutex mutex;
     std::condition_variable cv;

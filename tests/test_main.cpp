@@ -21,6 +21,7 @@ int main() {
     test_local_engine();
     test_windows_allocations_and_errors();
     test_batch_lifetimes_and_concurrency();
+    test_batch_across_fork();
     test_engine_shutdown();
     test_planner_scope();
     test_planner_property();

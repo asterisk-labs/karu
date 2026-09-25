@@ -1,9 +1,11 @@
 #include "batch.hpp"
 
+#include "../platform.hpp"
+
 #include <chrono>
 #include <utility>
 
-karu_batch::karu_batch() = default;
+karu_batch::karu_batch() : owner_process(karu::os::pid()) {}
 
 karu_status karu_batch::next(karu::Completion& out, int timeout_ms) {
     std::unique_lock lock(mutex);
@@ -43,6 +45,10 @@ void karu_batch::transfer_finished() {
 
 bool karu_batch::is_cancelled() const {
     return cancelled.load(std::memory_order_acquire);
+}
+
+bool karu_batch::inherited() const {
+    return owner_process != karu::os::pid();
 }
 
 std::string karu_batch::region_hint(std::string_view resource) const {

@@ -488,6 +488,11 @@ karu_status karu_batch_next(karu_batch* batch, karu_done* out, int timeout_ms) {
         karu::set_error("karu_batch_next: null argument");
         return KARU_ERR_INVALID;
     }
+    if (batch->inherited()) {
+        karu::set_error("karu_batch_next: the batch was submitted by another process; "
+                        "batches do not cross fork()");
+        return KARU_ERR_INVALID;
+    }
     try {
         karu::Completion completion;
         const karu_status status = batch->next(completion, timeout_ms);
@@ -508,6 +513,11 @@ karu_status karu_batch_next(karu_batch* batch, karu_done* out, int timeout_ms) {
 void karu_batch_free(karu_batch* batch) {
     if (batch == nullptr)
         return;
+    if (batch->inherited()) {
+        // The child has no workers to finish this batch and may inherit a
+        // locked mutex. Leave it allocated until the child exits.
+        return;
+    }
     std::unique_ptr<karu::BatchCore> owned(batch);
     const auto engine = owned->owner;
     if (engine)

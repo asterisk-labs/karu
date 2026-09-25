@@ -68,6 +68,7 @@ void test_renewable_callback_cache();
 void test_local_engine();
 void test_windows_allocations_and_errors();
 void test_batch_lifetimes_and_concurrency();
+void test_batch_across_fork();
 void test_engine_shutdown();
 void test_planner_scope();
 void test_planner_property();

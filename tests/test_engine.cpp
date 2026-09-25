@@ -10,6 +10,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -18,6 +19,20 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifndef _WIN32
+#include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
+#if defined(__SANITIZE_THREAD__)
+#define KARU_TEST_THREAD_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define KARU_TEST_THREAD_SANITIZER 1
+#endif
+#endif
 
 namespace karu::test {
 
@@ -273,6 +288,111 @@ void test_batch_lifetimes_and_concurrency() {
     karu_locator_free(object);
     karu_client_free(client);
     karu_config_free(config);
+}
+
+#ifndef _WIN32
+namespace {
+
+struct BlockingCredentials {
+    std::atomic<bool> entered{false};
+    std::atomic<bool> release{false};
+};
+
+karu_status blocking_credentials(void* user_data, karu_credentials_kind, const char*,
+                                 karu_credentials*) {
+    auto& state = *static_cast<BlockingCredentials*>(user_data);
+    state.entered.store(true, std::memory_order_release);
+    while (!state.release.load(std::memory_order_acquire))
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return KARU_ERR_CREDENTIALS;
+}
+
+} // namespace
+#endif
+
+void test_batch_across_fork() {
+    SECTION("batches across fork");
+#ifdef _WIN32
+    OK(true);
+#else
+    const auto data = make_fixture(64u << 10);
+    BlockingCredentials credentials;
+    karu_config* config = nullptr;
+    karu_client* client = nullptr;
+    karu_locator* remote = nullptr;
+    karu_locator* local = nullptr;
+    EQ(karu_config_create_empty(&config), KARU_OK);
+    EQ(karu_config_set_credentials_provider(config, KARU_CREDENTIALS_AWS, blocking_credentials,
+                                            &credentials, nullptr),
+       KARU_OK);
+    EQ(karu_client_create(config, &client), KARU_OK);
+    karu_config_free(config);
+    EQ(karu_resolve("s3://bucket/fork", &remote), KARU_OK);
+    EQ(karu_resolve(fixture_path.c_str(), &local), KARU_OK);
+
+    // Hold the transfer in a credential worker until after fork().
+    std::array<unsigned char, 16> remote_buffer{};
+    const karu_req pending{remote, 0, remote_buffer.size(), remote_buffer.data(), nullptr, nullptr};
+    karu_batch* batch = nullptr;
+    EQ(karu_client_submit(client, &pending, 1, &batch), KARU_OK);
+    const auto started = std::chrono::steady_clock::now();
+    while (!credentials.entered.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() - started < std::chrono::seconds(5)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    OK(credentials.entered.load(std::memory_order_acquire));
+
+    const pid_t child = ::fork();
+    if (child == 0) {
+        // Neither call may wait for the parent's credential worker.
+        ::alarm(10);
+        int code = 0;
+        karu_done done{};
+        if (karu_batch_next(batch, &done, -1) != KARU_ERR_INVALID)
+            code |= 1;
+        if (std::strstr(karu_last_error(), "fork") == nullptr)
+            code |= 2;
+        karu_batch_free(batch);
+#ifndef KARU_TEST_THREAD_SANITIZER
+        // TSan cannot create threads after fork; other builds check engine recreation.
+        std::array<unsigned char, 64> buffer{};
+        karu_req request{local, 1000, buffer.size(), buffer.data(), nullptr, nullptr};
+        if (karu_client_fetch(client, &request, 1) != KARU_OK ||
+            std::memcmp(buffer.data(), data.data() + 1000, buffer.size()) != 0) {
+            code |= 4;
+        }
+#endif
+        ::_exit(code);
+    }
+    OK(child > 0);
+    int status = 0;
+    pid_t waited = 0;
+    if (child > 0) {
+        const auto forked = std::chrono::steady_clock::now();
+        while ((waited = ::waitpid(child, &status, WNOHANG)) == 0 &&
+               std::chrono::steady_clock::now() - forked < std::chrono::seconds(20)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (waited == 0) {
+            ::kill(child, SIGKILL);
+            waited = ::waitpid(child, &status, 0);
+        }
+    }
+    EQ(waited, child);
+    OK(WIFEXITED(status));
+    EQ(WIFEXITED(status) ? WEXITSTATUS(status) : -1, 0);
+
+    // The parent still owns the batch and drains it normally.
+    credentials.release.store(true, std::memory_order_release);
+    karu_done done{};
+    EQ(karu_batch_next(batch, &done, -1), KARU_OK);
+    EQ(done.status, KARU_ERR_CREDENTIALS);
+    EQ(karu_batch_next(batch, &done, -1), KARU_END);
+    karu_batch_free(batch);
+    karu_locator_free(local);
+    karu_locator_free(remote);
+    karu_client_free(client);
+#endif
 }
 
 void test_engine_shutdown() {

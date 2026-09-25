@@ -195,10 +195,12 @@ KARU_API karu_status karu_client_submit_with(karu_client* client, const karu_req
                                              size_t count, const karu_submit_options* options,
                                              karu_batch** out_batch);
 // Returns KARU_OK with one completion. Multiple threads may consume the same
-// batch. KARU_END and KARU_TIMEOUT leave out unchanged.
+// batch. KARU_END and KARU_TIMEOUT leave out unchanged. A batch inherited
+// through fork() returns KARU_ERR_INVALID in the child.
 KARU_API karu_status karu_batch_next(karu_batch* batch, karu_done* out, int timeout_ms);
 // Cancels pending work and waits for active workers to release the buffers.
-// Do not call concurrently with karu_batch_next on the same batch.
+// Do not call concurrently with karu_batch_next on the same batch. In a forked
+// child, an inherited batch is left untouched and the call returns at once.
 KARU_API void karu_batch_free(karu_batch* batch);
 // Blocking batch read. Every request must provide a destination buffer. If the
 // call fails, the contents of every destination buffer are unspecified.
