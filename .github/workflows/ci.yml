@@ -90,13 +90,31 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
 
-      # Exercise requests against independent protocol implementations without
-      # paying for a second Linux configure and build.
+      # Reuse the Linux build for emulator tests.
+      - name: Restore MinIO
+        if: matrix.name == 'Linux GCC'
+        id: minio
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/karu-minio
+          key: karu-minio-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tests/emulators/build_minio.sh') }}
+
+      - name: Set up Go for MinIO
+        if: matrix.name == 'Linux GCC' && steps.minio.outputs.cache-hit != 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Build MinIO
+        if: matrix.name == 'Linux GCC' && steps.minio.outputs.cache-hit != 'true'
+        run: tests/emulators/build_minio.sh "$HOME/.cache/karu-minio"
+
       - name: Start storage emulators
         if: matrix.name == 'Linux GCC'
         env:
           KARU_TEST_REQUIRE_ALL_EMULATORS: 1
-        run: tests/emulators/up.sh
+        run: KARU_MINIO_BIN_DIR="$HOME/.cache/karu-minio" tests/emulators/up.sh
 
       - name: Read from the emulators
         if: matrix.name == 'Linux GCC'
@@ -107,7 +125,7 @@ jobs:
       - name: Emulator logs
         if: failure() && matrix.name == 'Linux GCC'
         run: |
-          docker logs karu-minio 2>&1 | tail -50 || true
+          tail -50 "${TMPDIR:-/tmp}/karu-emulators/minio.log" 2>/dev/null || true
           docker logs karu-gcs 2>&1 | tail -50 || true
           tail -50 "${TMPDIR:-/tmp}/karu-emulators/azurite.log" 2>/dev/null || true
 

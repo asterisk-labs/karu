@@ -1,19 +1,7 @@
 #!/bin/sh
-# Start the storage emulators the karu_emulators test reads from, and seed each
-# one with the same fixture object.
-#
-# These are independent implementations of the S3, Azure Blob and GCS protocols.
-# They verify our signatures and produce their own responses, which is the one
-# thing tests/credential_server.py structurally cannot do: that fixture accepts
-# whatever Karu sends.
-#
-# Usage:  tests/emulators/up.sh          start and seed
-#         tests/emulators/down.sh        stop and remove
-#
-# S3 and GCS need a container runtime. Azure does not: Azurite is an npm package
-# and runs anywhere Node does, so `up.sh azure` is useful on a laptop with no
-# Docker. Anything that fails to start is simply left down, and the test skips
-# the backends it cannot reach.
+# Start and seed the storage emulators.
+# Usage: tests/emulators/up.sh [all|s3|azure|gcs]
+# S3 needs build_minio.sh, Azure needs Node, and GCS needs Docker.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
@@ -25,8 +13,8 @@ AZURE_PORT="${KARU_TEST_AZURE_PORT:-10000}"
 GCS_PORT="${KARU_TEST_GCS_PORT:-4443}"
 S3_KEY_ID="${KARU_TEST_S3_KEY_ID:-karuemulator}"
 S3_SECRET="${KARU_TEST_S3_SECRET:-karuemulator-secret}"
-MINIO_IMAGE="quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
-MINIO_MC_IMAGE="quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z"
+# Avoid picking up Midnight Commander's mc from PATH.
+MINIO_BIN_DIR="${KARU_MINIO_BIN_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/karu-minio}"
 FAKE_GCS_IMAGE="fsouza/fake-gcs-server:1.56.1"
 AZURITE_PACKAGE="azurite@3.37.0"
 
@@ -37,8 +25,7 @@ wait_for() {
     url=$2
     attempt=0
     while [ "$attempt" -lt 60 ]; do
-        # Any HTTP answer means the service is listening; the status does not
-        # matter, because an unauthenticated probe is expected to be refused.
+        # Auth errors also confirm the service is listening.
         if curl -s -o /dev/null --max-time 2 "$url"; then
             echo "  $name listo"
             return 0
@@ -60,27 +47,29 @@ unavailable() {
 }
 
 start_s3() {
-    if ! have_docker; then
-        unavailable "S3: sin docker, omitido" || return 1
+    minio="$MINIO_BIN_DIR/minio"
+    mc="$MINIO_BIN_DIR/mc"
+    if [ ! -x "$minio" ] || [ ! -x "$mc" ]; then
+        unavailable "S3: falta MinIO en $MINIO_BIN_DIR; ejecuta tests/emulators/build_minio.sh" ||
+            return 1
         return 0
     fi
-    docker rm -f karu-minio >/dev/null 2>&1 || true
-    docker run -d --name karu-minio \
-        -p "127.0.0.1:$S3_PORT:9000" \
-        -e "MINIO_ROOT_USER=$S3_KEY_ID" \
-        -e "MINIO_ROOT_PASSWORD=$S3_SECRET" \
-        "$MINIO_IMAGE" server /data >/dev/null
+    if [ -f "$STATE/minio.pid" ]; then
+        kill "$(cat "$STATE/minio.pid")" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$STATE/minio" "$STATE/mc" && mkdir -p "$STATE/minio"
+    MINIO_ROOT_USER="$S3_KEY_ID" MINIO_ROOT_PASSWORD="$S3_SECRET" MINIO_BROWSER=off \
+        "$minio" server "$STATE/minio" --address "127.0.0.1:$S3_PORT" \
+        > "$STATE/minio.log" 2>&1 &
+    echo $! > "$STATE/minio.pid"
     wait_for "MinIO" "http://127.0.0.1:$S3_PORT/minio/health/live" || return 1
-    # Seed through MinIO's own client so no signing code of ours stands between
-    # the fixture and the server.
+    # Seed with mc to keep Karu's signing code out of fixture setup.
     python3 "$ROOT/fixture.py" > "$STATE/fixture.bin"
-    docker run --rm --network container:karu-minio -v "$STATE:/seed" --entrypoint /bin/sh \
-        "$MINIO_MC_IMAGE" -c "
-            mc alias set karu http://127.0.0.1:9000 $S3_KEY_ID $S3_SECRET >/dev/null &&
-            mc mb --ignore-existing karu/karu >/dev/null &&
-            mc cp /seed/fixture.bin karu/karu/fixture.bin >/dev/null &&
-            mc stat karu/karu/fixture.bin >/dev/null
-        " >/dev/null
+    export MC_CONFIG_DIR="$STATE/mc"
+    "$mc" alias set karu "http://127.0.0.1:$S3_PORT" "$S3_KEY_ID" "$S3_SECRET" >/dev/null &&
+        "$mc" mb --ignore-existing karu/karu >/dev/null &&
+        "$mc" cp "$STATE/fixture.bin" karu/karu/fixture.bin >/dev/null &&
+        "$mc" stat karu/karu/fixture.bin >/dev/null || return 1
     echo "  S3 sembrado"
 }
 
@@ -90,10 +79,7 @@ start_azure() {
         return 0
     fi
     mkdir -p "$STATE/azurite"
-    # azurite-blob is a binary inside the "azurite" package, not a package of
-    # its own, so npx has to be told which package provides it. Fetch it first,
-    # synchronously: on a cold cache the download alone outlasts the wait below,
-    # and the service would look like it had failed to start.
+    # Fetch before starting the readiness timeout; a cold npm download can exceed it.
     echo "  descargando Azurite si hace falta..."
     if ! npx --yes --package="$AZURITE_PACKAGE" azurite-blob version >/dev/null 2>&1; then
         unavailable "Azure: no se pudo obtener azurite, omitido" || return 1
@@ -114,8 +100,7 @@ start_gcs() {
         return 0
     fi
     docker rm -f karu-gcs >/dev/null 2>&1 || true
-    # fake-gcs-server serves whatever it finds under /data, one directory per
-    # bucket, so the fixture needs no upload API and no credentials.
+    # fake-gcs-server maps /data/<bucket>/<object> to stored objects.
     rm -rf "$STATE/gcs" && mkdir -p "$STATE/gcs/karu"
     python3 "$ROOT/fixture.py" > "$STATE/gcs/karu/fixture.bin"
     docker run -d --name karu-gcs \

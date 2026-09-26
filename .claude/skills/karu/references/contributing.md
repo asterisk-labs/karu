@@ -141,8 +141,9 @@ ctest --test-dir build -R karu_emulators --output-on-failure
 tests/emulators/down.sh
 ```
 
-- S3 and Source use MinIO, GCS uses fake-gcs-server (both need a container runtime), and
-  Azure uses Azurite (Node only). Versions are pinned in `up.sh`.
+- S3 and Source use MinIO: run `tests/emulators/build_minio.sh` once with Go 1.24+.
+  GCS uses fake-gcs-server (Docker); Azure uses Azurite (Node).
+  Versions are pinned in the scripts. CI caches the MinIO binaries.
 - Every emulator serves the same 64 KiB `karu/fixture.bin`. MinIO is seeded with its own
   `mc`, GCS by mounting a directory, and Azure by `seed_azure.py`, an independent Shared
   Key signer.
