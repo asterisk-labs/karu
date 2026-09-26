@@ -2,7 +2,7 @@
 
 The stable boundary is `include/karu/karu.h`; its implementation is `src/karu.cpp`.
 The examples below compile with `-std=c11 -Wall -Wextra -Wpedantic -Werror` against an
-installed karu 0.2.3 and ran on local files, `tests/http_server.py` and `hf://`.
+installed karu 0.3.0 and ran on local files, `tests/http_server.py` and `hf://`.
 
 ## Contents
 

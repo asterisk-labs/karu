@@ -3,7 +3,7 @@
 Sources: `src/config.cpp`, `src/config_options.hpp`, `src/request_builder.cpp`,
 `src/backends/credentials.cpp` (`add_configured_headers`). `CONFIGURATION.md` at the
 repository root is the complete option table and is installed with the package; this
-file explains how the options combine. Messages were captured from karu 0.2.3.
+file explains how the options combine. Messages were captured from karu 0.3.0.
 
 ## Contents
 

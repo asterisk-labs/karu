@@ -4,7 +4,7 @@
 RAII handles, spans, `std::optional` planner overrides and `std::expected` results. It
 does not create another engine: every call reaches the same client, batch and completion
 machinery described in `c-api.md`. The example below compiles with
-`-Wall -Wextra -Wpedantic -Werror` and ran against karu 0.2.3 on local files, `hf://`
+`-Wall -Wextra -Wpedantic -Werror` and ran against karu 0.3.0 on local files, `hf://`
 and a public `s3://` bucket.
 
 ## Contents

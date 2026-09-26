@@ -2,7 +2,7 @@
 
 Sources: `src/uri.cpp`, `src/uri.hpp`, `src/config.cpp` (`canonical_vsi_path`,
 `path_prefix_matches`), `src/backends/url.cpp`, `tests/test_uri_config.cpp`. The
-canonical forms and messages below were printed by `karu_resolve` in karu 0.2.3.
+canonical forms and messages below were printed by `karu_resolve` in karu 0.3.0.
 
 ## Contents
 

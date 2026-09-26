@@ -1,6 +1,6 @@
 # Debugging
 
-Messages below were captured from karu 0.2.3 (macOS, libcurl 8.7.1) with the programs in
+Messages below were captured from karu 0.3.0 (macOS, libcurl 8.7.1) with the programs in
 `c-api.md`, the loopback fixture `tests/http_server.py`, and real reads from Hugging Face
 and a public S3 bucket. Paths, ports and libcurl wording vary between machines; match on
 the stable part of each message.
