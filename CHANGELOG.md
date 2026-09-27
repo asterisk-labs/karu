@@ -4,13 +4,6 @@ Notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
-### Fixed
-
-- Anonymous and SAS Azure requests send `x-ms-version: 2023-11-03`, like signed ones.
-  Azure served anonymous reads as version 2009-09-19, whose unquoted ETags
-  `karu_client_stat` and `karu_client_read_ends` dropped, so later reads could not be
-  pinned with `if_match`. A SAS still authorizes with its own `sv`.
-
 ## [0.4.0] - 2026-09-27
 
 ### Added
@@ -18,6 +11,13 @@ Notable user-visible changes are recorded here.
 - `karu_client_read_ends` / `Client::read_ends`: the first and last bytes of an object
   with its size and ETag in one round trip. The tail uses a suffix range, except on
   Azure, where it follows the head.
+
+### Fixed
+
+- Anonymous and SAS Azure requests send `x-ms-version: 2023-11-03`, like signed ones.
+  Azure served anonymous reads as version 2009-09-19, whose unquoted ETags
+  `karu_client_stat` dropped, so later reads could not be pinned with `if_match`. A SAS
+  still authorizes with its own `sv`.
 
 ## [0.3.0] - 2026-09-26
 
