@@ -4,87 +4,50 @@
 
 [![CI](https://github.com/asterisk-labs/karu/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/asterisk-labs/karu/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/asterisk-labs/karu/graph/badge.svg?branch=main)](https://codecov.io/gh/asterisk-labs/karu)
+[![Release](https://img.shields.io/github/v/release/asterisk-labs/karu?color=4E04EB)](https://github.com/asterisk-labs/karu/releases)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-4E04EB.svg)
-![Linux, macOS, and Windows](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-4E04EB.svg)
 [![MIT license](https://img.shields.io/badge/license-MIT-2b8a3e.svg)](#license)
 
-Karu is a C++23 library for reading exact byte ranges from local files, HTTP,
-S3, Google Cloud Storage, Azure Storage, Hugging Face, and
-[Source Cooperative](https://source.coop). It accepts URI and VSI paths while
-keeping reads positional and stateless.
+Batched byte-range reads from local files, HTTP, S3, GCS, Azure, Hugging Face and
+[Source Cooperative](https://source.coop).
 
-Karu's VSI path syntax is strongly inspired by GDAL VSI.
+## Features
+
+- **URIs or GDAL VSI paths** for every backend, such as `s3://bucket/key` or `/vsis3/bucket/key`.
+- **Batched reads** that merge nearby ranges, fetch in parallel and complete one by one.
+- **Stateless reads** that name their object, offset and buffer, so they can be reordered and retried.
+- **Version pinning** with `stat` and `if_match`, so a changed object fails instead of mixing versions.
+- **Retries and resumable transfers** within a per-request deadline.
+- **Credential discovery** for every backend, plus custom providers.
+- **Per-path configuration**, for example anonymous for one bucket and a profile for another.
 
 ## Quick start
-
-This reads the first 4 KiB of a public
-[Rumi fixture on Hugging Face](https://huggingface.co/datasets/asterisk-labs/rumi-api-fixtures):
 
 ```cpp
 #include <karu/karu.hpp>
 
-auto config = karu::Config::from_environment().value();
-auto client = karu::Client::create(config).value();
+auto client = karu::Client::create(karu::Config::from_environment().value()).value();
 auto object = karu::Object::parse(
-    "hf://datasets/asterisk-labs/rumi-api-fixtures/data/s2-00-tile.rumi"
-).value();
-
+    "hf://datasets/asterisk-labs/rumi-api-fixtures/data/s2-00-tile.rumi").value();
 auto bytes = client.read(object, 0, 4096).value();
 ```
 
-For private Hugging Face repositories, run `hf auth login`. Karu reads the
-token created by the Hugging Face CLI.
+## Installation
 
-## Paths
+Prebuilt packages for Linux, macOS and Windows are on the
+[releases page](https://github.com/asterisk-labs/karu/releases), and CMake finds them
+with `find_package`.
 
-| Backend | URI | VSI path |
-|---|---|---|
-| HTTP | `https://host/object` | `/vsicurl/https://host/object` |
-| AWS S3 | `s3://bucket/key` | `/vsis3/bucket/key` |
-| Google Cloud Storage | `gs://bucket/key` | `/vsigs/bucket/key` |
-| Azure Blob | `az://container/key` | `/vsiaz/container/key` |
-| Azure Data Lake | `abfs://container/key` | `/vsiadls/container/key` |
-| Hugging Face | `hf://datasets/org/repo/path` | `/vsihf/datasets/org/repo/path` |
-| Source Cooperative | `source://account/product/key` | `/vsisource/account/product/key` |
-|---|---|---|
-
-## Configuration
-
-Options can apply to the whole client or to the longest matching path prefix:
-
-```cpp
-auto config = karu::Config::from_environment().value();
-config.set("AWS_REGION", "us-west-2").value();
-config.set_path("/vsis3/public/", "AWS_NO_SIGN_REQUEST", "YES").value();
-config.set_path("/vsis3/private/", "AWS_PROFILE", "research").value();
+```cmake
+find_package(karu CONFIG REQUIRED)
+target_link_libraries(app PRIVATE karu::karu)
 ```
 
-Karu supports standard credential sources for AWS, GCS, Azure, Hugging Face,
-and Source Cooperative. See [`CONFIGURATION.md`](CONFIGURATION.md) for the
-complete option and credential reference.
+## Documentation
 
-## Build
+[Guide](https://asterisk.coop/karu/) · [Configuration](CONFIGURATION.md) · [Changelog](CHANGELOG.md)
 
-Karu requires CMake 3.21, a C++23 compiler, libcurl 7.83 or newer, OpenSSL 3,
-and threads.
-
-```sh
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DKARU_BUILD_TESTS=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-## AI agent skill
-
-Install the [Karu skill](https://github.com/asterisk-labs/karu/blob/main/.claude/skills/karu/SKILL.md)
-so coding agents know its path grammar, batch semantics, configuration and credential
-rules.
-
-```sh
-npx skills add asterisk-labs/karu
-```
+Coding agents can install the Karu skill with `npx skills add asterisk-labs/karu`.
 
 ## License
 
