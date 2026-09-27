@@ -1,6 +1,7 @@
 #include "engine.hpp"
 
 #include "../backends/contract.hpp"
+#include "../backends/credentials.hpp"
 #include "../error.hpp"
 #include "../platform.hpp"
 #include "../text.hpp"
@@ -177,6 +178,8 @@ Engine::Engine(ConfigSnapshot config)
     }
     require_shared_data(share_.get(), CURL_LOCK_DATA_DNS);
     require_shared_data(share_.get(), CURL_LOCK_DATA_SSL_SESSION);
+    // Check the bundle file before starting I/O threads.
+    static_cast<void>(backends::running_curl_ca_support());
     size_pool_.reserve(static_cast<std::size_t>(options_.concurrency));
 
     // Split the client-wide limit, with at least one transfer slot per loop.

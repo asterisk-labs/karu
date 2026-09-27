@@ -36,6 +36,18 @@ using IniFile = std::unordered_map<std::string, IniSection>;
 [[nodiscard]] std::optional<std::int64_t> json_integer(std::string_view json,
                                                        std::string_view name);
 
+// How the running libcurl finds CA certificates.
+struct CurlCaSupport {
+    unsigned version = 0;
+    std::string_view tls;
+    bool default_ca_path = false;
+    bool default_bundle = false;
+};
+
+[[nodiscard]] const CurlCaSupport& running_curl_ca_support();
+[[nodiscard]] bool clear_default_ca_path(const HttpRequestOptions& options,
+                                         const CurlCaSupport& curl) noexcept;
+
 [[nodiscard]] std::expected<HttpResponse, RequestError>
 credential_request(std::string_view method, const std::string& url, std::string_view body,
                    const std::vector<Header>& headers, long timeout_seconds = 5,

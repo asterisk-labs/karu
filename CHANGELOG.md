@@ -4,6 +4,11 @@ Notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Changed
+
+- With OpenSSL and libcurl 7.87+, use the CA bundle without the default CA
+  directory so libcurl can cache it. Set `KARU_HTTP_CA_PATH` to keep using a directory.
+
 ## [0.4.0] - 2026-09-27
 
 ### Added

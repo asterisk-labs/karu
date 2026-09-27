@@ -1,3 +1,4 @@
+#include "backends/credentials.hpp"
 #include "karu/karu.h"
 #include "test_support.hpp"
 
@@ -166,6 +167,44 @@ void test_config_precedence() {
         EQS(overridden.ca_path, "/custom/certificates");
     }
 #endif
+
+    // Model a build with both a default CA bundle and a CA directory.
+    {
+        const backends::CurlCaSupport debian{.version = 0x080500,
+                                             .tls = "OpenSSL/3.0.13",
+                                             .default_ca_path = true,
+                                             .default_bundle = true};
+        HttpRequestOptions bundle;
+        bundle.ca_bundle = "/etc/ssl/certs/ca-certificates.crt";
+        OK(backends::clear_default_ca_path(bundle, debian));
+        OK(backends::clear_default_ca_path(HttpRequestOptions{}, debian));
+
+        HttpRequestOptions directory = bundle;
+        directory.ca_path = "/etc/ssl/certs";
+        OK(!backends::clear_default_ca_path(directory, debian));
+
+        // Without a bundle the directory is the only trust source.
+        backends::CurlCaSupport no_bundle = debian;
+        no_bundle.default_bundle = false;
+        OK(!backends::clear_default_ca_path(HttpRequestOptions{}, no_bundle));
+        OK(backends::clear_default_ca_path(bundle, no_bundle));
+
+        backends::CurlCaSupport no_directory = debian;
+        no_directory.default_ca_path = false;
+        OK(!backends::clear_default_ca_path(bundle, no_directory));
+
+        backends::CurlCaSupport before_cache = debian;
+        before_cache.version = 0x075600;
+        OK(!backends::clear_default_ca_path(bundle, before_cache));
+
+        // Leave other TLS backends unchanged.
+        for (const char* tls : {"Schannel", "SecureTransport (LibreSSL/3.3.6)", "GnuTLS/3.8.3",
+                                "(OpenSSL/3.0.13) Schannel"}) {
+            backends::CurlCaSupport other = debian;
+            other.tls = tls;
+            OK(!backends::clear_default_ca_path(bundle, other));
+        }
+    }
 
     // A config is snapshotted by the client, so later builder mutations do
     // not mutate a running transport.

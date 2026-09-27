@@ -1,5 +1,6 @@
 #include "transport.hpp"
 
+#include "../backends/credentials.hpp"
 #include "../text.hpp"
 #include "http_response.hpp"
 
@@ -496,6 +497,10 @@ std::expected<void, std::string> apply_http_options(CURL* easy, const HttpReques
         return result;
     if (auto result = apply_string(CURLOPT_CAPATH, options.ca_path); !result)
         return result;
+    if (backends::clear_default_ca_path(options, backends::running_curl_ca_support())) {
+        if (auto result = set_option(easy, CURLOPT_CAPATH, static_cast<char*>(nullptr)); !result)
+            return result;
+    }
     if (auto result = apply_string(CURLOPT_PROXY, options.proxy); !result)
         return result;
     if (auto result = apply_string(CURLOPT_PROXYUSERPWD, options.proxy_user_password); !result)

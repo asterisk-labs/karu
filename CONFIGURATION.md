@@ -248,6 +248,13 @@ On Linux and macOS, Karu uses the system CA bundle available at runtime when
 none of the CA options above is set. This keeps binaries from retaining the
 build machine's certificate path.
 
+With OpenSSL and libcurl 7.87+, Karu clears the default CA directory when a
+bundle is available. This lets libcurl cache the bundle. Set `KARU_HTTP_CA_PATH`
+to use a directory too; other TLS backends keep their defaults.
+
+libcurl caches the certificates for up to 24 hours by default. Changes to the
+bundle file may not take effect until the cache expires.
+
 ## Custom providers
 
 `karu_config_set_credentials_provider()` installs one callback for AWS, GCS,

@@ -157,6 +157,12 @@ Tuning notes:
   `/etc/pki/tls/certs/ca-bundle.crt`, `/etc/ssl/ca-bundle.pem`, `/etc/pki/tls/cacert.pem`,
   `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`, `/etc/ssl/cert.pem`; on macOS
   `/etc/ssl/cert.pem`. Elsewhere, and for empty configurations, libcurl's default applies.
+- With OpenSSL and libcurl 7.87+, Karu clears the default CA directory when a
+  bundle is available and `KARU_HTTP_CA_PATH` is unset. This allows CA caching;
+  other TLS backends are unchanged. See `clear_default_ca_path` in
+  `src/backends/credentials.cpp`.
+- The cache lasts up to 24 hours by default, so bundle updates may not take effect
+  immediately.
 - Credential endpoints (STS, OAuth, metadata services) use the same CA, proxy,
   User-Agent and HTTP version settings.
 
