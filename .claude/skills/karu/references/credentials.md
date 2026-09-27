@@ -183,9 +183,12 @@ Credential chain (`load_azure_credentials`), first match wins:
 - Managed identity selectors, at most one: `AZURE_IMDS_OBJECT_ID`, `AZURE_IMDS_CLIENT_ID`
   (defaults to `AZURE_CLIENT_ID`), `AZURE_IMDS_MSI_RES_ID`.
 - Request authentication, in this order: `AZURE_NO_SIGN_REQUEST=YES`, a SAS appended to the
-  query, a bearer token with `x-ms-version: 2023-11-03`, then Shared Key with
-  `AZURE_STORAGE_ACCOUNT` and the base64 `AZURE_STORAGE_ACCESS_KEY` (the signature covers
-  `If-Match`, `Range`, `x-ms-date` and `x-ms-version`).
+  query, a bearer token, then Shared Key with `AZURE_STORAGE_ACCOUNT` and the base64
+  `AZURE_STORAGE_ACCESS_KEY` (the signature covers `If-Match`, `Range`, `x-ms-date` and
+  `x-ms-version`).
+- Every request sends `x-ms-version: 2023-11-03`. Without it Azure serves anonymous reads
+  as 2009-09-19, whose ETags lack quotes, and SAS reads as the token's `sv`. A SAS keeps
+  its own `sv`, which only decides how Azure checks the token.
 - Endpoint: `AZURE_STORAGE_ENDPOINT`, else the connection string's `BlobEndpoint` or
   `DfsEndpoint`, else `https://<account>.blob.<suffix>` (`.dfs.` for `abfs://` and
   `/vsiadls/`), with suffix `core.windows.net` by default. Without an account or endpoint

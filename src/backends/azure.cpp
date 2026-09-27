@@ -13,6 +13,11 @@
 namespace karu::backends {
 namespace {
 
+// Sent on every request. Without it Azure serves anonymous requests as 2009-09-19,
+// whose unquoted ETags cannot pin reads, and SAS requests as the token's sv. The sv
+// still decides how Azure checks the SAS itself.
+constexpr std::string_view SERVICE_VERSION = "2023-11-03";
+
 constexpr std::array<std::string_view, 18> CREDENTIAL_OPTIONS{"AZURE_STORAGE_CONNECTION_STRING",
                                                               "AZURE_STORAGE_ACCOUNT",
                                                               "AZURE_STORAGE_ACCESS_KEY",
@@ -139,29 +144,23 @@ prepare_azure(const ConfigSnapshot& config, const Resolved& object,
             RequestError{KARU_ERR_CONFIG, "AZURE_STORAGE_ENDPOINT cannot contain a query"});
     std::string url = append_object(endpoint, object.container, object.key);
 
-    if (option_is_true(config.option(path, "AZURE_NO_SIGN_REQUEST", "NO"))) {
-        PreparedRequest request{std::move(url), {}};
-        if (!if_match.empty())
-            request.headers.emplace_back("If-Match", if_match);
-        return request;
-    }
+    std::vector<Header> headers;
+    if (!if_match.empty())
+        headers.emplace_back("If-Match", if_match);
+    headers.emplace_back("x-ms-version", SERVICE_VERSION);
+    if (option_is_true(config.option(path, "AZURE_NO_SIGN_REQUEST", "NO")))
+        return PreparedRequest{std::move(url), std::move(headers)};
     if (!credentials.sas_token.empty()) {
         std::string sas = credentials.sas_token;
         while (!sas.empty() && (sas.front() == '?' || sas.front() == '&'))
             sas.erase(sas.begin());
         url += (url.find('?') == std::string::npos ? "?" : "&") + sas;
-        PreparedRequest request{std::move(url), {}};
+        PreparedRequest request{std::move(url), std::move(headers)};
         request.http.follow_redirects = false;
-        if (!if_match.empty())
-            request.headers.emplace_back("If-Match", if_match);
         return request;
     }
-    std::vector<Header> headers;
-    if (!if_match.empty())
-        headers.emplace_back("If-Match", if_match);
     if (!credentials.bearer_token.empty()) {
         headers.emplace_back("Authorization", "Bearer " + credentials.bearer_token);
-        headers.emplace_back("x-ms-version", "2023-11-03");
         PreparedRequest request{std::move(url), std::move(headers)};
         request.http.follow_redirects = false;
         return request;
@@ -177,7 +176,8 @@ prepare_azure(const ConfigSnapshot& config, const Resolved& object,
     if (!decoded_key)
         return std::unexpected(decoded_key.error());
     const std::string date = rfc7231_date(signing_time);
-    const std::string canonical_headers = "x-ms-date:" + date + "\nx-ms-version:2023-11-03\n";
+    const std::string canonical_headers =
+        "x-ms-date:" + date + "\nx-ms-version:" + std::string(SERVICE_VERSION) + "\n";
     auto url_parts = split_url(url);
     if (!url_parts)
         return std::unexpected(url_parts.error());
@@ -194,7 +194,6 @@ prepare_azure(const ConfigSnapshot& config, const Resolved& object,
     if (!signature)
         return std::unexpected(signature.error());
     headers.emplace_back("x-ms-date", date);
-    headers.emplace_back("x-ms-version", "2023-11-03");
     headers.emplace_back("Authorization",
                          "SharedKey " + credentials.account_name + ":" + base64(*signature));
     PreparedRequest request{std::move(url), std::move(headers)};

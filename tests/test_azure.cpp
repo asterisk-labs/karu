@@ -34,6 +34,7 @@ void test_azure_request() {
     OK(exact_request.has_value());
     if (exact_request) {
         EQS(header(*exact_request, "x-ms-date"), "Sun, 30 Aug 2015 12:36:00 GMT");
+        EQS(header(*exact_request, "x-ms-version"), "2023-11-03");
         EQS(header(*exact_request, "Authorization"),
             "SharedKey account:ATPHSo27zQ9aJ7DUXth+r77/Cii4diPaL3gbBGTR2JE=");
     }
@@ -45,11 +46,15 @@ void test_azure_request() {
         "EndpointSuffix=example.test"));
     OK(anonymous_azure_builder.set("AZURE_NO_SIGN_REQUEST", "YES"));
     karu::RequestBuilder anonymous_azure(must_freeze(anonymous_azure_builder));
-    auto anonymous_request = anonymous_azure.prepare(azure, 0, 1);
+    // Without x-ms-version Azure answers anonymous reads as version 2009-09-19,
+    // whose unquoted ETag cannot pin later reads with If-Match.
+    auto anonymous_request = anonymous_azure.prepare(azure, 0, 1, {}, "\"etag\"");
     OK(anonymous_request.has_value());
     if (anonymous_request) {
         EQS(anonymous_request->url, "http://dev.blob.example.test/container/a%20b");
-        OK(anonymous_request->headers.empty());
+        EQ(anonymous_request->headers.size(), 2);
+        EQS(header(*anonymous_request, "If-Match"), "\"etag\"");
+        EQS(header(*anonymous_request, "x-ms-version"), "2023-11-03");
     }
 
     karu::ConfigBuilder ambiguous_identity(false);
@@ -120,7 +125,8 @@ void test_azure_request() {
         EQ(queried.error().status, KARU_ERR_CONFIG);
 
     // A SAS token is pasted onto the URL, and the leading separators callers
-    // copy out of the portal have to be stripped rather than doubled.
+    // copy out of the portal have to be stripped rather than doubled. The
+    // token keeps its own sv, which only decides how Azure checks the SAS.
     for (const char* sas : {"sv=2021&sig=abc", "?sv=2021&sig=abc", "&sv=2021&sig=abc"}) {
         karu::ConfigBuilder sas_builder(false);
         OK(sas_builder.set("AZURE_STORAGE_ACCOUNT", "account"));
@@ -131,7 +137,8 @@ void test_azure_request() {
         if (sas_request) {
             EQS(sas_request->url,
                 "https://account.blob.core.windows.net/container/a%20b?sv=2021&sig=abc");
-            OK(sas_request->headers.empty());
+            EQ(sas_request->headers.size(), 1);
+            EQS(header(*sas_request, "x-ms-version"), "2023-11-03");
             OK(!sas_request->http.follow_redirects);
         }
     }
