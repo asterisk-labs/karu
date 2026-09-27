@@ -532,7 +532,7 @@ struct ProbeState {
     bool version_changed = false;
     bool redirect_blocked = false;
     int retry_after = 0;
-    std::string response_region;
+    std::string response_region{};
     std::string etag{};
     EncodingHeaders encoding{};
     std::array<char, kErrorBodyCapacity> error_body{};
