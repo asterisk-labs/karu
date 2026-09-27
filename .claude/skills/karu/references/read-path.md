@@ -3,7 +3,7 @@
 Sources: `src/runtime/planner.cpp`, `src/runtime/engine.cpp`, `src/runtime/transport.cpp`,
 `src/runtime/http_response.cpp`, `src/runtime/batch.cpp`, `src/client.hpp`,
 `benchmarks/coalescing.cpp`, `docs/how-karu-reads.html` (the long-form guide). Timings
-and benchmark rows were measured on karu 0.3.0.
+and benchmark rows were measured on karu 0.4.0.
 
 ## Contents
 

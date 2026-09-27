@@ -17,7 +17,7 @@ merged and retried. Karu is read only and format free: it resolves addresses, re
 sizes and moves bytes. It never lists, writes, parses formats or caches object data.
 A format layer such as rumi decides which ranges matter and decodes what comes back.
 
-This skill describes **karu 0.3.0** (C API version 1). Check `karu_version_string()` or
+This skill describes **karu 0.4.0** (C API version 1). Check `karu_version_string()` or
 the `VERSION` file. If they differ, trust the source, `CHANGELOG.md` and
 `CONFIGURATION.md` over this file.
 
@@ -136,7 +136,7 @@ rebase offsets to zero and reject reads that leave the window.
 ## Reference map
 
 Read only the reference relevant to the current task. Each one names its source files
-in the repository and is scoped to karu 0.3.0.
+in the repository and is scoped to karu 0.4.0.
 
 | Task | Read |
 | --- | --- |
