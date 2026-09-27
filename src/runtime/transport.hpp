@@ -7,9 +7,11 @@
 #include "curl_types.hpp"
 #include "transfer.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <curl/curl.h>
 #include <expected>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -54,6 +56,32 @@ struct ObjectInfo {
                                                              CURLSH* share,
                                                              RequestBuilder& request_builder,
                                                              const ClientOptions& options);
+
+// Absolute offsets. A suffix asks for the last `length` bytes of the object.
+struct ByteRange {
+    std::uint64_t first = 0;
+    std::uint64_t length = 0;
+    bool suffix = false;
+};
+
+struct RangeReply {
+    std::uint64_t total = 0;
+    // The bytes stored at the destination start at this offset.
+    std::uint64_t first = 0;
+    std::uint64_t got = 0;
+    // Strong entity tag with its quotes, or empty.
+    std::string etag;
+    // The server ignored the suffix of a longer object and nothing was stored.
+    bool suffix_ignored = false;
+};
+
+// One ranged GET on the calling thread, with the retries, corrections and
+// deadline of a read. The destination holds range.length bytes. An absolute
+// range may reach past the object, and a suffix may be longer than it.
+[[nodiscard]] std::expected<RangeReply, Failure>
+get_range(const Locator& locator, CURL* easy, CURLSH* share, RequestBuilder& request_builder,
+          const ClientOptions& options, const ByteRange& range, std::span<std::byte> destination,
+          std::string_view if_match = {});
 
 } // namespace karu::transport
 

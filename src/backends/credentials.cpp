@@ -379,6 +379,10 @@ std::string range_header(std::uint64_t first, std::uint64_t length) {
     return concat("bytes=", first, "-", first + length - 1);
 }
 
+std::string suffix_range_header(std::uint64_t length) {
+    return concat("bytes=-", length);
+}
+
 std::expected<ProviderCredentials, RequestError>
 copy_callback_credentials(const std::shared_ptr<CredentialCallback>& callback,
                           karu_credentials_kind kind, std::string_view path) {

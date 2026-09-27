@@ -148,6 +148,15 @@ or size call, not at client creation.
   `stat` probes bounded remote windows too.
 - Initialize `info` with `KARU_OBJECT_INFO_INIT`. Fields beyond `struct_size`
   are left untouched.
+- `karu_client_read_ends(client, locator, head, head_length, tail, tail_length, &info)`
+  reads the first `head_length` and the last `tail_length` visible bytes and fills `info`
+  as `stat` does. Each buffer receives `min(length, info.size)` bytes, so on a short
+  object the two overlap. The head and a suffix range for the tail (`bytes=-N`) go out
+  together, the head from a helper thread. Azure ignores suffix ranges, so there the tail
+  follows the head by offset with `If-Match`; so does any server that answers the suffix
+  with a longer whole object. Bounded windows ask for both ends by offset, and a tail
+  inside the head needs no request. Sizes or strong ETags that disagree return
+  `KARU_ERR_PRECONDITION`. A zero length takes `NULL`; with both zero the call is `stat`.
 
 ## 6. Requests, batches and completions
 
@@ -462,10 +471,12 @@ $ python3 tests/http_server.py ./provider
 - One engine per client: `KARU_IO_THREADS` threads each driving a libcurl multi handle
   (4 by default), 4 credential workers and 4 file workers. They start on first use and
   stop when the client and all its batches are freed.
-- `karu_client_size` and `karu_client_stat` run the entire probe on the calling thread, including native
-  discovery, a custom credential callback and any `credential_process`. Submitted cloud
-  reads use credential workers instead. There is no background refresh: credentials are
-  renewed lazily by the first request that needs them.
+- `karu_client_size` and `karu_client_stat` run the entire probe on the calling thread,
+  including native discovery, a custom credential callback and any `credential_process`.
+  `karu_client_read_ends` does the same but reads the head from a helper thread, which
+  may be the one that resolves credentials. Submitted cloud reads use credential workers
+  instead. There is no background refresh: credentials are renewed lazily by the first
+  request that needs them.
 - `karu_client_submit`, `karu_client_fetch` and `karu_client_size` may be called from
   many threads on one client.
 - `fork()`: a client used in a child notices the new process id, abandons the inherited

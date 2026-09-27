@@ -300,6 +300,21 @@ class Client {
         return ObjectInfo{.size = info.size, .etag = info.etag};
     }
 
+    // The first head.size() and the last tail.size() bytes with the size and
+    // ETag; see karu_client_read_ends. Each span receives
+    // min(span.size(), size) bytes.
+    [[nodiscard]] Result<ObjectInfo> read_ends(const Object& object, std::span<std::byte> head,
+                                               std::span<std::byte> tail) const {
+        karu_object_info info{};
+        info.struct_size = sizeof(info);
+        const karu_status status =
+            karu_client_read_ends(handle_.get(), object.native_handle(), head.data(), head.size(),
+                                  tail.data(), tail.size(), &info);
+        if (status != KARU_OK)
+            return std::unexpected(current_error(status));
+        return ObjectInfo{.size = info.size, .etag = info.etag};
+    }
+
     [[nodiscard]] Result<void> read_into(const Object& object, std::uint64_t offset,
                                          std::span<std::byte> destination,
                                          std::string_view if_match = {}) const {

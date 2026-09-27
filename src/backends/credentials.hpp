@@ -50,6 +50,7 @@ oauth_token(const std::string& url, const std::string& form,
 [[nodiscard]] std::expected<IniFile, RequestError> read_ini(const std::string& path,
                                                             std::string_view purpose);
 [[nodiscard]] std::string range_header(std::uint64_t first, std::uint64_t length);
+[[nodiscard]] std::string suffix_range_header(std::uint64_t length);
 
 [[nodiscard]] std::expected<ProviderCredentials, RequestError>
 copy_callback_credentials(const std::shared_ptr<CredentialCallback>& callback,

@@ -65,6 +65,20 @@ int drain_success(karu_batch* batch, const char* message) {
     }
 }
 
+karu_status read_ends(karu_client* client, const std::string& uri, std::span<unsigned char> head,
+                      std::span<unsigned char> tail, karu_object_info& info) {
+    karu_locator* locator = nullptr;
+    const karu_status resolved = karu_resolve(uri.c_str(), &locator);
+    if (resolved != KARU_OK)
+        return resolved;
+    info = karu_object_info{};
+    info.struct_size = sizeof(info);
+    const karu_status status = karu_client_read_ends(client, locator, head.data(), head.size(),
+                                                     tail.data(), tail.size(), &info);
+    karu_locator_free(locator);
+    return status;
+}
+
 struct RefreshState {
     karu_credentials_kind kind;
     const char* cache_prefix;
@@ -515,6 +529,16 @@ int main(int argc, char** argv) {
               "backend size probe");
         karu_locator_free(backend_object);
 
+        std::array<unsigned char, 100> backend_head{};
+        std::array<unsigned char, 100> backend_tail{};
+        karu_object_info backend_info{};
+        check(read_ends(backend_client, root + "/ends/azure", backend_head, backend_tail,
+                        backend_info) == KARU_OK &&
+                  backend_info.size == 4096 && std::string(backend_info.etag) == "\"e1\"",
+              "backend reads both ends");
+        check_bytes(backend_head, 0, "backend head contents");
+        check_bytes(backend_tail, 3996, "backend tail contents");
+
         check(fetch(backend_client, root + "/missing", 0, backend_bytes) == KARU_ERR_NOT_FOUND,
               "backend 404 mapping");
         check(fetch(backend_client, root + "/precondition", 0, backend_bytes, "\"wrong\"") ==
@@ -524,6 +548,84 @@ int main(int argc, char** argv) {
               "backend matching precondition");
         karu_client_free(backend_client);
     }
+
+    const auto ends_verdict = [&](const std::string& path) {
+        std::array<unsigned char, 1> verdict{};
+        return fetch(client, base + "/ends-verdict" + path, 0, verdict) == KARU_OK &&
+               verdict[0] == 1;
+    };
+    check(ends_verdict("/container/ends/azure"), "Azure reads the tail by offset after the head");
+
+    karu_object_info ends{};
+    std::array<unsigned char, 100> head{};
+    std::array<unsigned char, 100> tail{};
+    check(read_ends(client, base + "/ends/object", head, tail, ends) == KARU_OK &&
+              ends.size == 4096 && std::string(ends.etag) == "\"e1\"",
+          "read ends reports the size and ETag");
+    check_bytes(head, 0, "head contents");
+    check_bytes(tail, 3996, "tail contents");
+    check(ends_verdict("/ends/object"), "head and suffix go out together");
+    for (const char* ignored_suffix : {"/ends/no-suffix", "/ends/whole"}) {
+        head.fill(0);
+        tail.fill(0);
+        check(read_ends(client, base + ignored_suffix, head, tail, ends) == KARU_OK &&
+                  ends.size == 4096,
+              "read ends when the suffix is ignored");
+        check_bytes(head, 0, "head contents when the suffix is ignored");
+        check_bytes(tail, 3996, "tail contents when the suffix is ignored");
+        check(ends_verdict(ignored_suffix), "the tail by offset carries the head's ETag");
+    }
+    check(read_ends(client, base + "/ends/changed", head, tail, ends) == KARU_ERR_PRECONDITION,
+          "ends from two versions fail");
+
+    tail.fill(0);
+    check(read_ends(client, base + "/ends/tail-only", {}, tail, ends) == KARU_OK &&
+              ends.size == 4096,
+          "read only the tail");
+    check_bytes(tail, 3996, "tail-only contents");
+    head.fill(0);
+    check(read_ends(client, base + "/ends/head-only", head, {}, ends) == KARU_OK &&
+              ends.size == 4096,
+          "read only the head");
+    check_bytes(head, 0, "head-only contents");
+
+    check(read_ends(client, base + "/ends/short", head, tail, ends) == KARU_OK && ends.size == 50,
+          "read ends of a short object");
+    check_bytes(std::span(head).first(50), 0, "short object head");
+    check_bytes(std::span(tail).first(50), 0, "short object tail");
+    check(read_ends(client, base + "/ends/empty", head, tail, ends) == KARU_OK && ends.size == 0,
+          "read ends of an empty object");
+
+    std::array<unsigned char, 20> window_head{};
+    std::array<unsigned char, 20> window_tail{};
+    check(read_ends(client, "/vsisubfile/100_50," + base + "/ends/window", window_head, window_tail,
+                    ends) == KARU_OK &&
+              ends.size == 50 && std::string(ends.etag) == "\"e1\"",
+          "read ends of a window");
+    check_bytes(window_head, 100, "window head");
+    check_bytes(window_tail, 130, "window tail");
+    check(ends_verdict("/ends/window"), "a window asks for both ends by offset");
+    std::array<unsigned char, 64> covering_head{};
+    window_tail.fill(0);
+    check(read_ends(client, "/vsisubfile/100_50," + base + "/ends/inside", covering_head,
+                    window_tail, ends) == KARU_OK &&
+              ends.size == 50,
+          "read ends of a window shorter than the head");
+    check_bytes(std::span(covering_head).first(50), 100, "window inside the head");
+    check_bytes(window_tail, 130, "tail taken from the head");
+    check(ends_verdict("/ends/inside"), "a tail inside the head needs no request");
+    check(read_ends(client, "/vsisubfile/4000_200," + base + "/ends/past", head, tail, ends) ==
+              KARU_ERR_RANGE,
+          "a window past the object");
+
+    std::array<unsigned char, 50> open_head{};
+    std::array<unsigned char, 200> open_tail{};
+    check(read_ends(client, "/vsisubfile/4000," + base + "/ends/open", open_head, open_tail,
+                    ends) == KARU_OK &&
+              ends.size == 96,
+          "read ends of a window open to the end");
+    check_bytes(open_head, 4000, "open window head");
+    check_bytes(std::span(open_tail).first(96), 4000, "suffix trimmed to the window");
 
     const karu_status bad_start = fetch(client, base + "/bad-range", 10, small);
     const std::string bad_start_detail = karu_last_error();

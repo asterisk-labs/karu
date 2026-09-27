@@ -184,6 +184,23 @@ int main(void) {
     if (karu_client_stat(client, locator, &too_small) != KARU_ERR_INVALID)
         return 57;
 
+    unsigned char ends[4];
+    if (karu_client_read_ends(NULL, locator, ends, 4, ends, 4, &info) != KARU_ERR_INVALID)
+        return 62;
+    if (karu_client_read_ends(client, NULL, ends, 4, ends, 4, &info) != KARU_ERR_INVALID)
+        return 63;
+    if (karu_client_read_ends(client, locator, ends, 4, ends, 4, NULL) != KARU_ERR_INVALID)
+        return 64;
+    if (karu_client_read_ends(client, locator, NULL, 4, ends, 4, &info) != KARU_ERR_INVALID)
+        return 65;
+    if (karu_client_read_ends(client, locator, ends, 4, NULL, 4, &info) != KARU_ERR_INVALID)
+        return 66;
+    if (karu_client_read_ends(client, locator, ends, KARU_TO_END, ends, 4, &info) !=
+        KARU_ERR_INVALID)
+        return 67;
+    if (karu_client_read_ends(client, locator, ends, 4, ends, 4, &too_small) != KARU_ERR_INVALID)
+        return 68;
+
     karu_locator_free(locator);
     karu_free(NULL);
     karu_client_free(client);

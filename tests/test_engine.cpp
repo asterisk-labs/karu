@@ -123,6 +123,44 @@ void test_windows_allocations_and_errors() {
     karu_batch_free(batch);
     EQ(karu_client_fetch(client, &allocated, 1), KARU_ERR_INVALID);
 
+    // Both ends of a local file, of a window, and of an object shorter than them.
+    karu_locator* whole = nullptr;
+    EQ(karu_resolve(fixture_path.c_str(), &whole), KARU_OK);
+    std::array<unsigned char, 100> head{};
+    std::array<unsigned char, 100> tail{};
+    karu_object_info info = KARU_OBJECT_INFO_INIT;
+    EQ(karu_client_read_ends(client, whole, head.data(), head.size(), tail.data(), tail.size(),
+                             &info),
+       KARU_OK);
+    EQ(info.size, data.size());
+    EQS(info.etag, "");
+    OK(std::memcmp(head.data(), data.data(), head.size()) == 0);
+    OK(std::memcmp(tail.data(), data.data() + data.size() - tail.size(), tail.size()) == 0);
+    EQ(karu_client_read_ends(client, window, head.data(), head.size(), tail.data(), tail.size(),
+                             &info),
+       KARU_OK);
+    EQ(info.size, 2000u);
+    OK(std::memcmp(head.data(), data.data() + 1000, head.size()) == 0);
+    OK(std::memcmp(tail.data(), data.data() + 2900, tail.size()) == 0);
+    std::vector<unsigned char> long_head(10000);
+    std::vector<unsigned char> long_tail(10000);
+    EQ(karu_client_read_ends(client, whole, long_head.data(), long_head.size(), long_tail.data(),
+                             long_tail.size(), &info),
+       KARU_OK);
+    EQ(info.size, data.size());
+    OK(std::memcmp(long_head.data(), data.data(), data.size()) == 0);
+    OK(std::memcmp(long_tail.data(), data.data(), data.size()) == 0);
+    EQ(karu_client_read_ends(client, whole, nullptr, 0, nullptr, 0, &info), KARU_OK);
+    EQ(info.size, data.size());
+    karu_locator* past = nullptr;
+    const std::string past_uri = "/vsisubfile/8000_500," + fixture_path;
+    EQ(karu_resolve(past_uri.c_str(), &past), KARU_OK);
+    EQ(karu_client_read_ends(client, past, head.data(), head.size(), tail.data(), tail.size(),
+                             &info),
+       KARU_ERR_RANGE);
+    karu_locator_free(past);
+    karu_locator_free(whole);
+
     karu_locator* missing = nullptr;
     const std::string missing_path = fixture_path + ".missing";
     std::filesystem::remove(missing_path);
@@ -130,6 +168,9 @@ void test_windows_allocations_and_errors() {
     EQ(karu_client_size(client, missing, &size), KARU_ERR_IO);
     karu_req missing_read{missing, 0, destination.size(), destination.data(), nullptr, nullptr};
     EQ(karu_client_fetch(client, &missing_read, 1), KARU_ERR_IO);
+    EQ(karu_client_read_ends(client, missing, head.data(), head.size(), tail.data(), tail.size(),
+                             &info),
+       KARU_ERR_IO);
 
     karu_locator* malformed = nullptr;
     EQ(karu_resolve("", &malformed), KARU_ERR_URI);
@@ -660,6 +701,12 @@ void test_cpp_facade() {
     if (window) {
         auto window_info = client->stat(*window);
         OK(window_info.has_value() && window_info->size == 50);
+        std::array<std::byte, 8> head{};
+        std::array<std::byte, 8> tail{};
+        auto ends = client->read_ends(*window, head, tail);
+        OK(ends.has_value() && ends->size == 50);
+        const auto expected = client->read(*window, 42, 8);
+        OK(expected.has_value() && std::memcmp(tail.data(), expected->data(), tail.size()) == 0);
     }
     // Contiguous reads count as one transfer after coalescing.
     {

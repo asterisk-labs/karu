@@ -71,6 +71,17 @@ std::vector<karu::Request> convert_requests(const karu_req* requests, std::size_
     return converted;
 }
 
+void store_object_info(karu_object_info* out, std::uint64_t size, const std::string& etag) {
+    out->size = size;
+    if (out->struct_size >= offsetof(karu_object_info, etag) + sizeof(out->etag)) {
+        // Return an empty ETag rather than a truncated, unusable validator.
+        const bool fits = etag.size() < sizeof(out->etag);
+        if (fits)
+            std::memcpy(out->etag, etag.data(), etag.size());
+        out->etag[fits ? etag.size() : 0] = '\0';
+    }
+}
+
 bool submit_options(const karu::ClientOptions& defaults, const karu_submit_options* overrides,
                     std::string_view call, karu::ClientOptions& result) {
     result = defaults;
@@ -480,17 +491,44 @@ karu_status karu_client_stat(karu_client* client, const karu_locator* locator,
         const karu_status status = client->acquire_engine()->object_info(*locator, size, etag);
         if (status != KARU_OK)
             return status;
-        out->size = size;
-        if (out->struct_size >= offsetof(karu_object_info, etag) + sizeof(out->etag)) {
-            // Return an empty ETag rather than a truncated, unusable validator.
-            const bool fits = etag.size() < sizeof(out->etag);
-            if (fits)
-                std::memcpy(out->etag, etag.data(), etag.size());
-            out->etag[fits ? etag.size() : 0] = '\0';
-        }
+        store_object_info(out, size, etag);
         return KARU_OK;
     } catch (...) {
         return exception_status("karu_client_stat");
+    }
+}
+
+karu_status karu_client_read_ends(karu_client* client, const karu_locator* locator, void* head,
+                                  uint64_t head_length, void* tail, uint64_t tail_length,
+                                  karu_object_info* out) {
+    karu::clear_error();
+    if (client == nullptr || locator == nullptr || out == nullptr ||
+        (head == nullptr && head_length > 0) || (tail == nullptr && tail_length > 0)) {
+        karu::set_error("karu_client_read_ends: null argument");
+        return KARU_ERR_INVALID;
+    }
+    if (out->struct_size < offsetof(karu_object_info, size) + sizeof(out->size)) {
+        karu::set_error("karu_client_read_ends: struct_size is too small");
+        return KARU_ERR_INVALID;
+    }
+    if (head_length == KARU_TO_END || tail_length == KARU_TO_END ||
+        head_length > std::numeric_limits<std::size_t>::max() ||
+        tail_length > std::numeric_limits<std::size_t>::max()) {
+        karu::set_error("karu_client_read_ends: lengths must be finite");
+        return KARU_ERR_INVALID;
+    }
+    try {
+        std::uint64_t size = 0;
+        std::string etag;
+        const karu_status status = client->acquire_engine()->read_ends(
+            *locator, {static_cast<std::byte*>(head), static_cast<std::size_t>(head_length)},
+            {static_cast<std::byte*>(tail), static_cast<std::size_t>(tail_length)}, size, etag);
+        if (status != KARU_OK)
+            return status;
+        store_object_info(out, size, etag);
+        return KARU_OK;
+    } catch (...) {
+        return exception_status("karu_client_read_ends");
     }
 }
 

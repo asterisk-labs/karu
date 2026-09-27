@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <random>
 #include <stdexcept>
 #include <utility>
@@ -81,6 +82,77 @@ std::string timeout_detail(const Transfer& transfer,
     const std::string& uri = transfer.request_url.empty() ? transfer.locator->resolved.canonical_uri
                                                           : transfer.request_url;
     return concat(redact_url(uri), ": ", reason);
+}
+
+std::string shown_uri(const Resolved& resolved) {
+    return resolved.backend == Backend::Http ? redact_url(resolved.canonical_uri)
+                                             : resolved.canonical_uri;
+}
+
+std::uint64_t visible_size(const Resolved& resolved, std::uint64_t total) noexcept {
+    if (resolved.window_length != TO_END)
+        return resolved.window_length;
+    return total > resolved.window_offset ? total - resolved.window_offset : 0;
+}
+
+std::size_t at_most(std::size_t length, std::uint64_t limit) noexcept {
+    return static_cast<std::size_t>(std::min<std::uint64_t>(length, limit));
+}
+
+karu_status short_read(const Resolved& resolved, std::uint64_t first, std::uint64_t length,
+                       std::uint64_t got) {
+    set_error(concat(shown_uri(resolved), ": object ended at byte ", first + got,
+                     " while reading [", first, ", +", length, ")"));
+    return KARU_ERR_RANGE;
+}
+
+karu_status read_file(os::File& file, const Resolved& resolved, std::uint64_t first,
+                      std::span<std::byte> destination) {
+    std::size_t done = 0;
+    while (done < destination.size()) {
+        const auto read =
+            file.read_at(destination.data() + done, destination.size() - done, first + done);
+        if (!read) {
+            set_error(concat(resolved.target, ": ", read.error().message()));
+            return KARU_ERR_IO;
+        }
+        if (*read == 0)
+            return short_read(resolved, first, destination.size(), done);
+        done += *read;
+    }
+    return KARU_OK;
+}
+
+karu_status read_file_ends(const Resolved& resolved, std::span<std::byte> head,
+                           std::span<std::byte> tail, std::uint64_t& size) {
+    std::error_code error;
+    const auto total = std::filesystem::file_size(os::path_from_utf8(resolved.target), error);
+    if (error) {
+        set_error(concat(resolved.target, ": ", error.message()));
+        return KARU_ERR_IO;
+    }
+    os::File file;
+    if (const std::error_code opened = file.open(resolved.target)) {
+        set_error(concat(resolved.target, ": ", opened.message()));
+        return KARU_ERR_IO;
+    }
+    const std::uint64_t visible = visible_size(resolved, total);
+    const std::size_t tail_length = at_most(tail.size(), visible);
+    karu_status status = read_file(file, resolved, resolved.window_offset,
+                                   head.first(at_most(head.size(), visible)));
+    if (status == KARU_OK) {
+        status = read_file(file, resolved, resolved.window_offset + visible - tail_length,
+                           tail.first(tail_length));
+    }
+    if (status == KARU_OK)
+        size = visible;
+    return status;
+}
+
+// Replies to separate requests must describe one version of the object.
+bool same_version(const transport::RangeReply& left, const transport::RangeReply& right) noexcept {
+    return left.total == right.total &&
+           (left.etag.empty() || right.etag.empty() || left.etag == right.etag);
 }
 
 } // namespace
@@ -330,14 +402,10 @@ void Engine::deliver(Transfer& transfer, karu_status status, const std::string& 
                 completion.got = transfer.received > part.relative_offset
                                      ? transfer.received - part.relative_offset
                                      : 0;
-                const auto& resolved = transfer.locator->resolved;
-                const std::string uri = resolved.backend == Backend::Http
-                                            ? redact_url(resolved.canonical_uri)
-                                            : resolved.canonical_uri;
                 completion.detail =
-                    concat(uri, ": object ended at byte ", transfer.offset + transfer.received,
-                           " while reading [", transfer.offset + part.relative_offset, ", +",
-                           part.length, ")");
+                    concat(shown_uri(transfer.locator->resolved), ": object ended at byte ",
+                           transfer.offset + transfer.received, " while reading [",
+                           transfer.offset + part.relative_offset, ", +", part.length, ")");
             } else {
                 completion.got = part.length;
             }
@@ -890,11 +958,6 @@ karu_status Engine::size_of(const Locator& locator, std::uint64_t& size) {
 
 karu_status Engine::object_info(const Locator& locator, std::uint64_t& size, std::string& etag) {
     const auto& resolved = locator.resolved;
-    const auto visible = [&resolved](std::uint64_t total) {
-        if (resolved.window_length != TO_END)
-            return resolved.window_length;
-        return total > resolved.window_offset ? total - resolved.window_offset : 0;
-    };
     etag.clear();
 
     if (resolved.backend == Backend::File) {
@@ -904,7 +967,7 @@ karu_status Engine::object_info(const Locator& locator, std::uint64_t& size, std
             set_error(concat(resolved.target, ": ", error.message()));
             return KARU_ERR_IO;
         }
-        size = visible(total);
+        size = visible_size(resolved, total);
         return KARU_OK;
     }
 
@@ -920,8 +983,104 @@ karu_status Engine::object_info(const Locator& locator, std::uint64_t& size, std
         set_error(result.error().detail);
         return result.error().status;
     }
-    size = visible(result->size);
+    size = visible_size(resolved, result->size);
     etag = std::move(result->etag);
+    return KARU_OK;
+}
+
+karu_status Engine::read_ends(const Locator& locator, std::span<std::byte> head,
+                              std::span<std::byte> tail, std::uint64_t& size, std::string& etag) {
+    using transport::ByteRange;
+    using Reply = std::expected<transport::RangeReply, transport::Failure>;
+    const Resolved& resolved = locator.resolved;
+    etag.clear();
+    if (resolved.backend == Backend::File)
+        return read_file_ends(resolved, head, tail, size);
+    if (head.empty() && tail.empty())
+        return object_info(locator, size, etag);
+
+    // A bounded window knows where its tail starts. Otherwise a suffix range
+    // finds it, except on Azure, which answers one with the whole blob.
+    const std::uint64_t offset = resolved.window_offset;
+    const bool bounded = resolved.window_length != TO_END;
+    const bool by_suffix = !bounded && !tail.empty() && resolved.backend != Backend::Azure;
+    std::array<std::byte, 1> scratch{};
+    std::span<std::byte> head_part =
+        bounded ? head.first(at_most(head.size(), resolved.window_length)) : head;
+    if (!bounded && head.empty() && !by_suffix)
+        head_part = scratch; // the tail needs the size first
+    ByteRange tail_range{0, tail.size(), true};
+    std::span<std::byte> tail_part = by_suffix ? tail : std::span<std::byte>{};
+    if (bounded && resolved.window_length > head_part.size()) {
+        const std::size_t length = at_most(tail.size(), resolved.window_length);
+        tail_range = ByteRange{offset + resolved.window_length - length, length};
+        tail_part = tail.first(length);
+    }
+
+    const auto get_head = [&] {
+        return get_range(locator, ByteRange{offset, head_part.size()}, head_part, {});
+    };
+    Reply head_reply = transport::RangeReply{};
+    Reply tail_reply = transport::RangeReply{};
+    std::future<Reply> pending;
+    if (!head_part.empty() && !tail_part.empty())
+        pending = std::async(std::launch::async, get_head);
+    else if (!head_part.empty())
+        head_reply = get_head();
+    if (!tail_part.empty())
+        tail_reply = get_range(locator, tail_range, tail_part, {});
+    if (pending.valid())
+        head_reply = pending.get();
+
+    const auto fail = [](const transport::Failure& failure) {
+        set_error(failure.detail);
+        return failure.status;
+    };
+    const auto changed = [&resolved] {
+        set_error(concat(shown_uri(resolved),
+                         ": the object changed between reading its head and its tail"));
+        return KARU_ERR_PRECONDITION;
+    };
+    if (!head_reply)
+        return fail(head_reply.error());
+    if (!tail_reply)
+        return fail(tail_reply.error());
+    const bool head_sent = !head_part.empty();
+    const bool tail_sent = !tail_part.empty();
+    if (head_sent && tail_sent && !same_version(*head_reply, *tail_reply))
+        return changed();
+    // Ranges inside a bounded window must exist in full.
+    if (bounded && head_reply->got != head_part.size())
+        return short_read(resolved, offset, head_part.size(), head_reply->got);
+    if (bounded && tail_reply->got != tail_part.size())
+        return short_read(resolved, tail_range.first, tail_part.size(), tail_reply->got);
+
+    const transport::RangeReply& known = head_sent ? *head_reply : *tail_reply;
+    const std::uint64_t visible = visible_size(resolved, known.total);
+    const std::size_t head_length = at_most(head.size(), visible);
+    const std::size_t tail_length = at_most(tail.size(), visible);
+    etag = known.etag.empty() ? tail_reply->etag : known.etag;
+    if (tail_length > 0) {
+        if (tail_sent && !tail_reply->suffix_ignored) {
+            // A suffix longer than the window starts before it.
+            if (by_suffix) {
+                std::memmove(tail.data(), tail.data() + (tail_reply->got - tail_length),
+                             tail_length);
+            }
+        } else if (visible <= head_length) {
+            std::memcpy(tail.data(), head.data() + (visible - tail_length), tail_length);
+        } else {
+            auto reply = get_range(locator, ByteRange{offset + visible - tail_length, tail_length},
+                                   tail.first(tail_length), etag);
+            if (!reply)
+                return fail(reply.error());
+            if (!same_version(*reply, known))
+                return changed();
+            if (etag.empty())
+                etag = std::move(reply->etag);
+        }
+    }
+    size = visible;
     return KARU_OK;
 }
 
@@ -939,6 +1098,18 @@ void Engine::return_size_handle(Easy handle) noexcept {
     std::lock_guard lock(size_pool_mutex_);
     if (size_pool_.size() < static_cast<std::size_t>(options_.concurrency))
         size_pool_.push_back(std::move(handle));
+}
+
+std::expected<transport::RangeReply, transport::Failure>
+Engine::get_range(const Locator& locator, const transport::ByteRange& range,
+                  std::span<std::byte> destination, std::string_view if_match) {
+    Easy handle = take_size_handle();
+    if (!handle)
+        return std::unexpected(transport::Failure{KARU_ERR_NOMEM, "curl_easy_init: out of memory"});
+    auto reply = transport::get_range(locator, handle.get(), share_.get(), request_builder_,
+                                      options_, range, destination, if_match);
+    return_size_handle(std::move(handle));
+    return reply;
 }
 
 } // namespace karu

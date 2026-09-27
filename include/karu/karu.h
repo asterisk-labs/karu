@@ -166,6 +166,17 @@ typedef struct {
 KARU_API karu_status karu_client_stat(karu_client* client, const karu_locator* locator,
                                       karu_object_info* out);
 
+// Reads the first head_length and the last tail_length bytes visible through
+// the locator, with the size and ETag that karu_client_stat reports. Each
+// buffer receives min(length, size) bytes, so the two may overlap on a short
+// object. Both ends are requested at once, the tail as a suffix range; Azure
+// ignores suffix ranges, so there the tail follows the head. Responses whose
+// sizes or strong ETags disagree return KARU_ERR_PRECONDITION. A zero length
+// takes a NULL buffer.
+KARU_API karu_status karu_client_read_ends(karu_client* client, const karu_locator* locator,
+                                           void* head, uint64_t head_length, void* tail,
+                                           uint64_t tail_length, karu_object_info* out);
+
 // Positional reads
 
 // Per-batch planner overrides. Initialize struct_size to sizeof this struct.

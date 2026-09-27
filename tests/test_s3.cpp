@@ -35,6 +35,16 @@ void test_s3_request() {
     EQS(header(*request, "x-amz-content-sha256"), "UNSIGNED-PAYLOAD");
     OK(!request->http.follow_redirects);
 
+    // A suffix range is signed like any other.
+    auto suffix = request_builder.prepare_suffix(object, 16384);
+    OK(suffix.has_value());
+    if (suffix) {
+        EQS(suffix->range, "bytes=-16384");
+        OK(header(*suffix, "Authorization").find("range;") != std::string::npos);
+        OK(header(*suffix, "Authorization") != header(*request, "Authorization"));
+    }
+    OK(!request_builder.prepare_suffix(object, 0));
+
     const ConfigSnapshot exact_config = must_freeze(ConfigBuilder(false));
     const Resolved exact_object = must_resolve("s3://examplebucket/test file");
     ProviderCredentials exact_credentials;

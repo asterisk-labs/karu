@@ -68,17 +68,35 @@ std::expected<PreparedRequest, RequestError>
 RequestBuilder::materialize(const Locator& locator, const ResolvedCredentials& credentials,
                             std::uint64_t first, std::uint64_t length, std::string_view region_hint,
                             std::string_view if_match) {
-    const Resolved& object = locator.resolved;
     if (length == 0 || first > UINT64_MAX - (length - 1))
         return std::unexpected(RequestError{KARU_ERR_RANGE, "HTTP range overflows"});
+    return materialize_range(locator, credentials, backends::range_header(first, length),
+                             region_hint, if_match);
+}
 
-    const std::string range = backends::range_header(first, length);
+std::expected<PreparedRequest, RequestError>
+RequestBuilder::prepare_suffix(const Locator& locator, std::uint64_t length,
+                               std::string_view region_hint, std::string_view if_match) {
+    if (length == 0)
+        return std::unexpected(RequestError{KARU_ERR_RANGE, "empty suffix range"});
+    auto credentials = resolve_credentials(locator);
+    if (!credentials)
+        return std::unexpected(credentials.error());
+    return materialize_range(locator, *credentials, backends::suffix_range_header(length),
+                             region_hint, if_match);
+}
+
+std::expected<PreparedRequest, RequestError>
+RequestBuilder::materialize_range(const Locator& locator, const ResolvedCredentials& credentials,
+                                  std::string range, std::string_view region_hint,
+                                  std::string_view if_match) {
+    const Resolved& object = locator.resolved;
     if (object.backend == Backend::Http || object.backend == Backend::HuggingFace) {
         auto prepared = object.backend == Backend::Http
                             ? backends::prepare_http(config_, object, if_match)
                             : backends::prepare_hugging_face(config_, object, if_match);
         if (prepared) {
-            prepared->range = range;
+            prepared->range = std::move(range);
             apply_http_options(config_, *prepared);
         }
         return prepared;
@@ -105,7 +123,7 @@ RequestBuilder::materialize(const Locator& locator, const ResolvedCredentials& c
         !headers) {
         return std::unexpected(headers.error());
     }
-    prepared->range = range;
+    prepared->range = std::move(range);
     apply_http_options(config_, *prepared);
     return prepared;
 }

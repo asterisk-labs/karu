@@ -93,6 +93,7 @@ rebase offsets to zero and reject reads that leave the window.
 | Fail if the object changed | the same `if_match` ETag on every read gives `KARU_ERR_PRECONDITION` |
 | Visible size | `karu_client_size` (a one-byte GET, never cached; bounded windows need no I/O) |
 | Size and ETag to pin reads | `karu_client_stat` / `Client::stat` (the same GET; the ETag goes to `if_match`) |
+| A file's header and footer | `karu_client_read_ends` / `Client::read_ends` (both ends, size and ETag in one round trip) |
 | Tune concurrency and coalescing | `karu_batch_get_stats` / `Batch::stats`: retries, 429/503, new connections, received vs requested bytes |
 | Credentials from your own SDK | `karu_config_set_credentials_provider` |
 
@@ -126,8 +127,9 @@ rebase offsets to zero and reject reads that leave the window.
   credential cache. After `fork()` a client rebuilds its engine on first use in the
   child. Inherited batches return `KARU_ERR_INVALID`; freeing them is a no-op.
 - Submitted cloud reads resolve credentials on credential workers. A synchronous
-  `karu_client_size` or `karu_client_stat` call performs its credential lookup, callback and
-  any `credential_process` on the calling thread.
+  `karu_client_size` or `karu_client_stat` call performs its credential lookup, callback
+  and any `credential_process` on the calling thread; `karu_client_read_ends` may do so
+  on the helper thread that reads the head.
 - Keep format knowledge out of Karu. Plan ranges above it, submit them in batches, and
   decode completions as they arrive.
 

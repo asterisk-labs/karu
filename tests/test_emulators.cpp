@@ -142,6 +142,19 @@ void exercise(const char* name, const karu::Client& client, const karu::Object& 
         }
     }
 
+    // Both ends at once: a suffix range, or on Azure the tail after the head.
+    {
+        std::vector<std::byte> head(1000);
+        std::vector<std::byte> tail(1000);
+        auto ends = client.read_ends(blob, head, tail);
+        const bool correct =
+            ends.has_value() && ends->size == kObjectSize && !ends->etag.empty() &&
+            std::equal(head.begin(), head.end(), object.begin()) &&
+            std::equal(tail.begin(), tail.end(), object.end() - static_cast<long>(tail.size()));
+        check(correct, std::string(name) + ": read_ends() con cabeza, cola, tamaño y ETag" +
+                           (ends ? "" : " -> " + ends.error().message));
+    }
+
     // Past the end must be reported, never silently truncated.
     {
         std::vector<std::byte> got(16);

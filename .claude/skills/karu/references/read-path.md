@@ -237,6 +237,15 @@ once attempts run out.
   and proves read authorization.
 - Results are never cached. Cache sizes yourself (a manifest, for example) when they can
   be trusted.
+- `karu_client_read_ends` reads a format's header and footer with its size. It sends the
+  head range and `Range: bytes=-N` for the tail at once, so both ends, the total and the
+  ETag arrive in one round trip. A `206` to the suffix must end at the object's last
+  byte and hold `min(N, size)` bytes. Azure ignores suffix ranges and would send the
+  whole blob, so Azure reads the head first and then the tail by offset with `If-Match`.
+  A server that answers the suffix with a longer whole object, or with `416` and a
+  nonzero total, gets the same fallback. Bounded windows ask for both ends by offset.
+  Both responses must agree on the size and on strong ETags, or the call returns
+  `KARU_ERR_PRECONDITION`.
 
 ## 9. ETags and consistency
 

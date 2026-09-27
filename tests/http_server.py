@@ -69,6 +69,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     cancel_range_ok = False
     redirect_target_port = 0
     resume_requests: dict[str, list[tuple[int, str | None]]] = {}
+    ends_requests: dict[str, list[tuple[str, str]]] = {}
 
     def reply(self, status: int, body: bytes = b"", **headers: str) -> None:
         self.send_response(status)
@@ -161,8 +162,63 @@ class Handler(http.server.BaseHTTPRequestHandler):
             )
         return False
 
+    def ends(self, path: str) -> None:
+        """Serve karu_client_read_ends; ends_verdict checks the requests."""
+        scenario = path.rsplit("/ends/", 1)[1]
+        range_header = self.headers.get("Range", "")
+        if_match = self.headers.get("If-Match")
+        Handler.ends_requests.setdefault(path, []).append((range_header, if_match or ""))
+        data = {"short": DATA[:50], "empty": b""}.get(scenario, DATA)
+        suffix = range_header.startswith("bytes=-")
+        etag = '"e2"' if scenario == "changed" and suffix else '"e1"'
+        # Azure answers a suffix range with the whole blob.
+        if scenario == "whole" or (
+            suffix and (scenario == "no-suffix" or path.startswith("/container/"))
+        ):
+            self.reply(200, data, ETag=etag)
+            return
+        if if_match not in (None, etag):
+            self.reply(412, b"changed", ETag=etag)
+            return
+        if suffix:
+            first = max(0, len(data) - int(range_header[7:]))
+            last = len(data) - 1
+        else:
+            first_text, last_text = range_header[6:].split("-", 1)
+            first, last = int(first_text), min(int(last_text), len(data) - 1)
+        if first >= len(data):
+            self.reply(416, Content_Range=f"bytes */{len(data)}", ETag=etag)
+            return
+        self.reply(
+            206,
+            data[first : last + 1],
+            Content_Range=f"bytes {first}-{last}/{len(data)}",
+            ETag=etag,
+        )
+
+    def ends_verdict(self, path: str) -> bool:
+        head = ("bytes=0-99", "")
+        suffix = ("bytes=-100", "")
+        tail = ("bytes=3996-4095", '"e1"')
+        expected = {
+            "/ends/object": [head, suffix],
+            "/ends/no-suffix": [head, suffix, tail],
+            "/ends/whole": [head, suffix, tail],
+            "/ends/window": [("bytes=100-119", ""), ("bytes=130-149", "")],
+            "/ends/inside": [("bytes=100-149", "")],
+            "/container/ends/azure": [head, tail],
+        }
+        return sorted(Handler.ends_requests.get(path, [])) == sorted(expected[path])
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urllib.parse.urlsplit(self.path).path
+        if path.startswith("/ends-verdict/"):
+            verdict = self.ends_verdict(path.removeprefix("/ends-verdict"))
+            self.reply(206, b"\x01" if verdict else b"\x00", Content_Range="bytes 0-0/1")
+            return
+        if "/ends/" in path:
+            self.ends(path)
+            return
         if path.startswith("/resume/"):
             self.resume(path.removeprefix("/resume/"))
             return

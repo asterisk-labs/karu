@@ -503,20 +503,34 @@ std::expected<void, std::string> apply_http_options(CURL* easy, const HttpReques
     return apply_string(CURLOPT_USERAGENT, options.user_agent);
 }
 
-struct SizeState {
+struct ProbeState {
     CURL* easy = nullptr;
-    std::uint64_t total = 0;
-    std::size_t body_received = 0;
-    bool have_total = false;
-    bool cut_short = false;
-    bool body_exceeded_range = false;
-    bool content_range_valid = false;
-    bool unsatisfied_content_range_valid = false;
+    ByteRange range{};
+    std::span<std::byte> destination{};
+    std::string_view if_match;
+    std::uint64_t fallback_limit = 0;
     bool follow_redirects = true;
     bool same_origin_redirects_only = false;
-    bool redirect_blocked = false;
-    long http_status = 0;
     std::string_view original_url;
+
+    long http_status = 0;
+    std::uint64_t total = 0;
+    bool have_total = false;
+    bool content_range_valid = false;
+    bool content_range_answers = false;
+    bool unsatisfied_content_range_valid = false;
+    std::uint64_t range_first = 0;
+    std::uint64_t range_last = 0;
+    bool started = false;
+    std::uint64_t skip = 0;
+    std::uint64_t wanted = 0;
+    std::uint64_t stored = 0;
+    bool cut_short = false;
+    bool body_exceeded_range = false;
+    bool suffix_ignored = false;
+    bool range_fallback_rejected = false;
+    bool version_changed = false;
+    bool redirect_blocked = false;
     int retry_after = 0;
     std::string response_region;
     std::string etag{};
@@ -526,16 +540,25 @@ struct SizeState {
     std::uint64_t error_body_received = 0;
 };
 
-void reset_response(SizeState& state) noexcept {
+void reset_response(ProbeState& state) noexcept {
+    state.http_status = 0;
     state.total = 0;
-    state.body_received = 0;
     state.have_total = false;
+    state.content_range_valid = false;
+    state.content_range_answers = false;
+    state.unsatisfied_content_range_valid = false;
+    state.range_first = 0;
+    state.range_last = 0;
+    state.started = false;
+    state.skip = 0;
+    state.wanted = 0;
+    state.stored = 0;
     state.cut_short = false;
     state.body_exceeded_range = false;
-    state.content_range_valid = false;
-    state.unsatisfied_content_range_valid = false;
+    state.suffix_ignored = false;
+    state.range_fallback_rejected = false;
+    state.version_changed = false;
     state.redirect_blocked = false;
-    state.http_status = 0;
     state.retry_after = 0;
     state.response_region.clear();
     state.etag.clear();
@@ -544,12 +567,69 @@ void reset_response(SizeState& state) noexcept {
     state.error_body_received = 0;
 }
 
-std::size_t size_body_callback(char* data, std::size_t size, std::size_t count,
-                               void* userdata) noexcept {
+// An absolute range may stop at the end of the object, and a suffix covers
+// the whole object when the object is shorter.
+bool answers(const ByteRange& range, std::uint64_t first, std::uint64_t last,
+             std::uint64_t total) noexcept {
+    if (range.suffix)
+        return last + 1 == total && last - first + 1 == std::min(range.length, total);
+    const std::uint64_t end = range.first + range.length - 1;
+    return first == range.first && last <= end && (last == end || last + 1 == total);
+}
+
+// Decide where a successful body goes. False stops the transfer.
+bool start_body(ProbeState& state, long status) noexcept {
+    if (detail::transformed(state.encoding))
+        return false;
+    if (is_strong_etag(state.if_match) && !state.etag.empty() && state.etag != state.if_match) {
+        state.version_changed = true;
+        return false;
+    }
+    if (status == 206) {
+        if (!state.content_range_answers)
+            return false;
+        state.wanted = state.range_last - state.range_first + 1;
+        return true;
+    }
+    if (status != 200)
+        return false;
+    // The server ignored Range and sends the whole object.
+    if (!state.have_total) {
+        curl_off_t length = -1;
+        curl_easy_getinfo(state.easy, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &length);
+        if (length < 0)
+            return false;
+        state.total = static_cast<std::uint64_t>(length);
+        state.have_total = true;
+    }
+    if (state.range.suffix) {
+        // A request by offset costs less than reading a longer object to its end.
+        if (state.total > state.range.length) {
+            state.suffix_ignored = true;
+            return false;
+        }
+        state.range_first = 0;
+        state.wanted = state.total;
+        return true;
+    }
+    if (state.range.first > state.fallback_limit) {
+        state.range_fallback_rejected = true;
+        return false;
+    }
+    state.skip = state.range.first;
+    state.range_first = state.range.first;
+    state.wanted = state.range.first < state.total
+                       ? std::min(state.range.length, state.total - state.range.first)
+                       : 0;
+    return true;
+}
+
+std::size_t probe_body_callback(char* data, std::size_t size, std::size_t count,
+                                void* userdata) noexcept {
     const auto bytes = callback_size(size, count);
     if (!bytes)
         return 0;
-    auto& state = *static_cast<SizeState*>(userdata);
+    auto& state = *static_cast<ProbeState*>(userdata);
     long status = 0;
     curl_easy_getinfo(state.easy, CURLINFO_RESPONSE_CODE, &status);
     if (status >= 300 && status < 400 && state.follow_redirects)
@@ -561,24 +641,44 @@ std::size_t size_body_callback(char* data, std::size_t size, std::size_t count,
         state.error_body_received += *bytes;
         return *bytes;
     }
-    if (status == 206 && state.content_range_valid) {
-        if (*bytes > 1 - std::min<std::size_t>(1, state.body_received)) {
-            state.body_exceeded_range = true;
+    if (!state.started) {
+        state.started = true;
+        if (!start_body(state, status)) {
+            state.cut_short = true;
             return 0;
         }
-        state.body_received += *bytes;
-        return *bytes;
     }
-    state.cut_short = true;
-    return 0;
+    std::size_t remaining = *bytes;
+    if (state.skip > 0) {
+        const auto drop = static_cast<std::size_t>(std::min<std::uint64_t>(state.skip, remaining));
+        data += drop;
+        remaining -= drop;
+        state.skip -= drop;
+    }
+    const std::uint64_t room = state.wanted - state.stored;
+    if (status == 206 && remaining > room) {
+        state.body_exceeded_range = true;
+        return 0;
+    }
+    const auto take = static_cast<std::size_t>(std::min<std::uint64_t>(room, remaining));
+    if (take > 0) {
+        std::memcpy(state.destination.data() + state.stored, data, take);
+        state.stored += take;
+    }
+    // The rest of a whole-object body is not needed.
+    if (status == 200 && state.skip == 0 && state.stored == state.wanted) {
+        state.cut_short = true;
+        return 0;
+    }
+    return *bytes;
 }
 
-std::size_t size_header_callback(char* data, std::size_t size, std::size_t count,
-                                 void* userdata) noexcept {
+std::size_t probe_header_callback(char* data, std::size_t size, std::size_t count,
+                                  void* userdata) noexcept {
     const auto bytes = callback_size(size, count);
     if (!bytes)
         return 0;
-    auto& state = *static_cast<SizeState*>(userdata);
+    auto& state = *static_cast<ProbeState*>(userdata);
     const std::string_view line(data, *bytes);
 
     if (line.starts_with("HTTP/")) {
@@ -592,16 +692,16 @@ std::size_t size_header_callback(char* data, std::size_t size, std::size_t count
         return 0;
     } else if (header_name_is(line, "content-range:")) {
         const std::string_view value = header_value(line, "content-range:");
-        std::uint64_t first = 0;
-        std::uint64_t last = 0;
         std::uint64_t parsed_total = 0;
         bool parsed_have_total = false;
-        state.content_range_valid =
-            parse_content_range(value, first, last, parsed_total, parsed_have_total) &&
-            first == 0 && last == 0;
-        if (state.content_range_valid && parsed_have_total) {
+        state.content_range_valid = parse_content_range(value, state.range_first, state.range_last,
+                                                        parsed_total, parsed_have_total) &&
+                                    parsed_have_total;
+        if (state.content_range_valid) {
             state.total = parsed_total;
             state.have_total = true;
+            state.content_range_answers =
+                answers(state.range, state.range_first, state.range_last, parsed_total);
             return *bytes;
         }
         std::uint64_t unsatisfied_total = 0;
@@ -762,17 +862,16 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
     return {};
 }
 
-std::expected<ObjectInfo, Failure> object_info(const Locator& locator, CURL* easy, CURLSH* share,
-                                               RequestBuilder& request_builder,
-                                               const ClientOptions& options) {
-    // A one-byte GET is more dependable than HEAD across object stores; the
-    // total comes from Content-Range and no object metadata is retained.
+std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy, CURLSH* share,
+                                             RequestBuilder& request_builder,
+                                             const ClientOptions& options, const ByteRange& range,
+                                             std::span<std::byte> destination,
+                                             std::string_view if_match) {
     std::array<char, CURL_ERROR_SIZE> error_buffer{};
-    SizeState state;
-    state.easy = easy;
+    ProbeState state;
     auto configured =
-        set_options(easy, CURLOPT_HEADERFUNCTION, size_header_callback, CURLOPT_HEADERDATA, &state,
-                    CURLOPT_WRITEFUNCTION, size_body_callback, CURLOPT_WRITEDATA, &state,
+        set_options(easy, CURLOPT_HEADERFUNCTION, probe_header_callback, CURLOPT_HEADERDATA, &state,
+                    CURLOPT_WRITEFUNCTION, probe_body_callback, CURLOPT_WRITEDATA, &state,
                     CURLOPT_SHARE, share, CURLOPT_ERRORBUFFER, error_buffer.data(),
                     CURLOPT_NOSIGNAL, 1L, CURLOPT_PATH_AS_IS, 1L, CURLOPT_UNRESTRICTED_AUTH, 0L,
                     CURLOPT_MAXREDIRS, 10L, CURLOPT_CONNECTTIMEOUT, options.connect_timeout_seconds,
@@ -798,7 +897,10 @@ std::expected<ObjectInfo, Failure> object_info(const Locator& locator, CURL* eas
     for (int attempt = 0; attempt < options.max_attempts;) {
         if (deadline.expired())
             return std::unexpected(timeout_failure(locator.resolved.canonical_uri));
-        auto request = request_builder.prepare(locator, 0, 1, region_hint);
+        auto request = range.suffix ? request_builder.prepare_suffix(locator, range.length,
+                                                                     region_hint, if_match)
+                                    : request_builder.prepare(locator, range.first, range.length,
+                                                              region_hint, if_match);
         if (!request) {
             return std::unexpected(Failure{request.error().status, request.error().message});
         }
@@ -822,17 +924,25 @@ std::expected<ObjectInfo, Failure> object_info(const Locator& locator, CURL* eas
         }
         region_hint = request->routing_region;
 
-        state = SizeState{.easy = easy,
-                          .follow_redirects = request->http.follow_redirects,
-                          .same_origin_redirects_only = request->http.same_origin_redirects_only,
-                          .original_url = request->url,
-                          .response_region = {}};
+        state = ProbeState{.easy = easy,
+                           .range = range,
+                           .destination = destination,
+                           .if_match = if_match,
+                           .fallback_limit = options.range_fallback_limit,
+                           .follow_redirects = request->http.follow_redirects,
+                           .same_origin_redirects_only = request->http.same_origin_redirects_only,
+                           .original_url = request->url};
         error_buffer[0] = '\0';
         CURLcode code = curl_easy_perform(easy);
         long http_status = 0;
         curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &http_status);
         if (code == CURLE_WRITE_ERROR && state.cut_short)
             code = CURLE_OK;
+        // An empty body never reached the callback.
+        if (code == CURLE_OK && http_status >= 200 && http_status < 300 && !state.started) {
+            state.started = true;
+            static_cast<void>(start_body(state, http_status));
+        }
 
         if (state.redirect_blocked) {
             return std::unexpected(Failure{
@@ -860,19 +970,27 @@ std::expected<ObjectInfo, Failure> object_info(const Locator& locator, CURL* eas
         }
 
         if (code == CURLE_OK && http_status == 416) {
-            if (state.unsatisfied_content_range_valid && state.total == 0)
-                return ObjectInfo{0, state.etag};
             if (!state.unsatisfied_content_range_valid) {
                 return std::unexpected(
                     Failure{KARU_ERR_HTTP, concat(redact_url(request->url),
                                                   ": invalid Content-Range in HTTP 416")});
             }
+            // No byte of the object is in the range.
+            if (range.suffix ? state.total == 0 : range.first >= state.total) {
+                return RangeReply{.total = state.total,
+                                  .first = range.suffix ? 0 : range.first,
+                                  .got = 0,
+                                  .etag = state.etag};
+            }
+            if (range.suffix) {
+                return RangeReply{.total = state.total, .etag = state.etag, .suffix_ignored = true};
+            }
         }
 
         if (http_status == 206 && state.body_exceeded_range) {
-            return std::unexpected(
-                Failure{KARU_ERR_HTTP,
-                        concat(redact_url(request->url), ": size response exceeded bytes 0-0")});
+            return std::unexpected(Failure{
+                KARU_ERR_HTTP, concat(redact_url(request->url), ": response exceeded bytes ",
+                                      state.range_first, "-", state.range_last)});
         }
 
         if (code == CURLE_OK && http_status >= 200 && http_status < 300 &&
@@ -882,36 +1000,52 @@ std::expected<ObjectInfo, Failure> object_info(const Locator& locator, CURL* eas
                         detail::transformation_detail(redact_url(request->url), state.encoding)});
         }
 
+        if (code == CURLE_OK && state.version_changed) {
+            return std::unexpected(Failure{
+                KARU_ERR_PRECONDITION,
+                concat(redact_url(request->url), ": the server ignored If-Match and sent ETag ",
+                       state.etag, ", so the object no longer matches if_match")});
+        }
+
         if (code == CURLE_OK && http_status == 206) {
-            if (!state.content_range_valid || !state.have_total || state.body_received != 1) {
+            if (!state.content_range_answers) {
+                return std::unexpected(Failure{
+                    KARU_ERR_HTTP,
+                    state.content_range_valid
+                        ? concat(redact_url(request->url), ": Content-Range [", state.range_first,
+                                 ", ", state.range_last, "] does not answer ", request->range)
+                        : concat(redact_url(request->url),
+                                 ": partial response has no valid object size")});
+            }
+            if (state.stored != state.wanted) {
                 return std::unexpected(
                     Failure{KARU_ERR_HTTP, concat(redact_url(request->url),
-                                                  ": partial response has no valid object size")});
+                                                  ": response body does not match Content-Range")});
             }
-            return ObjectInfo{state.total, state.etag};
+            return RangeReply{state.total, state.range_first, state.stored, state.etag};
         }
 
         if (code == CURLE_OK && http_status == 200) {
-            if (!state.have_total) {
-                curl_off_t length = -1;
-                curl_easy_getinfo(easy, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &length);
-                if (length >= 0) {
-                    state.total = static_cast<std::uint64_t>(length);
-                    state.have_total = true;
-                }
+            if (state.suffix_ignored)
+                return RangeReply{.total = state.total, .etag = state.etag, .suffix_ignored = true};
+            if (state.range_fallback_rejected) {
+                return std::unexpected(Failure{
+                    KARU_ERR_HTTP,
+                    concat(redact_url(request->url), ": server ignored Range; refusing to discard ",
+                           range.first, " bytes (limit ", options.range_fallback_limit, ")")});
             }
             if (!state.have_total) {
                 return std::unexpected(
                     Failure{KARU_ERR_HTTP,
                             concat(redact_url(request->url), ": the server reported no size")});
             }
-            return ObjectInfo{state.total, state.etag};
+            return RangeReply{state.total, state.range_first, state.stored, state.etag};
         }
 
         if (code == CURLE_OK && http_status >= 200 && http_status < 300) {
             return std::unexpected(
                 Failure{KARU_ERR_HTTP, concat(redact_url(request->url), ": unexpected HTTP ",
-                                              http_status, " response to size request")});
+                                              http_status, " response to a range request")});
         }
 
         if (deadline.expired())
@@ -953,7 +1087,20 @@ std::expected<ObjectInfo, Failure> object_info(const Locator& locator, CURL* eas
             Failure{KARU_ERR_NETWORK, concat(redact_url(request->url), ": ", message)});
     }
 
-    return std::unexpected(Failure{KARU_ERR_NETWORK, "size request exhausted its retries"});
+    return std::unexpected(Failure{KARU_ERR_NETWORK, "range request exhausted its retries"});
+}
+
+std::expected<ObjectInfo, Failure> object_info(const Locator& locator, CURL* easy, CURLSH* share,
+                                               RequestBuilder& request_builder,
+                                               const ClientOptions& options) {
+    // A one-byte GET is more dependable than HEAD across object stores; the
+    // total comes from Content-Range and no object metadata is retained.
+    std::array<std::byte, 1> first{};
+    auto reply =
+        get_range(locator, easy, share, request_builder, options, ByteRange{0, 1, false}, first);
+    if (!reply)
+        return std::unexpected(std::move(reply.error()));
+    return ObjectInfo{reply->total, std::move(reply->etag)};
 }
 
 } // namespace karu::transport

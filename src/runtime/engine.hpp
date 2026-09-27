@@ -6,6 +6,7 @@
 #include "batch.hpp"
 #include "curl_types.hpp"
 #include "transfer.hpp"
+#include "transport.hpp"
 
 #include <array>
 #include <atomic>
@@ -13,9 +14,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <memory>
 #include <mutex>
 #include <span>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -60,6 +64,10 @@ class Engine {
     void cancel(BatchCore& batch);
     karu_status size_of(const Locator& locator, std::uint64_t& size);
     karu_status object_info(const Locator& locator, std::uint64_t& size, std::string& etag);
+    // Stores the first head.size() and the last tail.size() visible bytes, or
+    // all of them when the object is shorter.
+    karu_status read_ends(const Locator& locator, std::span<std::byte> head,
+                          std::span<std::byte> tail, std::uint64_t& size, std::string& etag);
 
   private:
     void io_loop(IoLoop& loop);
@@ -79,6 +87,9 @@ class Engine {
     void stop_workers() noexcept;
     [[nodiscard]] Easy take_size_handle();
     void return_size_handle(Easy handle) noexcept;
+    [[nodiscard]] std::expected<transport::RangeReply, transport::Failure>
+    get_range(const Locator& locator, const transport::ByteRange& range,
+              std::span<std::byte> destination, std::string_view if_match);
 
     std::atomic<bool> stop_{false};
     std::vector<std::thread> file_workers_;
