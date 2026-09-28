@@ -276,7 +276,7 @@
             <h2>A remote read becomes an HTTP exchange</h2>
             <p class="section-intro">The scheduler decides when a remote transfer may start. The network path then establishes or reuses a secure connection, sends one prepared request, and streams the response back into Karu.</p>
             <h3>What happens before an HTTPS request</h3>
-            <p>A remote URL begins with a host name that people can recognize. DNS, the Domain Name System, resolves that name to a network address. TCP then creates a reliable ordered byte stream between the client and the server. HTTPS adds TLS on top of that stream before HTTP messages are exchanged.</p>
+            <p>A remote URL begins with a host name that people can recognize. DNS, the Domain Name System, resolves that name to a network address. For direct batch reads on Linux and macOS, Karu caches DNS answers for a minute and rotates addresses across connections. TCP then creates a reliable ordered byte stream between the client and the server. HTTPS adds TLS on top of that stream before HTTP messages are exchanged.</p>
             <p>TLS stands for Transport Layer Security. It encrypts traffic so an observer cannot read it, checks that messages were not altered in transit, and validates the server certificate against a trusted certificate authority. The first connection pays for DNS work, a TCP handshake, and a TLS handshake. Reusing the connection avoids repeating most of that setup.</p>
             <figure class="story-figure compact">
               <svg viewBox="0 0 760 224" role="img" aria-labelledby="network-title network-desc">

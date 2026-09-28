@@ -29,7 +29,8 @@ add_executable(karu_tests
     test_source.cpp
     test_planner_property.cpp
     test_status_and_paths.cpp
-    test_engine.cpp)
+    test_engine.cpp
+    test_resolver.cpp)
 target_link_libraries(karu_tests PRIVATE karu::karu)
 target_include_directories(karu_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
 karu_configure_cpp_test(karu_tests)

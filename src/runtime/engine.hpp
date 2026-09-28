@@ -5,6 +5,7 @@
 #include "../request_builder.hpp"
 #include "batch.hpp"
 #include "curl_types.hpp"
+#include "resolver.hpp"
 #include "transfer.hpp"
 #include "transport.hpp"
 
@@ -46,6 +47,8 @@ struct IoLoop {
     std::deque<std::unique_ptr<Transfer>> pending;
     std::unordered_map<Transfer*, std::unique_ptr<Transfer>> active;
     std::deque<Retry> retries;
+    // Prepared transfers waiting for their host's first lookup; they hold slots.
+    std::deque<std::unique_ptr<Transfer>> resolving;
     std::atomic<bool> cancellation_pending{false};
 };
 
@@ -73,7 +76,8 @@ class Engine {
     void io_loop(IoLoop& loop);
     void file_loop();
     void credential_loop();
-    void start_transfer(IoLoop& loop, std::unique_ptr<Transfer> transfer);
+    // `prepared` resumes a transfer that waited for its host's lookup.
+    void start_transfer(IoLoop& loop, std::unique_ptr<Transfer> transfer, bool prepared = false);
     void finish_transfer(std::unique_ptr<Transfer> transfer, karu_status status,
                          std::string detail = {});
     void deliver(Transfer& transfer, karu_status status, const std::string& detail);
@@ -100,6 +104,7 @@ class Engine {
     CurlShareState share_state_;
     Share share_;
     std::vector<std::unique_ptr<IoLoop>> loops_;
+    HostResolver resolver_{[this] { wake_loops(); }};
     // Synchronous probes need handles separate from the I/O loops.
     std::mutex size_pool_mutex_;
     std::vector<Easy> size_pool_;

@@ -113,6 +113,8 @@ struct Transfer {
 
     Easy easy;
     Slist headers;
+    // The host's addresses from HostResolver, for CURLOPT_RESOLVE.
+    Slist resolve;
 
     [[nodiscard]] const std::string& url() const noexcept { return request_url; }
 };

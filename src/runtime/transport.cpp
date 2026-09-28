@@ -466,10 +466,9 @@ std::expected<void, std::string> restrict_to_http(CURL* easy) {
 #endif
 }
 
-// libcurl shuffles on resolution. Bypass its DNS cache so new connections
-// get a fresh order; existing connections need no lookup.
+// Keep fallback lookups and injected addresses bounded by the same cache lifetime.
 std::expected<void, std::string> spread_connections(CURL* easy) {
-    return set_options(easy, CURLOPT_DNS_SHUFFLE_ADDRESSES, 1L, CURLOPT_DNS_CACHE_TIMEOUT, 0L);
+    return set_options(easy, CURLOPT_DNS_SHUFFLE_ADDRESSES, 1L, CURLOPT_DNS_CACHE_TIMEOUT, 60L);
 }
 
 // libcurl 8.7.0 shares one receive buffer per multi handle. Older
@@ -853,6 +852,11 @@ std::expected<void, std::string> configure(Transfer& transfer, CURLSH* share,
     configured = spread_connections(transfer.easy.get());
     if (!configured)
         return configured;
+    if (transfer.resolve) {
+        configured = set_option(transfer.easy.get(), CURLOPT_RESOLVE, transfer.resolve.get());
+        if (!configured)
+            return configured;
+    }
     // Older libcurl may reject resizing a pooled handle's buffer. Its
     // existing buffer remains usable, so this failure is harmless.
     static_cast<void>(

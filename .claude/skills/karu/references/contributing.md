@@ -36,6 +36,7 @@ src/text.hpp                   concat, redact_url
 src/runtime/planner.*          validation, grouping, coalescing into Transfer and Part
 src/runtime/engine.*           event loops, file and credential workers, retries, cancellation, size
 src/runtime/transport.*        curl easy setup, header and body callbacks, scatter, size probe
+src/runtime/resolver.*         background DNS lookups and address rotation
 src/runtime/http_response.*    status mapping, transient classification, Retry-After, backoff
 src/runtime/batch.*            per-batch completion queue
 src/runtime/{transfer,deadline,curl_types}.hpp   transfer state, monotonic deadline, curl RAII
@@ -198,7 +199,7 @@ tests/emulators/down.sh
   and concurrency is the lever. Nothing on the hot path may block per file or per range;
   the facade's `read` is a convenience over `fetch`.
 - **Stateless reads.** No object byte or size cache. Connections, TLS sessions and
-  credentials are reused. libcurl's DNS cache is disabled for address shuffling.
+  credentials are reused. DNS answers are cached for 60 seconds.
 - **Blocking work off the event loops.** Submitted-read discovery, callbacks and helper
   processes run on credential workers; files run on file workers. Synchronous size probes
   do their credential work on the calling thread.

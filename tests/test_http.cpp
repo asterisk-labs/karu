@@ -144,6 +144,13 @@ int main(int argc, char** argv) {
 
     std::array<unsigned char, 333> range{};
     check(fetch(client, base + "/object", 127, range) == KARU_OK, "206 range read");
+
+    // A host name is looked up once and reaches libcurl through CURLOPT_RESOLVE.
+    std::array<unsigned char, 333> named{};
+    check(fetch(client, "http://localhost:" + std::string(argv[1]) + "/object", 127, named) ==
+                  KARU_OK &&
+              named == range,
+          "range read through a resolved host name");
     check_bytes(range, 127, "206 range contents");
 
     std::array<unsigned char, 333> chunked{};

@@ -128,10 +128,13 @@ count (round trips) with fetched bytes (bandwidth) for the real access pattern.
 
 - Easy handles are reset and returned to a pool after each transfer so their
   connections stay open. A curl share object shares TLS sessions.
-- Each new connection resolves its host again and shuffles the addresses, so connections
-  can use different service endpoints. This adds DNS work when opening connections;
-  reused connections do not resolve again.
-  Each loop sets `CURLMOPT_MAXCONNECTS` to its share of `KARU_CONCURRENCY`.
+- On Linux and macOS, `HostResolver` resolves batch hosts off the I/O threads,
+  querying IPv4 and IPv6 separately. It caches answers for 60 seconds and rotates
+  addresses through `CURLOPT_RESOLVE`. Transfers wait up to 300 ms before falling
+  back to libcurl. Proxies, IP literals and redirect targets use libcurl's resolver.
+  Any HTTP(S) or ALL_PROXY environment setting disables the custom resolver for
+  that engine, including hosts excluded by `no_proxy`.
+- Each loop sets `CURLMOPT_MAXCONNECTS` to its share of `KARU_CONCURRENCY`.
 - HTTP/1.1 is the default (`KARU_HTTP_VERSION`). HTTP/2 multiplexing is used only when
   requested and negotiated.
 - GCS requests send `Accept-Encoding: gzip`, so an object stored with

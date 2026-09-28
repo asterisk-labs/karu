@@ -34,6 +34,7 @@ set(KARU_CORE_SOURCES
     src/runtime/transport.cpp
     src/runtime/http_response.cpp
     src/runtime/engine.cpp
+    src/runtime/resolver.cpp
     src/karu.cpp
 )
 

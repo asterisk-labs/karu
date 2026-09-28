@@ -27,6 +27,7 @@ int main() {
     test_planner_property();
     test_status_and_paths();
     test_transport_statuses();
+    test_host_resolver();
     test_cpp_facade();
 
     if (!fixture_path.empty())

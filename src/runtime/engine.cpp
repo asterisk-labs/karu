@@ -238,6 +238,7 @@ Engine::~Engine() {
 }
 
 void Engine::stop_workers() noexcept {
+    resolver_.stop();
     {
         // Publish shutdown while holding the mutex used by file workers for
         // their wait predicate. Without this pairing, a notify can land
@@ -371,7 +372,8 @@ void Engine::take_http(IoLoop& loop) {
     if (http_backlog_.load(std::memory_order_acquire) == 0)
         return;
     std::lock_guard lock(http_mutex_);
-    while (loop.active.size() + loop.pending.size() < loop.limit && !http_queue_.empty()) {
+    while (loop.active.size() + loop.pending.size() + loop.resolving.size() < loop.limit &&
+           !http_queue_.empty()) {
         loop.pending.push_back(std::move(http_queue_.front()));
         http_queue_.pop_front();
     }
@@ -433,54 +435,81 @@ void Engine::finish_transfer(std::unique_ptr<Transfer> transfer, karu_status sta
     batch->transfer_finished();
 }
 
-void Engine::start_transfer(IoLoop& loop, std::unique_ptr<Transfer> transfer) {
+void Engine::start_transfer(IoLoop& loop, std::unique_ptr<Transfer> transfer, bool prepared) {
     try {
-        transfer->deadline.start(options_.request_timeout_seconds);
-        if (transfer->deadline.expired()) {
-            const std::string detail = timeout_detail(*transfer);
-            finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
-            return;
-        }
-        if (!transport::ensure_sink(*transfer)) {
-            finish_transfer(std::move(transfer), KARU_ERR_NOMEM,
-                            "out of memory allocating a coalesced transfer buffer");
-            return;
+        if (prepared) {
+            if (transfer->deadline.expired()) {
+                const std::string detail = timeout_detail(*transfer);
+                finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
+                return;
+            }
+        } else {
+            transfer->deadline.start(options_.request_timeout_seconds);
+            if (transfer->deadline.expired()) {
+                const std::string detail = timeout_detail(*transfer);
+                finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
+                return;
+            }
+            if (!transport::ensure_sink(*transfer)) {
+                finish_transfer(std::move(transfer), KARU_ERR_NOMEM,
+                                "out of memory allocating a coalesced transfer buffer");
+                return;
+            }
+
+            if (transfer->region_hint.empty()) {
+                transfer->region_hint =
+                    transfer->batch->region_hint(transfer->locator->resolved.canonical_uri);
+            }
+            const bool cloud =
+                backends::cloud_provider(transfer->locator->resolved.backend) != nullptr;
+            if (cloud && !transfer->credentials_ready) {
+                finish_transfer(std::move(transfer), KARU_ERR_INVALID,
+                                "internal error: cloud request has no resolved credentials");
+                return;
+            }
+            const std::uint64_t first = transfer->offset + transfer->resumed;
+            const std::uint64_t length = transfer->length - transfer->resumed;
+            const std::string_view pin = transport::version_pin(*transfer);
+            auto request =
+                cloud ? request_builder_.materialize(*transfer->locator, transfer->credentials,
+                                                     first, length, transfer->region_hint, pin)
+                      : request_builder_.prepare(*transfer->locator, first, length,
+                                                 transfer->region_hint, pin);
+            if (!request) {
+                finish_transfer(std::move(transfer), request.error().status,
+                                std::move(request.error().message));
+                return;
+            }
+            if (transfer->deadline.expired()) {
+                const std::string detail = timeout_detail(*transfer);
+                finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
+                return;
+            }
+            transfer->request_url = std::move(request->url);
+            transfer->request_range = std::move(request->range);
+            transfer->request_headers = std::move(request->headers);
+            transfer->http = std::make_unique<HttpRequestOptions>(std::move(request->http));
+            if (!request->routing_region.empty())
+                transfer->region_hint = std::move(request->routing_region);
         }
 
-        if (transfer->region_hint.empty()) {
-            transfer->region_hint =
-                transfer->batch->region_hint(transfer->locator->resolved.canonical_uri);
-        }
-        const bool cloud = backends::cloud_provider(transfer->locator->resolved.backend) != nullptr;
-        if (cloud && !transfer->credentials_ready) {
-            finish_transfer(std::move(transfer), KARU_ERR_INVALID,
-                            "internal error: cloud request has no resolved credentials");
+        // Wait for the host's first lookup; see HostResolver.
+        HostResolver::Entry target;
+        if (transfer->http->proxy.empty())
+            target = resolver_.entry(transfer->request_url);
+        if (target.waiting) {
+            loop.resolving.push_back(std::move(transfer));
             return;
         }
-        const std::uint64_t first = transfer->offset + transfer->resumed;
-        const std::uint64_t length = transfer->length - transfer->resumed;
-        const std::string_view pin = transport::version_pin(*transfer);
-        auto request = cloud
-                           ? request_builder_.materialize(*transfer->locator, transfer->credentials,
-                                                          first, length, transfer->region_hint, pin)
-                           : request_builder_.prepare(*transfer->locator, first, length,
-                                                      transfer->region_hint, pin);
-        if (!request) {
-            finish_transfer(std::move(transfer), request.error().status,
-                            std::move(request.error().message));
-            return;
+        transfer->resolve.reset();
+        if (!target.resolve.empty()) {
+            transfer->resolve.reset(curl_slist_append(nullptr, target.resolve.c_str()));
+            if (!transfer->resolve) {
+                finish_transfer(std::move(transfer), KARU_ERR_NOMEM,
+                                "out of memory preparing request");
+                return;
+            }
         }
-        if (transfer->deadline.expired()) {
-            const std::string detail = timeout_detail(*transfer);
-            finish_transfer(std::move(transfer), KARU_TIMEOUT, detail);
-            return;
-        }
-        transfer->request_url = std::move(request->url);
-        transfer->request_range = std::move(request->range);
-        transfer->request_headers = std::move(request->headers);
-        transfer->http = std::make_unique<HttpRequestOptions>(std::move(request->http));
-        if (!request->routing_region.empty())
-            transfer->region_hint = std::move(request->routing_region);
 
         if (loop.easy_pool.empty()) {
             transfer->easy.reset(curl_easy_init());
@@ -557,6 +586,16 @@ void Engine::discard_cancelled_http(IoLoop& loop) {
         discard_transfer(std::move(transfer));
     }
 
+    for (auto iterator = loop.resolving.begin(); iterator != loop.resolving.end();) {
+        if (!(*iterator)->batch->is_cancelled()) {
+            ++iterator;
+            continue;
+        }
+        auto transfer = std::move(*iterator);
+        iterator = loop.resolving.erase(iterator);
+        discard_transfer(std::move(transfer));
+    }
+
     for (auto iterator = loop.retries.begin(); iterator != loop.retries.end();) {
         if (!iterator->transfer->batch->is_cancelled()) {
             ++iterator;
@@ -598,7 +637,18 @@ void Engine::io_loop(IoLoop& loop) {
             iterator = loop.retries.erase(iterator);
         }
 
-        while (loop.active.size() < loop.limit && !loop.pending.empty()) {
+        if (!loop.resolving.empty()) {
+            std::deque<std::unique_ptr<Transfer>> waiting;
+            waiting.swap(loop.resolving);
+            for (auto& transfer : waiting) {
+                if (transfer->batch->is_cancelled())
+                    discard_transfer(std::move(transfer));
+                else
+                    start_transfer(loop, std::move(transfer), true);
+            }
+        }
+
+        while (loop.active.size() + loop.resolving.size() < loop.limit && !loop.pending.empty()) {
             auto transfer = std::move(loop.pending.front());
             loop.pending.pop_front();
             if (transfer->batch->is_cancelled()) {
@@ -728,7 +778,7 @@ void Engine::io_loop(IoLoop& loop) {
         }
 
         // Skip polling when queued work can start now.
-        const bool room = loop.active.size() < loop.limit;
+        const bool room = loop.active.size() + loop.resolving.size() < loop.limit;
         int timeout_ms = 50;
         if (room && (!loop.pending.empty() || http_backlog_.load(std::memory_order_acquire) != 0)) {
             timeout_ms = 0;
@@ -745,6 +795,9 @@ void Engine::io_loop(IoLoop& loop) {
         } else if (running == 0 && loop.pending.empty()) {
             timeout_ms = 200;
         }
+        // Recheck waiting transfers, in case a lookup never answers.
+        if (!loop.resolving.empty())
+            timeout_ms = std::min(timeout_ms, 20);
         // Publish the idle bit before checking the queue. With seq_cst on
         // both sides, either the producer sees the bit and wakes us, or we
         // see its queued work before polling.
@@ -770,6 +823,10 @@ void Engine::io_loop(IoLoop& loop) {
         discard_transfer(std::move(transfer));
     }
     loop.pending.clear();
+    for (auto& transfer : loop.resolving) {
+        discard_transfer(std::move(transfer));
+    }
+    loop.resolving.clear();
     for (Retry& retry : loop.retries) {
         discard_transfer(std::move(retry.transfer));
     }

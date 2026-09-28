@@ -73,6 +73,7 @@ void test_engine_shutdown();
 void test_planner_scope();
 void test_planner_property();
 void test_transport_statuses();
+void test_host_resolver();
 void test_cpp_facade();
 void test_status_and_paths();
 
