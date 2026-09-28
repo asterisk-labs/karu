@@ -6,13 +6,13 @@ Notable user-visible changes are recorded here.
 
 ### Changed
 
-- With OpenSSL and libcurl 7.87+, use the CA bundle without the default CA
-  directory so libcurl can cache it. Set `KARU_HTTP_CA_PATH` to keep using a directory.
+- OpenSSL uses the hashed system CA directory when available. An explicit CA
+  bundle takes precedence; set `KARU_HTTP_CA_PATH` to use a directory too.
 
 ### Fixed
 
-- Reduce repeated DNS queries during concurrent reads. Lookups run off the I/O
-  threads and cached addresses expire after a minute.
+- Reduce DNS queries and certificate loading during concurrent HTTPS reads.
+  DNS lookups run off the I/O threads and cached addresses expire after a minute.
 
 ## [0.4.0] - 2026-09-27
 

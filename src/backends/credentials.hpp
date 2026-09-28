@@ -42,11 +42,15 @@ struct CurlCaSupport {
     std::string_view tls;
     bool default_ca_path = false;
     bool default_bundle = false;
+    bool hashed_ca_directory = false;
 };
 
+enum class CaDefault { none, directory, bundle };
+
+[[nodiscard]] bool has_hashed_certificates(const char* path);
 [[nodiscard]] const CurlCaSupport& running_curl_ca_support();
-[[nodiscard]] bool clear_default_ca_path(const HttpRequestOptions& options,
-                                         const CurlCaSupport& curl) noexcept;
+[[nodiscard]] CaDefault ca_default_to_clear(const HttpRequestOptions& options,
+                                            const CurlCaSupport& curl) noexcept;
 
 [[nodiscard]] std::expected<HttpResponse, RequestError>
 credential_request(std::string_view method, const std::string& url, std::string_view body,

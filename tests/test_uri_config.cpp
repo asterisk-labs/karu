@@ -168,41 +168,53 @@ void test_config_precedence() {
     }
 #endif
 
-    // Model a build with both a default CA bundle and a CA directory.
+    // Model a Debian build: a default bundle beside a hashed default directory.
     {
+        using backends::CaDefault;
         const backends::CurlCaSupport debian{.version = 0x080500,
                                              .tls = "OpenSSL/3.0.13",
                                              .default_ca_path = true,
-                                             .default_bundle = true};
-        HttpRequestOptions bundle;
-        bundle.ca_bundle = "/etc/ssl/certs/ca-certificates.crt";
-        OK(backends::clear_default_ca_path(bundle, debian));
-        OK(backends::clear_default_ca_path(HttpRequestOptions{}, debian));
+                                             .default_bundle = true,
+                                             .hashed_ca_directory = true};
+        HttpRequestOptions system;
+        system.ca_bundle = "/etc/ssl/certs/ca-certificates.crt";
+        system.system_ca_bundle = true;
+        EQ(backends::ca_default_to_clear(HttpRequestOptions{}, debian), CaDefault::bundle);
+        EQ(backends::ca_default_to_clear(system, debian), CaDefault::bundle);
 
+        // A configured bundle is used alone, so libcurl can cache it.
+        HttpRequestOptions bundle;
+        bundle.ca_bundle = "/opt/certificates.pem";
+        EQ(backends::ca_default_to_clear(bundle, debian), CaDefault::directory);
         HttpRequestOptions directory = bundle;
         directory.ca_path = "/etc/ssl/certs";
-        OK(!backends::clear_default_ca_path(directory, debian));
+        EQ(backends::ca_default_to_clear(directory, debian), CaDefault::none);
 
-        // Without a bundle the directory is the only trust source.
-        backends::CurlCaSupport no_bundle = debian;
-        no_bundle.default_bundle = false;
-        OK(!backends::clear_default_ca_path(HttpRequestOptions{}, no_bundle));
-        OK(backends::clear_default_ca_path(bundle, no_bundle));
+        // Without hashed certificates the bundle is cached instead, if there is one.
+        backends::CurlCaSupport unhashed = debian;
+        unhashed.hashed_ca_directory = false;
+        EQ(backends::ca_default_to_clear(system, unhashed), CaDefault::directory);
+        EQ(backends::ca_default_to_clear(HttpRequestOptions{}, unhashed), CaDefault::directory);
+        unhashed.default_bundle = false;
+        EQ(backends::ca_default_to_clear(HttpRequestOptions{}, unhashed), CaDefault::none);
 
-        backends::CurlCaSupport no_directory = debian;
+        backends::CurlCaSupport no_directory = unhashed;
         no_directory.default_ca_path = false;
-        OK(!backends::clear_default_ca_path(bundle, no_directory));
+        EQ(backends::ca_default_to_clear(bundle, no_directory), CaDefault::none);
 
+        // Only the bundle needs the 7.87 cache; directory lookups do not.
         backends::CurlCaSupport before_cache = debian;
         before_cache.version = 0x075600;
-        OK(!backends::clear_default_ca_path(bundle, before_cache));
+        EQ(backends::ca_default_to_clear(bundle, before_cache), CaDefault::none);
+        EQ(backends::ca_default_to_clear(system, before_cache), CaDefault::bundle);
 
         // Leave other TLS backends unchanged.
         for (const char* tls : {"Schannel", "SecureTransport (LibreSSL/3.3.6)", "GnuTLS/3.8.3",
                                 "(OpenSSL/3.0.13) Schannel"}) {
             backends::CurlCaSupport other = debian;
             other.tls = tls;
-            OK(!backends::clear_default_ca_path(bundle, other));
+            EQ(backends::ca_default_to_clear(system, other), CaDefault::none);
+            EQ(backends::ca_default_to_clear(bundle, other), CaDefault::none);
         }
     }
 

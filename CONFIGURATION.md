@@ -244,16 +244,17 @@ credential options or callback instead of injecting those headers through
 `KARU_HTTP_HEADERS`.
 
 Object transfers and their redirects are restricted to HTTP and HTTPS.
-On Linux and macOS, Karu uses the system CA bundle available at runtime when
-none of the CA options above is set. This keeps binaries from retaining the
-build machine's certificate path.
+On Linux and macOS, Karu discovers a system CA bundle at runtime when no CA
+option is set. This avoids relying solely on the build machine's certificate path.
 
-With OpenSSL and libcurl 7.87+, Karu clears the default CA directory when a
-bundle is available. This lets libcurl cache the bundle. Set `KARU_HTTP_CA_PATH`
-to use a directory too; other TLS backends keep their defaults.
+With OpenSSL and no CA option set, Karu prefers libcurl's hashed CA directory,
+as on Debian and Ubuntu. Only certificates in that directory are trusted.
+Otherwise, libcurl 7.87+ uses the available bundle without its default directory
+so it can cache the certificates. Set `KARU_HTTP_CA_PATH` to include a directory;
+other TLS backends keep their defaults.
 
-libcurl caches the certificates for up to 24 hours by default. Changes to the
-bundle file may not take effect until the cache expires.
+The bundle cache lasts up to 24 hours. Bundle updates may not take effect
+until it expires.
 
 ## Custom providers
 

@@ -451,6 +451,7 @@ HttpRequestOptions ConfigSnapshot::compute_http_options() const {
     result.ca_path = option(path, "KARU_HTTP_CA_PATH");
     if (!has_option(path, "KARU_HTTP_CA_BUNDLE") && !has_option(path, "KARU_HTTP_CA_PATH")) {
         result.ca_bundle = system_ca_bundle_;
+        result.system_ca_bundle = !system_ca_bundle_.empty();
     }
     result.proxy = option(path, "KARU_HTTP_PROXY");
     result.proxy_user_password = option(path, "KARU_HTTP_PROXY_CREDENTIALS");

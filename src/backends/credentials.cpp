@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <openssl/pem.h>
 #include <ranges>
 #include <span>
 #include <sstream>
@@ -198,6 +199,35 @@ std::expected<void, RequestError> set_credential_options(CURL* easy, CURLoption 
 
 } // namespace
 
+bool has_hashed_certificates(const char* path) {
+    if (path == nullptr)
+        return false;
+    std::error_code error;
+    for (std::filesystem::directory_iterator entry(path, error), end; !error && entry != end;
+         entry.increment(error)) {
+        const std::string name = entry->path().filename().string();
+        if (name.size() != 10 || name[8] != '.' || name[9] != '0' ||
+            !std::all_of(name.begin(), name.begin() + 8,
+                         [](unsigned char c) { return std::isxdigit(c) != 0; }))
+            continue;
+        if (!entry->is_regular_file(error) || error) {
+            error.clear();
+            continue;
+        }
+        std::unique_ptr<BIO, decltype(&BIO_free)> file(
+            BIO_new_file(entry->path().string().c_str(), "r"), BIO_free);
+        if (!file)
+            continue;
+        std::unique_ptr<X509, decltype(&X509_free)> certificate(
+            PEM_read_bio_X509(file.get(), nullptr, nullptr, nullptr), X509_free);
+        unsigned long hash = 0;
+        std::from_chars(name.data(), name.data() + 8, hash, 16);
+        if (certificate && X509_subject_name_hash(certificate.get()) == hash)
+            return true;
+    }
+    return false;
+}
+
 const CurlCaSupport& running_curl_ca_support() {
     static const CurlCaSupport support = [] {
         CurlCaSupport result;
@@ -210,19 +240,30 @@ const CurlCaSupport& running_curl_ca_support() {
         std::error_code error;
         result.default_bundle =
             info->cainfo != nullptr && std::filesystem::is_regular_file(info->cainfo, error);
+        result.hashed_ca_directory =
+            info->capath != nullptr && has_hashed_certificates(info->capath);
         return result;
     }();
     return support;
 }
 
-// A CA directory prevents OpenSSL's CA cache from being used. Clear the default
-// only when a bundle is available and the caller has not set a directory.
-bool clear_default_ca_path(const HttpRequestOptions& options, const CurlCaSupport& curl) noexcept {
+// A hashed directory loads certificates on demand. An explicit bundle uses
+// libcurl's CA cache instead, which requires clearing the default directory.
+CaDefault ca_default_to_clear(const HttpRequestOptions& options,
+                              const CurlCaSupport& curl) noexcept {
     const bool openssl = curl.tls.starts_with("OpenSSL/") || curl.tls.starts_with("LibreSSL/") ||
                          curl.tls.starts_with("BoringSSL") || curl.tls.starts_with("AWS-LC/") ||
                          curl.tls.starts_with("quictls/");
-    return openssl && curl.version >= 0x075700 && curl.default_ca_path && options.ca_path.empty() &&
-           (!options.ca_bundle.empty() || curl.default_bundle);
+    if (!openssl || !options.ca_path.empty())
+        return CaDefault::none;
+    const bool configured_bundle = !options.ca_bundle.empty() && !options.system_ca_bundle;
+    if (!configured_bundle && curl.hashed_ca_directory)
+        return CaDefault::bundle;
+    if (curl.version >= 0x075700 && curl.default_ca_path &&
+        (!options.ca_bundle.empty() || curl.default_bundle)) {
+        return CaDefault::directory;
+    }
+    return CaDefault::none;
 }
 
 std::expected<HttpResponse, RequestError>
@@ -265,11 +306,18 @@ credential_request(std::string_view method, const std::string& url, std::string_
         if (!configured)
             return std::unexpected(configured.error());
     }
-    if (clear_default_ca_path(options, running_curl_ca_support())) {
+    switch (ca_default_to_clear(options, running_curl_ca_support())) {
+    case CaDefault::directory:
         configured = set_credential_option(easy.get(), CURLOPT_CAPATH, static_cast<char*>(nullptr));
-        if (!configured)
-            return std::unexpected(configured.error());
+        break;
+    case CaDefault::bundle:
+        configured = set_credential_option(easy.get(), CURLOPT_CAINFO, static_cast<char*>(nullptr));
+        break;
+    case CaDefault::none:
+        break;
     }
+    if (!configured)
+        return std::unexpected(configured.error());
     if (!options.proxy.empty()) {
         configured = set_credential_option(easy.get(), CURLOPT_PROXY, options.proxy.c_str());
         if (!configured)

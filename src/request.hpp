@@ -26,6 +26,8 @@ struct HttpRequestOptions {
     // User-configured headers are scoped to the original HTTP origin.
     bool same_origin_redirects_only = false;
     std::string ca_bundle;
+    // ca_bundle was found on the system, not configured.
+    bool system_ca_bundle = false;
     std::string ca_path;
     std::string proxy;
     std::string proxy_user_password;

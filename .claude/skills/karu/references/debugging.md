@@ -183,10 +183,10 @@ Silent costs worth checking:
   the first system bundle it finds when the configuration is created.
 - `CURLOPT_CAPATH` is not supported by every TLS backend (Schannel on Windows answers
   `CURLE_NOT_BUILT_IN`); prefer a bundle file there.
-- On OpenSSL with libcurl 7.87+, a CA stored only in the default directory is not
-  used when a bundle is available. Add it to the bundle or set `KARU_HTTP_CA_PATH`.
-  Setting a directory disables this cache; bundle updates may otherwise wait up
-  to 24 hours for the cache to expire.
+- With OpenSSL, default trust comes from the hashed CA directory when available.
+  An explicit bundle uses only its own certificates with libcurl 7.87+. If a CA
+  is missing, set `KARU_HTTP_CA_BUNDLE` and `KARU_HTTP_CA_PATH` to include both sources.
+  Bundle updates may wait up to 24 hours for libcurl's cache to expire.
 - Proxies: `KARU_HTTP_PROXY` and `KARU_HTTP_PROXY_CREDENTIALS`, or libcurl's
   `https_proxy`, `http_proxy` and `no_proxy`. `SOURCE_PROXY_URL` is not a proxy setting.
 - HTTP/2 settings fail at setup (`could not configure HTTP request: CURLOPT_HTTP_VERSION: ...`,
