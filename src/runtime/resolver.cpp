@@ -87,14 +87,19 @@ std::vector<std::string> system_lookup(const std::string& host) {
     std::vector<std::string> addresses;
     std::vector<std::string> ipv4;
     std::exception_ptr failure;
-    std::jthread ipv6([&] {
+    std::thread ipv6([&] {
         try {
             resolve_family(host, AF_INET6, addresses);
         } catch (...) {
             failure = std::current_exception();
         }
     });
-    resolve_family(host, AF_INET, ipv4);
+    try {
+        resolve_family(host, AF_INET, ipv4);
+    } catch (...) {
+        ipv6.join();
+        throw;
+    }
     ipv6.join();
     if (failure)
         std::rethrow_exception(failure);
