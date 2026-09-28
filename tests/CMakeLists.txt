@@ -58,6 +58,14 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/http_server.py
                 $<TARGET_FILE:karu_http_test>)
 
+    add_executable(karu_tls_test test_tls.cpp test_support.cpp)
+    target_link_libraries(karu_tls_test PRIVATE karu::karu)
+    target_include_directories(karu_tls_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    karu_configure_cpp_test(karu_tls_test)
+    add_test(NAME karu_tls
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tls_server.py
+                $<TARGET_FILE:karu_tls_test>)
+
     # Credential discovery is driven entirely by loopback fixtures and files in
     # a temporary tree, so it never reads the developer's real profiles.
     add_executable(karu_credentials_test

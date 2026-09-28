@@ -93,6 +93,7 @@ off by default for consumers.
 | `karu` | `karu_tests` (`test_main.cpp` plus `test_uri_config`, `test_s3`, `test_gcs`, `test_azure`, `test_hugging_face`, `test_source`, `test_planner_property`, `test_status_and_paths`, `test_engine`) | URI grammar and windows, option precedence, exact SigV4, GOOG1 and Shared Key requests, managed headers, callback cache, local engine, batch lifetimes and cancellation under threads, planner properties, status mapping, the C++ facade |
 | `karu_c_api` | `karu_c_api_test` from `test_c_api.c` | the header compiles as C11 and the ABI works from C |
 | `karu_http` | `tests/http_server.py` runs `karu_http_test` with its port | real HTTP: ranges, chunked bodies, retries and `Retry-After`, redirects and header leaks, S3 region and credential corrections, preconditions, ignored ranges, truncation, size probes, connection reuse, cancellation |
+| `karu_tls` | `tests/tls_server.py` runs `karu_tls_test` | temporary certificates, CA bundles and directories, hostname validation, credential endpoints |
 | `karu_credentials` | `tests/credential_server.py` runs `karu_credentials_test` | AWS, GCS, Azure and Source discovery chains, profiles, `credential_process`, STS, OAuth, metadata services, transport options |
 | `karu_emulators` | `karu_emulator_test` | reads from MinIO, Azurite and fake-gcs-server; exits 77 (ctest skip) when none answer |
 | `karu_package_consumer`, `karu_c_package_consumer` | `tests/package`, run by `make package-test` | `find_package(karu)` from C++ and C |
