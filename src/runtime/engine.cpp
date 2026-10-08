@@ -156,6 +156,16 @@ bool same_version(const transport::RangeReply& left, const transport::RangeReply
            (left.etag.empty() || right.etag.empty() || left.etag == right.etag);
 }
 
+void add_range_stats(transport::RangeStats& destination,
+                     const transport::RangeStats& source) noexcept {
+    destination.received_bytes += source.received_bytes;
+    destination.retries += source.retries;
+    destination.throttled += source.throttled;
+    destination.new_connections += source.new_connections;
+    destination.resumed += source.resumed;
+    destination.credential_refreshes += source.credential_refreshes;
+}
+
 } // namespace
 
 Engine::Engine(ConfigSnapshot config)
@@ -1049,13 +1059,19 @@ karu_status Engine::object_info(const Locator& locator, std::uint64_t& size, std
 }
 
 karu_status Engine::read_ends(const Locator& locator, std::span<std::byte> head,
-                              std::span<std::byte> tail, std::uint64_t& size, std::string& etag) {
+                              std::span<std::byte> tail, std::uint64_t& size, std::string& etag,
+                              transport::RangeStats* stats) {
     using transport::ByteRange;
     using Reply = std::expected<transport::RangeReply, transport::Failure>;
     const Resolved& resolved = locator.resolved;
     etag.clear();
-    if (resolved.backend == Backend::File)
-        return read_file_ends(resolved, head, tail, size);
+    if (resolved.backend == Backend::File) {
+        const karu_status status = read_file_ends(resolved, head, tail, size);
+        if (status == KARU_OK && stats != nullptr) {
+            stats->received_bytes += at_most(head.size(), size) + at_most(tail.size(), size);
+        }
+        return status;
+    }
     if (head.empty() && tail.empty())
         return object_info(locator, size, etag);
 
@@ -1105,6 +1121,10 @@ karu_status Engine::read_ends(const Locator& locator, std::span<std::byte> head,
         return fail(head_reply.error());
     if (!tail_reply)
         return fail(tail_reply.error());
+    if (stats != nullptr) {
+        add_range_stats(*stats, head_reply->stats);
+        add_range_stats(*stats, tail_reply->stats);
+    }
     const bool head_sent = !head_part.empty();
     const bool tail_sent = !tail_part.empty();
     if (head_sent && tail_sent && !same_version(*head_reply, *tail_reply))

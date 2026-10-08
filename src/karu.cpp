@@ -2,6 +2,7 @@
 
 #include "client.hpp"
 #include "config.hpp"
+#include "download.hpp"
 #include "error.hpp"
 #include "locator.hpp"
 #include "runtime/batch.hpp"
@@ -79,6 +80,83 @@ void store_object_info(karu_object_info* out, std::uint64_t size, const std::str
         if (fits)
             std::memcpy(out->etag, etag.data(), etag.size());
         out->etag[fits ? etag.size() : 0] = '\0';
+    }
+}
+
+bool download_options(const karu_download_options* options, karu::DownloadSettings& result) {
+    if (options == nullptr)
+        return true;
+    constexpr std::size_t minimum_size =
+        offsetof(karu_download_options, chunk_size) + sizeof(options->chunk_size);
+    if (options->struct_size < minimum_size) {
+        karu::set_error("karu_client_download: download options structure is too small");
+        return false;
+    }
+    const auto available = [&](std::size_t offset, std::size_t size) {
+        return options->struct_size >= offset + size;
+    };
+    result.chunk_size = options->chunk_size;
+    if (available(offsetof(karu_download_options, parallelism), sizeof(options->parallelism)))
+        result.parallelism = options->parallelism;
+    if (available(offsetof(karu_download_options, overwrite), sizeof(options->overwrite))) {
+        if (options->overwrite != 0 && options->overwrite != 1) {
+            karu::set_error("karu_client_download: overwrite must be zero or one");
+            return false;
+        }
+        result.overwrite = options->overwrite != 0;
+    }
+    if (available(offsetof(karu_download_options, progress), sizeof(options->progress)))
+        result.progress = options->progress;
+    if (available(offsetof(karu_download_options, progress_user_data),
+                  sizeof(options->progress_user_data))) {
+        result.progress_user_data = options->progress_user_data;
+    }
+    if (result.chunk_size == 0 || result.chunk_size == KARU_TO_END) {
+        karu::set_error("karu_client_download: chunk_size must be nonzero and finite");
+        return false;
+    }
+    if (result.parallelism == 0 || result.parallelism > std::numeric_limits<std::size_t>::max()) {
+        karu::set_error("karu_client_download: parallelism is outside the supported range");
+        return false;
+    }
+    if (result.chunk_size > std::numeric_limits<std::size_t>::max() ||
+        result.parallelism > std::numeric_limits<std::size_t>::max() / result.chunk_size) {
+        karu::set_error("karu_client_download: chunk_size times parallelism is too large");
+        return false;
+    }
+    return true;
+}
+
+void store_download_result(karu_download_result* out, const karu::DownloadSummary& summary) {
+    if (out == nullptr)
+        return;
+    const auto available = [out](std::size_t offset, std::size_t size) {
+        return out->struct_size >= offset + size;
+    };
+    if (available(offsetof(karu_download_result, size), sizeof(out->size)))
+        out->size = summary.size;
+    if (available(offsetof(karu_download_result, downloaded), sizeof(out->downloaded)))
+        out->downloaded = summary.downloaded;
+    if (available(offsetof(karu_download_result, received_bytes), sizeof(out->received_bytes)))
+        out->received_bytes = summary.received_bytes;
+    if (available(offsetof(karu_download_result, retries), sizeof(out->retries)))
+        out->retries = summary.retries;
+    if (available(offsetof(karu_download_result, throttled), sizeof(out->throttled)))
+        out->throttled = summary.throttled;
+    if (available(offsetof(karu_download_result, new_connections), sizeof(out->new_connections))) {
+        out->new_connections = summary.new_connections;
+    }
+    if (available(offsetof(karu_download_result, resumed), sizeof(out->resumed)))
+        out->resumed = summary.resumed;
+    if (available(offsetof(karu_download_result, credential_refreshes),
+                  sizeof(out->credential_refreshes))) {
+        out->credential_refreshes = summary.credential_refreshes;
+    }
+    if (available(offsetof(karu_download_result, etag), sizeof(out->etag))) {
+        const bool fits = summary.etag.size() < sizeof(out->etag);
+        if (fits)
+            std::memcpy(out->etag, summary.etag.data(), summary.etag.size());
+        out->etag[fits ? summary.etag.size() : 0] = '\0';
     }
 }
 
@@ -529,6 +607,38 @@ karu_status karu_client_read_ends(karu_client* client, const karu_locator* locat
         return KARU_OK;
     } catch (...) {
         return exception_status("karu_client_read_ends");
+    }
+}
+
+karu_status karu_client_download(karu_client* client, const karu_locator* locator,
+                                 const char* destination, const karu_download_options* options,
+                                 karu_download_result* out_result) {
+    karu::clear_error();
+    if (client == nullptr || locator == nullptr || destination == nullptr) {
+        karu::set_error("karu_client_download: null argument");
+        return KARU_ERR_INVALID;
+    }
+    if (destination[0] == '\0') {
+        karu::set_error("karu_client_download: destination is empty");
+        return KARU_ERR_INVALID;
+    }
+    if (out_result != nullptr &&
+        out_result->struct_size < offsetof(karu_download_result, size) + sizeof(out_result->size)) {
+        karu::set_error("karu_client_download: result structure is too small");
+        return KARU_ERR_INVALID;
+    }
+    try {
+        karu::DownloadSettings settings;
+        if (!download_options(options, settings))
+            return KARU_ERR_INVALID;
+        karu::DownloadSummary summary;
+        const karu_status status = karu::download(client, locator, destination, settings, summary);
+        if (status != KARU_OK)
+            return status;
+        store_download_result(out_result, summary);
+        return KARU_OK;
+    } catch (...) {
+        return exception_status("karu_client_download");
     }
 }
 

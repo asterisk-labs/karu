@@ -70,7 +70,8 @@ class Engine {
     // Stores the first head.size() and the last tail.size() visible bytes, or
     // all of them when the object is shorter.
     karu_status read_ends(const Locator& locator, std::span<std::byte> head,
-                          std::span<std::byte> tail, std::uint64_t& size, std::string& etag);
+                          std::span<std::byte> tail, std::uint64_t& size, std::string& etag,
+                          transport::RangeStats* stats = nullptr);
 
   private:
     void io_loop(IoLoop& loop);

@@ -158,6 +158,26 @@ struct ObjectInfo {
     std::string etag;
 };
 
+struct DownloadOptions {
+    std::uint64_t chunk_size = KARU_DOWNLOAD_CHUNK_SIZE_DEFAULT;
+    std::uint64_t parallelism = KARU_DOWNLOAD_PARALLELISM_DEFAULT;
+    bool overwrite = false;
+    karu_download_progress progress = nullptr;
+    void* progress_user_data = nullptr;
+};
+
+struct DownloadResult {
+    std::uint64_t size = 0;
+    std::uint64_t downloaded = 0;
+    std::uint64_t received_bytes = 0;
+    std::uint64_t retries = 0;
+    std::uint64_t throttled = 0;
+    std::uint64_t new_connections = 0;
+    std::uint64_t resumed = 0;
+    std::uint64_t credential_refreshes = 0;
+    std::string etag;
+};
+
 struct Read {
     const Object* object = nullptr;
     std::uint64_t offset = 0;
@@ -313,6 +333,35 @@ class Client {
         if (status != KARU_OK)
             return std::unexpected(current_error(status));
         return ObjectInfo{.size = info.size, .etag = info.etag};
+    }
+
+    [[nodiscard]] Result<DownloadResult> download(const Object& object,
+                                                  std::string_view destination,
+                                                  const DownloadOptions& options = {}) const {
+        const std::string stable_destination(destination);
+        const karu_download_options native_options{
+            .struct_size = sizeof(karu_download_options),
+            .chunk_size = options.chunk_size,
+            .parallelism = options.parallelism,
+            .overwrite = options.overwrite ? 1 : 0,
+            .progress = options.progress,
+            .progress_user_data = options.progress_user_data,
+        };
+        karu_download_result result = KARU_DOWNLOAD_RESULT_INIT;
+        const karu_status status =
+            karu_client_download(handle_.get(), object.native_handle(), stable_destination.c_str(),
+                                 &native_options, &result);
+        if (status != KARU_OK)
+            return std::unexpected(current_error(status));
+        return DownloadResult{.size = result.size,
+                              .downloaded = result.downloaded,
+                              .received_bytes = result.received_bytes,
+                              .retries = result.retries,
+                              .throttled = result.throttled,
+                              .new_connections = result.new_connections,
+                              .resumed = result.resumed,
+                              .credential_refreshes = result.credential_refreshes,
+                              .etag = result.etag};
     }
 
     [[nodiscard]] Result<void> read_into(const Object& object, std::uint64_t offset,

@@ -201,6 +201,50 @@ int main(void) {
     if (karu_client_read_ends(client, locator, ends, 4, ends, 4, &too_small) != KARU_ERR_INVALID)
         return 68;
 
+    karu_download_options download_options = KARU_DOWNLOAD_OPTIONS_INIT;
+    karu_download_result download_result = KARU_DOWNLOAD_RESULT_INIT;
+    if (download_options.struct_size != sizeof(karu_download_options) ||
+        download_options.chunk_size != KARU_DOWNLOAD_CHUNK_SIZE_DEFAULT ||
+        download_options.parallelism != KARU_DOWNLOAD_PARALLELISM_DEFAULT ||
+        download_result.struct_size != sizeof(karu_download_result))
+        return 69;
+    if (karu_client_download(NULL, locator, "download.bin", &download_options, &download_result) !=
+        KARU_ERR_INVALID)
+        return 70;
+    if (karu_client_download(client, NULL, "download.bin", &download_options, &download_result) !=
+        KARU_ERR_INVALID)
+        return 71;
+    if (karu_client_download(client, locator, NULL, &download_options, &download_result) !=
+        KARU_ERR_INVALID)
+        return 72;
+    if (karu_client_download(client, locator, "", &download_options, &download_result) !=
+        KARU_ERR_INVALID)
+        return 73;
+    download_options.chunk_size = 0;
+    if (karu_client_download(client, locator, "download.bin", &download_options,
+                             &download_result) != KARU_ERR_INVALID)
+        return 74;
+    download_options.chunk_size = KARU_DOWNLOAD_CHUNK_SIZE_DEFAULT;
+    download_options.parallelism = 0;
+    if (karu_client_download(client, locator, "download.bin", &download_options,
+                             &download_result) != KARU_ERR_INVALID)
+        return 75;
+    download_options.parallelism = KARU_DOWNLOAD_PARALLELISM_DEFAULT;
+    download_options.overwrite = 2;
+    if (karu_client_download(client, locator, "download.bin", &download_options,
+                             &download_result) != KARU_ERR_INVALID)
+        return 76;
+    download_options.overwrite = 0;
+    download_options.struct_size = sizeof(size_t);
+    if (karu_client_download(client, locator, "download.bin", &download_options,
+                             &download_result) != KARU_ERR_INVALID)
+        return 77;
+    download_options = (karu_download_options)KARU_DOWNLOAD_OPTIONS_INIT;
+    download_result.struct_size = sizeof(size_t);
+    if (karu_client_download(client, locator, "download.bin", &download_options,
+                             &download_result) != KARU_ERR_INVALID)
+        return 78;
+
     karu_locator_free(locator);
     karu_free(NULL);
     karu_client_free(client);

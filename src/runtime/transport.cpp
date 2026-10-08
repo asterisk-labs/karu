@@ -524,6 +524,7 @@ struct ProbeState {
     bool follow_redirects = true;
     bool same_origin_redirects_only = false;
     std::string_view original_url;
+    RangeStats* stats = nullptr;
 
     long http_status = 0;
     std::uint64_t total = 0;
@@ -653,6 +654,8 @@ std::size_t probe_body_callback(char* data, std::size_t size, std::size_t count,
         state.error_body_received += *bytes;
         return *bytes;
     }
+    if (state.stats != nullptr)
+        state.stats->received_bytes += *bytes;
     if (!state.started) {
         state.started = true;
         if (!start_body(state, status)) {
@@ -911,6 +914,7 @@ std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy,
     RequestDeadline deadline;
     deadline.start(options.request_timeout_seconds);
     int unreachable_attempts = 0;
+    RangeStats stats;
     for (int attempt = 0; attempt < options.max_attempts;) {
         if (deadline.expired())
             return std::unexpected(timeout_failure(locator.resolved.canonical_uri));
@@ -948,11 +952,17 @@ std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy,
                            .fallback_limit = options.range_fallback_limit,
                            .follow_redirects = request->http.follow_redirects,
                            .same_origin_redirects_only = request->http.same_origin_redirects_only,
-                           .original_url = request->url};
+                           .original_url = request->url,
+                           .stats = &stats};
         error_buffer[0] = '\0';
         CURLcode code = curl_easy_perform(easy);
         long http_status = 0;
         curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &http_status);
+        long connects = 0;
+        if (curl_easy_getinfo(easy, CURLINFO_NUM_CONNECTS, &connects) == CURLE_OK && connects > 0)
+            stats.new_connections += static_cast<std::uint64_t>(connects);
+        if (http_status == 429 || http_status == 503)
+            ++stats.throttled;
         if (code == CURLE_WRITE_ERROR && state.cut_short)
             code = CURLE_OK;
         // An empty body never reached the callback.
@@ -983,6 +993,7 @@ std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy,
             detail::credentials_expired(locator.resolved.backend, http_status, error_body)) {
             request_builder.invalidate_credentials(locator);
             credentials_retried = true;
+            ++stats.credential_refreshes;
             continue;
         }
 
@@ -997,10 +1008,14 @@ std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy,
                 return RangeReply{.total = state.total,
                                   .first = range.suffix ? 0 : range.first,
                                   .got = 0,
-                                  .etag = state.etag};
+                                  .etag = state.etag,
+                                  .stats = stats};
             }
             if (range.suffix) {
-                return RangeReply{.total = state.total, .etag = state.etag, .suffix_ignored = true};
+                return RangeReply{.total = state.total,
+                                  .etag = state.etag,
+                                  .suffix_ignored = true,
+                                  .stats = stats};
             }
         }
 
@@ -1039,12 +1054,19 @@ std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy,
                     Failure{KARU_ERR_HTTP, concat(redact_url(request->url),
                                                   ": response body does not match Content-Range")});
             }
-            return RangeReply{state.total, state.range_first, state.stored, state.etag};
+            return RangeReply{.total = state.total,
+                              .first = state.range_first,
+                              .got = state.stored,
+                              .etag = state.etag,
+                              .stats = stats};
         }
 
         if (code == CURLE_OK && http_status == 200) {
             if (state.suffix_ignored)
-                return RangeReply{.total = state.total, .etag = state.etag, .suffix_ignored = true};
+                return RangeReply{.total = state.total,
+                                  .etag = state.etag,
+                                  .suffix_ignored = true,
+                                  .stats = stats};
             if (state.range_fallback_rejected) {
                 return std::unexpected(Failure{
                     KARU_ERR_HTTP,
@@ -1056,7 +1078,11 @@ std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy,
                     Failure{KARU_ERR_HTTP,
                             concat(redact_url(request->url), ": the server reported no size")});
             }
-            return RangeReply{state.total, state.range_first, state.stored, state.etag};
+            return RangeReply{.total = state.total,
+                              .first = state.range_first,
+                              .got = state.stored,
+                              .etag = state.etag,
+                              .stats = stats};
         }
 
         if (code == CURLE_OK && http_status >= 200 && http_status < 300) {
@@ -1075,6 +1101,7 @@ std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy,
             http_status == 400 && error_body.find("RequestTimeout") != std::string_view::npos;
         if (attempt < options.max_attempts && unreachable_attempts < kUnreachableAttempts &&
             (detail::transient(code, http_status) || request_timeout)) {
+            ++stats.retries;
             const auto wait = detail::retry_delay(attempt, state.retry_after, random);
             if (!deadline.can_wait_for(wait))
                 return std::unexpected(timeout_failure(

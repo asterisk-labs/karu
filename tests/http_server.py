@@ -13,6 +13,7 @@ import urllib.parse
 
 DATA = bytes((index * 31 + 7) & 0xFF for index in range(4096))
 LARGE_DATA = bytes((index * 31 + 7) & 0xFF for index in range(128 * 1024))
+DOWNLOAD_PROBE_DATA = bytes((index * 31 + 7) & 0xFF for index in range(3 * 1024 * 1024 + 123))
 # Simulate GCS serving decompressed bytes instead of the stored object.
 DECODED = bytes((index * 17 + 3) & 0xFF for index in range(8192))
 # An older version of /resume/changed, replaced while a read was resuming.
@@ -65,6 +66,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
     late_region_retries = 0
     same_region_requests = 0
     retry_date_requests = 0
+    download_retries = 0
+    download_lock = threading.Lock()
+    download_active = 0
+    download_max_active = 0
+    download_ranges: list[tuple[int, int, str | None]] = []
+    download_probe_active = 0
+    download_probe_max_active = 0
+    download_probe_ranges: list[tuple[int, int, str | None]] = []
     cancel_started = threading.Event()
     cancel_range_ok = False
     redirect_target_port = 0
@@ -216,6 +225,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
             verdict = self.ends_verdict(path.removeprefix("/ends-verdict"))
             self.reply(206, b"\x01" if verdict else b"\x00", Content_Range="bytes 0-0/1")
             return
+        if path == "/download-verdict":
+            expected = {(0, 511, None)} | {
+                (offset, offset + 511, '"download-v1"') for offset in range(512, 4096, 512)
+            }
+            with Handler.download_lock:
+                valid = (
+                    2 <= Handler.download_max_active <= 3
+                    and len(Handler.download_ranges) == len(expected)
+                    and set(Handler.download_ranges) == expected
+                )
+            self.reply(206, b"\x01" if valid else b"\x00", Content_Range="bytes 0-0/1")
+            return
+        if path == "/download-probe-verdict":
+            expected = {
+                (0, 1024 * 1024 - 1, None),
+                (1024 * 1024, 3 * 1024 * 1024 - 1, '"probe-v1"'),
+                (3 * 1024 * 1024, len(DOWNLOAD_PROBE_DATA) - 1, '"probe-v1"'),
+            }
+            with Handler.download_lock:
+                valid = (
+                    Handler.download_probe_max_active == 2
+                    and len(Handler.download_probe_ranges) == len(expected)
+                    and set(Handler.download_probe_ranges) == expected
+                )
+            self.reply(206, b"\x01" if valid else b"\x00", Content_Range="bytes 0-0/1")
+            return
         if "/ends/" in path:
             self.ends(path)
             return
@@ -247,6 +282,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if path == "/retry" and Handler.retries == 0:
             Handler.retries += 1
+            self.reply(503, b"try again", Retry_After="0")
+            return
+        if path == "/download-retry" and Handler.download_retries == 0:
+            Handler.download_retries += 1
             self.reply(503, b"try again", Retry_After="0")
             return
         if path == "/scatter-retry" and Handler.scatter_retries == 0:
@@ -422,8 +461,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
             time.sleep(4)
         first_text, last_text = range_header[6:].split("-", 1)
         first = int(first_text)
-        source = LARGE_DATA if path == "/scatter-chunks" else DATA
+        if (
+            path == "/download-changed"
+            and self.headers.get("If-Match") == '"download-v1"'
+            and first > 0
+        ):
+            self.reply(412, b"changed", ETag='"download-v2"')
+            return
+        if path == "/scatter-chunks":
+            source = LARGE_DATA
+        elif path == "/download-probe":
+            source = DOWNLOAD_PROBE_DATA
+        else:
+            source = DATA
         last = min(int(last_text), len(source) - 1)
+        if path == "/download-retry":
+            with Handler.download_lock:
+                Handler.download_active += 1
+                Handler.download_max_active = max(
+                    Handler.download_max_active, Handler.download_active
+                )
+                Handler.download_ranges.append((first, last, self.headers.get("If-Match")))
+            time.sleep(0.05)
+            with Handler.download_lock:
+                Handler.download_active -= 1
+        if path == "/download-probe":
+            with Handler.download_lock:
+                Handler.download_probe_active += 1
+                Handler.download_probe_max_active = max(
+                    Handler.download_probe_max_active, Handler.download_probe_active
+                )
+                Handler.download_probe_ranges.append((first, last, self.headers.get("If-Match")))
+            if self.headers.get("If-Match") is not None:
+                time.sleep(0.05)
+            with Handler.download_lock:
+                Handler.download_probe_active -= 1
         if first >= len(source):
             self.reply(416, Content_Range=f"bytes */{len(source)}")
             return
@@ -488,6 +560,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             extra = {"Warning": '214 proxy "Transformation Applied"'}
         if path == "/etag":
             extra = {"ETag": '"e1"'}
+        if path in ("/download", "/download-retry", "/download-changed"):
+            extra = {"ETag": '"download-v1"'}
+        if path == "/download-probe":
+            extra = {"ETag": '"probe-v1"'}
         if path == "/ignores-if-match":
             # Ignore If-Match but report the served version, as some CDNs do.
             extra = {"ETag": '"e2"'}

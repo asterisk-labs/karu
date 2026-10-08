@@ -64,6 +64,17 @@ struct ByteRange {
     bool suffix = false;
 };
 
+// Counters collected by a synchronous ranged probe. Keep these aligned with
+// the transfer counters exposed by karu_batch_stats.
+struct RangeStats {
+    std::uint64_t received_bytes = 0;
+    std::uint64_t retries = 0;
+    std::uint64_t throttled = 0;
+    std::uint64_t new_connections = 0;
+    std::uint64_t resumed = 0;
+    std::uint64_t credential_refreshes = 0;
+};
+
 struct RangeReply {
     std::uint64_t total = 0;
     // The bytes stored at the destination start at this offset.
@@ -73,6 +84,7 @@ struct RangeReply {
     std::string etag;
     // The server ignored the suffix of a longer object and nothing was stored.
     bool suffix_ignored = false;
+    RangeStats stats{};
 };
 
 // One ranged GET on the calling thread, with the retries, corrections and

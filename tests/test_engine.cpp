@@ -1,6 +1,7 @@
 #include "karu/karu.h"
 #include "karu/karu.hpp"
 #include "locator.hpp"
+#include "platform.hpp"
 #include "runtime/batch.hpp"
 #include "runtime/engine.hpp"
 #include "runtime/http_response.hpp"
@@ -10,10 +11,13 @@
 
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <span>
 #include <string>
@@ -672,6 +676,14 @@ void test_transport_statuses() {
 
 void test_cpp_facade() {
     SECTION("C++ facade");
+#ifndef _WIN32
+    OK(karu::os::hard_links_unavailable(ENOTSUP));
+    OK(karu::os::hard_links_unavailable(EOPNOTSUPP));
+    OK(karu::os::hard_links_unavailable(ENOSYS));
+    OK(karu::os::hard_links_unavailable(EPERM));
+    OK(!karu::os::hard_links_unavailable(EEXIST));
+    OK(!karu::os::hard_links_unavailable(EACCES));
+#endif
     auto config = karu::Config::empty();
     OK(config.has_value());
     if (!config)
@@ -774,6 +786,55 @@ void test_cpp_facade() {
         }
     }
     EQ(ready, 2);
+
+    const auto download_path = std::filesystem::temp_directory_path() /
+                               ("karu_download_" + std::to_string(karu::os::pid()) + ".bin");
+    std::error_code ignored;
+    std::filesystem::remove(download_path, ignored);
+    const karu::DownloadOptions download_options{
+        .chunk_size = 257,
+        .parallelism = 3,
+        .overwrite = false,
+    };
+    auto downloaded = client->download(*object, download_path.string(), download_options);
+    OK(downloaded.has_value());
+    if (downloaded) {
+        EQ(downloaded->size, std::filesystem::file_size(fixture_path));
+        EQ(downloaded->downloaded, downloaded->size);
+        EQ(downloaded->received_bytes, downloaded->size);
+        OK(downloaded->etag.empty());
+        std::ifstream input(download_path, std::ios::binary);
+        const std::vector<unsigned char> copy((std::istreambuf_iterator<char>(input)),
+                                              std::istreambuf_iterator<char>());
+        std::ifstream original(fixture_path, std::ios::binary);
+        const std::vector<unsigned char> expected((std::istreambuf_iterator<char>(original)),
+                                                  std::istreambuf_iterator<char>());
+        OK(copy == expected);
+    }
+    auto existing = client->download(*object, download_path.string(), download_options);
+    OK(!existing.has_value() && existing.error().status == KARU_ERR_IO);
+    OK(!existing.has_value() &&
+       existing.error().message.find("destination already exists") != std::string::npos);
+    auto replacement_options = download_options;
+    replacement_options.overwrite = true;
+    auto replaced = client->download(*object, download_path.string(), replacement_options);
+    OK(replaced.has_value());
+    std::filesystem::remove(download_path, ignored);
+    if (window) {
+        auto window_download = client->download(*window, download_path.string(), download_options);
+        OK(window_download.has_value() && window_download->size == 50);
+        if (window_download) {
+            std::ifstream input(download_path, std::ios::binary);
+            const std::vector<unsigned char> copy((std::istreambuf_iterator<char>(input)),
+                                                  std::istreambuf_iterator<char>());
+            std::ifstream original(fixture_path, std::ios::binary);
+            original.seekg(100);
+            std::vector<unsigned char> expected(50);
+            original.read(reinterpret_cast<char*>(expected.data()), expected.size());
+            OK(copy == expected);
+        }
+        std::filesystem::remove(download_path, ignored);
+    }
 }
 
 } // namespace karu::test

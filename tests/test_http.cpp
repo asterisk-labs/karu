@@ -10,11 +10,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <span>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -89,6 +93,32 @@ struct SlowCredentialsState {
     std::atomic<int> active{0};
     std::atomic<bool> release{false};
 };
+
+struct DownloadProgress {
+    int calls = 0;
+    std::uint64_t completed = 0;
+    std::uint64_t total = 0;
+    bool cancel = false;
+};
+
+int download_progress(void* data, std::uint64_t completed, std::uint64_t total) {
+    auto& progress = *static_cast<DownloadProgress*>(data);
+    ++progress.calls;
+    progress.completed = completed;
+    progress.total = total;
+    return progress.cancel ? 0 : 1;
+}
+
+bool has_temporary_for(const std::filesystem::path& destination) {
+    const std::string prefix = destination.filename().string() + ".karu.part.";
+    std::error_code error;
+    for (const auto& entry :
+         std::filesystem::directory_iterator(destination.parent_path(), error)) {
+        if (entry.path().filename().string().starts_with(prefix))
+            return true;
+    }
+    return false;
+}
 
 karu_status refresh_credentials(void* data, karu_credentials_kind kind, const char*,
                                 karu_credentials* out) {
@@ -229,6 +259,17 @@ int main(int argc, char** argv) {
     check(karu_resolve((base + "/empty").c_str(), &empty) == KARU_OK, "resolve empty object");
     check(karu_client_size(client, empty, &size) == KARU_OK && size == 0,
           "empty object size from Content-Range");
+    const auto empty_download_path =
+        std::filesystem::temp_directory_path() / "karu-http-download-empty.bin";
+    std::error_code empty_download_error;
+    std::filesystem::remove(empty_download_path, empty_download_error);
+    karu_download_result empty_download = KARU_DOWNLOAD_RESULT_INIT;
+    check(karu_client_download(client, empty, empty_download_path.string().c_str(), nullptr,
+                               &empty_download) == KARU_OK &&
+              empty_download.size == 0 && empty_download.downloaded == 0 &&
+              std::filesystem::file_size(empty_download_path) == 0,
+          "empty object downloads as an empty file");
+    std::filesystem::remove(empty_download_path, empty_download_error);
     karu_locator_free(empty);
 
     karu_locator* no_content = nullptr;
@@ -796,6 +837,112 @@ int main(int argc, char** argv) {
     check(fetch(client, base + "/etag", 10, small, info.etag) == KARU_OK, "stat ETag pins a read");
     check(fetch(client, base + "/etag", 10, small, "\"e0\"") == KARU_ERR_PRECONDITION,
           "a stale ETag fails the read");
+
+    const auto download_path = std::filesystem::temp_directory_path() / "karu-http-download.bin";
+    const auto cancelled_path =
+        std::filesystem::temp_directory_path() / "karu-http-download-cancelled.bin";
+    const auto changed_path =
+        std::filesystem::temp_directory_path() / "karu-http-download-changed.bin";
+    const auto probe_path = std::filesystem::temp_directory_path() / "karu-http-download-probe.bin";
+    std::error_code download_error;
+    std::filesystem::remove(download_path, download_error);
+    std::filesystem::remove(cancelled_path, download_error);
+    std::filesystem::remove(changed_path, download_error);
+    std::filesystem::remove(probe_path, download_error);
+    karu_locator* download_object = nullptr;
+    check(karu_resolve((base + "/download-retry").c_str(), &download_object) == KARU_OK,
+          "resolve download object");
+    DownloadProgress progress;
+    karu_download_options download_options = KARU_DOWNLOAD_OPTIONS_INIT;
+    download_options.chunk_size = 512;
+    download_options.parallelism = 3;
+    download_options.progress = download_progress;
+    download_options.progress_user_data = &progress;
+    karu_download_result download_result = KARU_DOWNLOAD_RESULT_INIT;
+    check(karu_client_download(client, download_object, download_path.string().c_str(),
+                               &download_options, &download_result) == KARU_OK,
+          "parallel HTTP download");
+    constexpr std::uint64_t download_size = 4096;
+    check(download_result.size == download_size && download_result.downloaded == download_size &&
+              download_result.received_bytes >= download_size && download_result.retries == 1 &&
+              download_result.throttled == 1 &&
+              std::string(download_result.etag) == "\"download-v1\"",
+          "download result and retry counters");
+    check(progress.calls == 8 && progress.completed == download_size &&
+              progress.total == download_size,
+          "download progress runs for every completed chunk");
+    std::array<unsigned char, 1> download_verdict{};
+    check(fetch(client, base + "/download-verdict", 0, download_verdict) == KARU_OK &&
+              download_verdict[0] == 1,
+          "download uses bounded parallel ranges with one ETag");
+    {
+        std::ifstream input(download_path, std::ios::binary);
+        const std::vector<unsigned char> downloaded((std::istreambuf_iterator<char>(input)),
+                                                    std::istreambuf_iterator<char>());
+        check(downloaded.size() == download_size, "downloaded file has the object size");
+        check_bytes(downloaded, 0, "downloaded bytes are in object order");
+    }
+    check(karu_client_download(client, download_object, download_path.string().c_str(),
+                               &download_options, nullptr) == KARU_ERR_IO,
+          "download refuses to replace by default");
+    download_options.overwrite = 1;
+    check(karu_client_download(client, download_object, download_path.string().c_str(),
+                               &download_options, nullptr) == KARU_OK,
+          "download atomically replaces when requested");
+    karu_locator_free(download_object);
+
+    check(karu_resolve((base + "/download-probe").c_str(), &download_object) == KARU_OK,
+          "resolve short-probe download object");
+    karu_download_options probe_options = KARU_DOWNLOAD_OPTIONS_INIT;
+    probe_options.chunk_size = UINT64_C(2) << 20;
+    probe_options.parallelism = 3;
+    DownloadProgress probe_progress;
+    probe_options.progress = download_progress;
+    probe_options.progress_user_data = &probe_progress;
+    karu_download_result probe_result = KARU_DOWNLOAD_RESULT_INIT;
+    constexpr std::uint64_t probe_download_size = UINT64_C(3) * 1024 * 1024 + 123;
+    check(karu_client_download(client, download_object, probe_path.string().c_str(), &probe_options,
+                               &probe_result) == KARU_OK &&
+              probe_result.size == probe_download_size &&
+              probe_result.downloaded == probe_download_size && probe_progress.calls == 3 &&
+              probe_progress.completed == probe_download_size &&
+              std::string(probe_result.etag) == "\"probe-v1\"",
+          "large chunks use a short probe before the parallel window");
+    std::array<unsigned char, 1> probe_verdict{};
+    check(fetch(client, base + "/download-probe-verdict", 0, probe_verdict) == KARU_OK &&
+              probe_verdict[0] == 1,
+          "short probe and following chunks exactly cover the object");
+    {
+        std::ifstream input(probe_path, std::ios::binary);
+        const std::vector<unsigned char> downloaded((std::istreambuf_iterator<char>(input)),
+                                                    std::istreambuf_iterator<char>());
+        check(downloaded.size() == probe_download_size, "short-probe download has the object size");
+        check_bytes(downloaded, 0, "short-probe download contents");
+    }
+    karu_locator_free(download_object);
+    std::filesystem::remove(probe_path, download_error);
+
+    check(karu_resolve((base + "/download").c_str(), &download_object) == KARU_OK,
+          "resolve cancellable download object");
+    DownloadProgress cancellation{.cancel = true};
+    download_options.overwrite = 0;
+    download_options.progress_user_data = &cancellation;
+    check(karu_client_download(client, download_object, cancelled_path.string().c_str(),
+                               &download_options, nullptr) == KARU_ERR_CANCELLED &&
+              !std::filesystem::exists(cancelled_path) && !has_temporary_for(cancelled_path),
+          "cancelled download removes its temporary file");
+    karu_locator_free(download_object);
+
+    check(karu_resolve((base + "/download-changed").c_str(), &download_object) == KARU_OK,
+          "resolve changing download object");
+    download_options.progress = nullptr;
+    download_options.progress_user_data = nullptr;
+    check(karu_client_download(client, download_object, changed_path.string().c_str(),
+                               &download_options, nullptr) == KARU_ERR_PRECONDITION &&
+              !std::filesystem::exists(changed_path) && !has_temporary_for(changed_path),
+          "changed object fails without publishing partial bytes");
+    karu_locator_free(download_object);
+    std::filesystem::remove(download_path, download_error);
     // Check the response ETag even when the server ignores If-Match.
     check(fetch(client, base + "/ignores-if-match", 10, small, "\"e2\"") == KARU_OK,
           "a pin that matches the response ETag");

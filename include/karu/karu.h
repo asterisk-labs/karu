@@ -177,6 +177,69 @@ KARU_API karu_status karu_client_read_ends(karu_client* client, const karu_locat
                                            void* head, uint64_t head_length, void* tail,
                                            uint64_t tail_length, karu_object_info* out);
 
+// Whole-object downloads
+
+#define KARU_DOWNLOAD_CHUNK_SIZE_DEFAULT (UINT64_C(8) << 20)
+#define KARU_DOWNLOAD_PARALLELISM_DEFAULT UINT64_C(8)
+
+// Called on the thread executing karu_client_download after bytes have been
+// committed to the temporary output. Return zero to cancel the download.
+typedef int (*karu_download_progress)(void* user_data, uint64_t completed, uint64_t total);
+
+// Initialize struct_size to sizeof this struct. Fields beyond struct_size use
+// their documented defaults.
+typedef struct {
+    size_t struct_size;
+    // Bytes per independent range request. Must be nonzero and finite.
+    uint64_t chunk_size;
+    // Maximum ranges submitted together. Must be at least one.
+    uint64_t parallelism;
+    // Nonzero permits atomically replacing an existing regular file. With zero,
+    // publication is race-free when the destination filesystem supports an
+    // exclusive publish primitive and otherwise uses a best-effort existence check.
+    int overwrite;
+    karu_download_progress progress;
+    void* progress_user_data;
+} karu_download_options;
+#define KARU_DOWNLOAD_OPTIONS_INIT                                                                 \
+    {                                                                                              \
+        sizeof(karu_download_options), KARU_DOWNLOAD_CHUNK_SIZE_DEFAULT,                           \
+            KARU_DOWNLOAD_PARALLELISM_DEFAULT, 0, NULL, NULL                                       \
+    }
+
+// Download outcome and aggregate transfer counters. Initialize struct_size to
+// sizeof this struct; fields beyond struct_size are left untouched.
+typedef struct {
+    size_t struct_size;
+    uint64_t size;
+    uint64_t downloaded;
+    uint64_t received_bytes;
+    uint64_t retries;
+    uint64_t throttled;
+    uint64_t new_connections;
+    uint64_t resumed;
+    uint64_t credential_refreshes;
+    // Strong ETag used to pin every range, including quotes. Empty when the
+    // source did not provide one.
+    char etag[256];
+} karu_download_result;
+#define KARU_DOWNLOAD_RESULT_INIT                                                                  \
+    {                                                                                              \
+        sizeof(karu_download_result), 0, 0, 0, 0, 0, 0, 0, 0, { 0 }                                \
+    }
+
+// Downloads the bytes visible through locator into destination. Ranges are
+// fetched through a bounded parallel window and written by offset to a temporary file
+// beside destination. The destination is published atomically only after every
+// range succeeds. On failure or cancellation, the temporary file is removed.
+// Servers used for multi-chunk downloads must honor Range requests once offsets
+// exceed KARU_RANGE_FALLBACK_LIMIT.
+// options and out_result may be NULL.
+KARU_API karu_status karu_client_download(karu_client* client, const karu_locator* locator,
+                                          const char* destination,
+                                          const karu_download_options* options,
+                                          karu_download_result* out_result);
+
 // Positional reads
 
 // Per-batch planner overrides. Initialize struct_size to sizeof this struct.

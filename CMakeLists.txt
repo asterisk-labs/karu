@@ -27,6 +27,7 @@ set(KARU_CORE_SOURCES
     src/config.cpp
     src/uri.cpp
     src/error.cpp
+    src/download.cpp
     src/credential_cache.cpp
     src/request_builder.cpp
     src/runtime/batch.cpp
