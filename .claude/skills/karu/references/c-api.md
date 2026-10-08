@@ -10,7 +10,7 @@ installed karu 0.4.0 and ran on local files, `tests/http_server.py` and `hf://`.
 2. Handles and ownership
 3. Status codes and error text
 4. Configuration and clients
-5. Locators and sizes
+5. Locators, probes and downloads
 6. Requests, batches and completions
 7. Example: submit and drain
 8. Blocking fetch and per-batch options
@@ -128,7 +128,7 @@ vcpkg toolchain file.
 The engine (threads, curl handles, credential cache) starts on the first submit, fetch
 or size call, not at client creation.
 
-## 5. Locators and sizes
+## 5. Locators, probes and downloads
 
 - `karu_resolve(uri, &locator)` parses only. It returns `KARU_ERR_URI` or
   `KARU_ERR_UNSUPPORTED` with a message; see `paths.md` for the grammar.
@@ -157,6 +157,14 @@ or size call, not at client creation.
   with a longer whole object. Bounded windows ask for both ends by offset, and a tail
   inside the head needs no request. Sizes or strong ETags that disagree return
   `KARU_ERR_PRECONDITION`. A zero length takes `NULL`; with both zero the call is `stat`.
+- `karu_client_download(client, locator, destination, options, result)` copies every visible
+  byte to a local file. By default it downloads up to eight 8 MiB chunks at once and refuses
+  to replace an existing destination. It first reads up to 1 MiB to learn the size and ETag,
+  then pins later requests to that ETag. The destination appears only after all requests
+  succeed. On filesystems without exclusive publication, the no-replace check is best effort.
+  The progress callback runs on the calling thread and may return zero to cancel. Servers
+  must honor ranges beyond `KARU_RANGE_FALLBACK_LIMIT`. Initialize options and results with
+  `KARU_DOWNLOAD_OPTIONS_INIT` and `KARU_DOWNLOAD_RESULT_INIT`.
 
 ## 6. Requests, batches and completions
 

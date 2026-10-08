@@ -70,6 +70,7 @@ needs, so the object may be destroyed after `submit` or `fetch` returns.
 | `Result<std::uint64_t> size(const Object&) const` | visible size; one `GET` of byte 0 for remote objects, never cached |
 | `Result<ObjectInfo> stat(const Object&) const` | `size` plus the strong `etag` (empty when unavailable) from the same `GET`; pass `etag` as `Read::if_match` |
 | `Result<ObjectInfo> read_ends(const Object&, std::span<std::byte> head, std::span<std::byte> tail) const` | `karu_client_read_ends`: both ends with the size and ETag in one round trip; each span receives `min(span.size(), size)` bytes |
+| `Result<DownloadResult> download(const Object&, destination, const DownloadOptions& = {}) const` | complete local copy using parallel requests and fixed memory; no partial destination on failure |
 | `Result<void> read_into(object, offset, std::span<std::byte>, if_match = {}) const` | one blocking read into caller memory; an empty span succeeds without I/O |
 | `Result<std::vector<std::byte>> read(object, offset, length, if_match = {}) const` | allocates `length` zeroed bytes, then `read_into`; length 0 gives an empty vector |
 | `Result<void> fetch(std::span<const Read>, const SubmitOptions& = {}) const` | blocking batch; fails with the first failed read; destinations unspecified on failure |

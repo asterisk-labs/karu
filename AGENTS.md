@@ -6,9 +6,10 @@ ABI in `include/karu/karu.h`; `include/karu/karu.hpp` is a header-only C++ facad
 
 ## Working agreements
 
-- Keep Karu format free and read only. It resolves addresses, reports sizes and reads
-  byte ranges. Format parsing, writes, listings, archives and object caches belong to the
-  layers above it (rumi, cozip, GDAL).
+- Keep Karu format free and source-side read only. It resolves addresses, reports sizes,
+  reads byte ranges and may materialize a complete object into a caller-named local file.
+  Format parsing, remote writes, listings, archives and object caches belong to the layers
+  above it (rumi, cozip, GDAL).
 - Keep the hot path batch oriented. Do not add per-file or per-range blocking work, and
   keep credential discovery, callbacks and helper processes off the I/O thread.
 - Language bindings use the C header; do not bind the C++ facade. C++ types and exceptions

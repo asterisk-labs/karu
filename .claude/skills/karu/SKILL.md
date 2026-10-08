@@ -13,13 +13,14 @@ description: >-
 
 Karu reads exact byte ranges. Every read names an object, an offset, a length, a
 destination buffer and a caller tag, so reads carry no cursor and can be reordered,
-merged and retried. Karu is read only and format free: it resolves addresses, reports
-sizes and moves bytes. It never lists, writes, parses formats or caches object data.
-A format layer such as rumi decides which ranges matter and decodes what comes back.
+merged and retried. Karu is source-side read only and format free: it resolves addresses,
+reports sizes and moves bytes. It never lists, mutates source objects, parses formats or
+caches object data. It may copy a complete object to a caller-named local file. A format
+layer such as rumi decides which ranges matter and decodes what comes back.
 
-This skill describes **karu 0.4.0** (C API version 1). Check `karu_version_string()` or
-the `VERSION` file. If they differ, trust the source, `CHANGELOG.md` and
-`CONFIGURATION.md` over this file.
+This skill describes the current source tree (C API version 1). The latest released
+version recorded in `VERSION` is **karu 0.4.0**. When working from another checkout,
+trust its source, `CHANGELOG.md` and `CONFIGURATION.md` over this file.
 
 ## Mental model
 
@@ -35,6 +36,8 @@ the `VERSION` file. If they differ, trust the source, `CHANGELOG.md` and
   neighbours under four guards, runs at most `KARU_CONCURRENCY` remote transfers, and
   scatters bytes back so that every original request gets its own completion
   (tag, status, bytes read) in completion order.
+- **Download**: copy all bytes visible through one locator to a local file with parallel
+  requests and fixed memory use. The destination appears only after every request succeeds.
 
 ## Canonical workflow
 
@@ -94,6 +97,7 @@ rebase offsets to zero and reject reads that leave the window.
 | Visible size | `karu_client_size` (a one-byte GET, never cached; bounded windows need no I/O) |
 | Size and ETag to pin reads | `karu_client_stat` / `Client::stat` (the same GET; the ETag goes to `if_match`) |
 | A file's header and footer | `karu_client_read_ends` / `Client::read_ends` (both ends, size and ETag in one round trip) |
+| A complete local copy | `karu_client_download` / `Client::download` (parallel requests, fixed memory use, no partial destination) |
 | Tune concurrency and coalescing | `karu_batch_get_stats` / `Batch::stats`: retries, 429/503, new connections, received vs requested bytes |
 | Credentials from your own SDK | `karu_config_set_credentials_provider` |
 

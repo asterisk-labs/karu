@@ -192,10 +192,11 @@ tests/emulators/down.sh
 
 ## 7. Design rules
 
-- **Format free and read only.** Karu never parses TIFF, Zarr, rumi or archives and never
-  lists or writes. Planners live above it (rumi `plan_ranges`, container manifests that
-  emit `/vsisubfile/` paths). GeoTIFF support means addressing only: Karu fetches the
-  bytes and GDAL decodes them from memory.
+- **Format free and source-side read only.** Karu never parses TIFF, Zarr, rumi or archives,
+  and never lists or mutates source objects. A whole-object download may materialize bytes
+  into a caller-named local file. Format planners remain above it (rumi `plan_ranges`,
+  container manifests that emit `/vsisubfile/` paths). GeoTIFF support still means
+  addressing only: Karu fetches the bytes and GDAL decodes them from memory.
 - **Batches first.** The workload is on the order of a million ranges for a data loader,
   and concurrency is the lever. Nothing on the hot path may block per file or per range;
   the facade's `read` is a convenience over `fetch`.

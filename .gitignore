@@ -3,3 +3,4 @@ build-*/
 __pycache__/
 compile_commands.json
 .DS_Store
+.karu-internal/

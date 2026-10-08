@@ -87,7 +87,7 @@
             </div>
             <h3>The boundary of the library</h3>
             <p>Karu resolves addresses, reports visible size, and reads byte ranges. It supports local files, plain HTTP, Amazon S3 and compatible storage, Google Cloud Storage, Azure Blob and Data Lake Storage, Hugging Face, and Source Cooperative.</p>
-            <p>It is read only. It does not upload, delete, or list objects. It does not parse file formats and does not cache object data. A layer above Karu decides which bytes have meaning. This narrow contract keeps reads safe to reorder, merge, and retry.</p>
+            <p>It is source-side read only. It does not upload, delete, or list objects. It does not parse file formats and does not cache object data. It may materialize every visible byte into a caller-named local file. A layer above Karu decides which bytes have meaning. This narrow contract keeps reads safe to reorder, merge, and retry.</p>
             <p>Rumi, for example, maps training windows to compressed frames and submits their byte ranges to Karu. As reads complete, Rumi decodes the frames into arrays or tensors. Karu handles the transport; Rumi handles the format.</p>
           </section>
 
@@ -359,6 +359,9 @@
             <p>Remote size results are not cached. The caller decides whether a known size can be reused because only the caller knows how long that answer should remain valid.</p>
             <h3>Reading both ends of an object</h3>
             <p>Formats that keep a header at the start and a footer at the end read both with <code>karu_client_read_ends</code>. Karu requests the head and a suffix range for the tail together, so the size, both ends, and the ETag arrive in one round trip. Azure ignores suffix ranges, so there the tail follows the head and carries its ETag as <code>If-Match</code>. Both responses must agree on the size and the ETag.</p>
+            <h3>Downloading a complete object</h3>
+            <p><code>karu_client_download</code> first reads up to 1 MiB to learn the size and ETag, then downloads the rest with parallel requests and fixed memory use. It writes to a temporary file and makes the destination visible only after the download succeeds. A callback can report progress or cancel.</p>
+            <p>By default, an existing destination is not replaced. This check is best effort on filesystems without an exclusive publication operation. Servers must honor <code>Range</code> beyond <code>KARU_RANGE_FALLBACK_LIMIT</code>.</p>
             <h3>Several correct reads can still see different versions</h3>
             <p>Range validation proves that one response contains the requested interval. It does not prove that several responses came from the same version of an object. If another process replaces the object between reads, every response may be individually valid while the caller combines bytes from different versions.</p>
             <p>An ETag is a server supplied identifier for one representation of a remote object. When the caller already knows the expected ETag, it may attach that value to every related read. Karu copies the condition at submission and sends it through the HTTP <code>If-Match</code> header.</p>

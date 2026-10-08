@@ -4,6 +4,10 @@ Notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Parallel file downloads with `karu_client_download` and `Client::download`.
+
 ### Changed
 
 - OpenSSL uses the hashed system CA directory when available. An explicit CA

@@ -18,6 +18,7 @@ Batched byte-range reads from local files, HTTP, S3, GCS, Azure, Hugging Face an
 - **Stateless reads** that name their object, offset and buffer, so they can be reordered and retried.
 - **Version pinning** with `stat` and `if_match`, so a changed object fails instead of mixing versions.
 - **Retries and resumable transfers** within a per-request deadline.
+- **Large file downloads** using parallel requests and bounded memory.
 - **Credential discovery** for every backend, plus custom providers.
 - **Per-path configuration**, for example anonymous for one bucket and a profile for another.
 
@@ -30,6 +31,9 @@ auto client = karu::Client::create(karu::Config::from_environment().value()).val
 auto object = karu::Object::parse(
     "hf://datasets/asterisk-labs/rumi-api-fixtures/data/s2-00-tile.rumi").value();
 auto bytes = client.read(object, 0, 4096).value();
+
+// Download a complete object with parallel requests and fixed memory use.
+auto downloaded = client.download(object, "scene.rumi").value();
 ```
 
 ## Installation
