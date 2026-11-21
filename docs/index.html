@@ -1,167 +1,98 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" data-route="home">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta
-    name="description"
-    content="Karu is a stateless byte range transport library for local files, HTTP, and object storage."
-  >
-  <title>Karu | Byte range transport</title>
-  <link rel="stylesheet" href="style.css?v=39">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>karu</title>
+<meta name="description" content="Exact byte ranges from local disks, HTTP, S3, GCS, Azure and Hugging Face, merged, fetched in parallel and pinned to one version of each object.">
+<link rel="icon" href="assets/svg/karu-mark-color.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/tokens.css?v=1">
+<link rel="stylesheet" href="assets/css/base.css?v=1">
+<link rel="stylesheet" href="assets/css/shell.css?v=2">
+<link rel="stylesheet" href="assets/css/content.css?v=2">
+<link rel="stylesheet" href="assets/css/home.css?v=6">
+<link rel="stylesheet" href="assets/css/figure.css?v=8">
 </head>
+
 <body>
-  <article class="sheet landing-sheet">
-    <header>
-      <div>
-        <a class="brand" href="index.html">karu</a>
-        <span class="version">v0.4.0</span>
-        <p>Stateless byte range transport</p>
+<div class="ambient" aria-hidden="true">
+  <span class="ambient-orb ambient-orb--violet"></span>
+  <span class="ambient-orb ambient-orb--mint"></span>
+  <canvas class="ambient-tiles" id="backdrop"></canvas>
+</div>
+
+<div class="page">
+  <header class="masthead">
+    <a class="lockup" href="index.html" aria-label="Karu home">
+      <img class="marksvg" src="assets/svg/karu-mark.svg" alt="">
+      <span class="wm-sm">karu</span>
+    </a>
+
+    <div class="offsite" aria-label="Project links">
+      <a href="https://github.com/asterisk-labs/karu" title="GitHub" aria-label="Karu on GitHub" rel="noopener noreferrer">
+        <svg class="github" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"></path></svg>
+      </a>
+      <a class="rumi" href="https://asterisk.coop/rumi/" title="Rumi" aria-label="Rumi, the raster format that reads through Karu" rel="noopener noreferrer">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 1.8h5v2.7h-5zM3.7 5.2h8.6v2.7H3.7zM2.6 8.6h10.8v2.7H2.6zM1.6 12h12.8v2.7H1.6z"></path></svg>
+        <img class="mark-color" src="assets/svg/rumi-mark.svg" alt="" width="16" height="16">
+      </a>
+      <a class="asterisk" href="https://asterisk.coop" title="asterisk labs" aria-label="asterisk labs" rel="noopener noreferrer">
+        <img class="mark-mono" src="assets/svg/asterisk-mark-black.svg" alt="" width="16" height="18">
+        <img class="mark-color" src="assets/svg/asterisk-mark-color.svg" alt="" width="16" height="18">
+      </a>
+    </div>
+
+    <nav class="nav" aria-label="Sections">
+      <a href="how-karu-reads.html">How Karu reads</a>
+      <a href="configuration.html">Configuration</a>
+    </nav>
+  </header>
+
+  <main id="view">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow">Stateless byte-range transport</p>
+
+        <h1 id="hero-title">Built for <span class="hero-line"><span class="hero-highlight">remote bytes</span>.</span></h1>
+
+        <p class="hero-summary">
+          Exact byte ranges from local disks, HTTP, S3, GCS, Azure and Hugging Face, merged, fetched in parallel and pinned to one version of each object.
+        </p>
+
+        <div class="install" data-copy-root>
+          <div class="install-command">
+            <span class="prompt" aria-hidden="true">$</span>
+            <code>find_package(karu CONFIG REQUIRED)</code>
+            <button class="copy-command" type="button" data-copy="find_package(karu CONFIG REQUIRED)" aria-label="Copy the CMake line">
+              <svg class="icon-copy" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h10v10H8z"></path><path d="M6 15H4V4h11v2"></path></svg>
+              <svg class="icon-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"></path></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <span class="copy-toast" aria-hidden="true">Copied</span>
+          <p class="copy-feedback" aria-live="polite"></p>
+        </div>
       </div>
-      <nav aria-label="Documentation links">
-        <a href="index.html" aria-current="page">Home</a>
-        <a href="how-karu-reads.html">How Karu Reads</a>
-        <a href="configuration.html">Configuration</a>
-        <a class="github" href="https://github.com/asterisk-labs/karu" aria-label="Karu on GitHub">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 0C3.58 0 0 3.64 0 8.13c0 3.59 2.29 6.64 5.47 7.71.4.08.55-.18.55-.39 0-.19-.01-.83-.01-1.51-2.01.38-2.53-.5-2.69-.96-.09-.23-.48-.96-.82-1.15-.28-.15-.68-.53-.01-.54.63-.01 1.08.59 1.23.83.72 1.23 1.87.88 2.33.67.07-.53.28-.88.51-1.08-1.78-.21-3.64-.91-3.64-4.02 0-.89.31-1.62.82-2.19-.08-.21-.36-1.04.08-2.16 0 0 .67-.22 2.2.84A7.44 7.44 0 0 1 8 3.91c.68 0 1.35.09 1.98.27 1.53-1.06 2.2-.84 2.2-.84.44 1.12.16 1.95.08 2.16.51.57.82 1.3.82 2.19 0 3.12-1.87 3.81-3.65 4.02.29.25.54.74.54 1.5 0 1.08-.01 1.95-.01 2.23 0 .21.15.47.55.39A8.12 8.12 0 0 0 16 8.13C16 3.64 12.42 0 8 0Z"/>
-          </svg>
-        </a>
-      </nav>
-    </header>
 
-    <main class="landing">
-      <section class="paper-copy" aria-label="Technical overview of Karu">
-        <div class="paper-column">
-          <h2>Reading without a cursor</h2>
-          <p>
-            Karu treats every read as a complete request containing an object,
-            byte position, length, destination buffer, and caller tag. Because the
-            position travels with the request, reads can run independently without
-            sharing a moving cursor. Before data moves, Karu resolves each window
-            to its real byte position, rejects invalid ranges, and groups reads from
-            the same object so the engine can build an efficient transfer plan.
-          </p>
-          <h2>Combining nearby ranges</h2>
-          <p>
-            Nearby ranges can share one larger transfer when that costs less than
-            separate network trips. Strict limits on gaps, transfer size, pieces,
-            and extra bytes keep this optimization from fetching too much data.
-          </p>
-        </div>
-        <div class="paper-column">
-          <h2>Local and remote reads</h2>
-          <p>
-            Local files use direct positional reads. Remote objects use HTTP requests
-            for exact byte ranges. Karu keeps several transfers active, so one slow
-            response does not stop the rest of the batch. The engine tracks queued
-            work, active transfers, retries, and completed results while reusing
-            network connections and TLS sessions. Credentials are resolved
-            separately, without blocking bytes already in motion.
-          </p>
-          <h2>Checking every result</h2>
-          <p>
-            Karu accepts a result only when its returned range and byte count match
-            the request. It retries temporary failures with bounded delays, then
-            separates merged data into the original buffers and caller tags.
-          </p>
-        </div>
-      </section>
+      <figure class="batch" id="batch" data-label="One client.submit of four reads, A to D, across your code, the Karu engine and storage. The planner turns them into two GETs on an S3 object, one covering A, B and C and reading the small gap between B and C, the other covering D, or into three preads on a local file that skip the gap. The transport runs every request at once, scatter puts each read's bytes in its buffer and drops the gap, and batch.next returns the reads as their requests end."></figure>
+    </section>
+  </main>
 
-      <figure class="sync" aria-label="Rumi and Karu data flow">
-        <svg class="sync-diagram" viewBox="0 0 900 300" role="img" aria-labelledby="sync-title sync-desc">
-          <title id="sync-title">Detailed synchronization between Rumi, Karu, and storage</title>
-          <desc id="sync-desc">
-            Rumi maps a pixel window to compressed frames and submits tagged byte ranges.
-            Karu resolves credentials, coalesces transfers, fetches from storage, scatters
-            the returned bytes, and completes each original tag so Rumi can decode.
-          </desc>
-          <defs>
-            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-              <path d="M0 0 10 5 0 10Z"/>
-            </marker>
-          </defs>
-
-          <text class="lane" x="18" y="36">RUMI</text>
-          <text class="lane" x="18" y="178">KARU</text>
-
-          <g class="box">
-            <rect x="104" y="14" width="150" height="58"/>
-            <text x="179" y="39">Pixel window</text>
-            <text class="sub" x="179" y="57">x · y · width · height</text>
-          </g>
-          <path class="edge" d="M254 43H300"/>
-          <text class="edge-label" x="277" y="31">read</text>
-
-          <g class="box">
-            <rect x="300" y="14" width="150" height="58"/>
-            <text x="375" y="39">Frame index</text>
-            <text class="sub" x="375" y="57">select compressed frames</text>
-          </g>
-          <path class="edge" d="M450 43H496"/>
-          <text class="edge-label" x="473" y="31">plan</text>
-
-          <g class="box accent">
-            <rect x="496" y="14" width="174" height="58"/>
-            <text x="583" y="39">Tagged ranges</text>
-            <text class="sub" x="583" y="57">offset · length · frame tag</text>
-          </g>
-          <path class="edge" d="M583 72V154"/>
-          <text class="edge-label" x="622" y="118">submit batch</text>
-
-          <g class="box">
-            <rect x="104" y="154" width="150" height="58"/>
-            <text x="179" y="179">Completions</text>
-            <text class="sub" x="179" y="197">buffer · status · frame tag</text>
-          </g>
-          <path class="edge return-edge" d="M300 183H254"/>
-          <text class="edge-label" x="277" y="171">scatter</text>
-
-          <g class="box">
-            <rect x="300" y="154" width="150" height="58"/>
-            <text x="375" y="179">Transfer plan</text>
-            <text class="sub" x="375" y="197">sort · group · coalesce</text>
-          </g>
-          <path class="edge return-edge" d="M496 183H450"/>
-          <text class="edge-label" x="473" y="171">bytes</text>
-
-          <g class="box accent">
-            <rect x="496" y="154" width="174" height="58"/>
-            <text x="583" y="179">Transport</text>
-            <text class="sub" x="583" y="197">resolve · sign · parallel GET</text>
-          </g>
-          <path class="edge" d="M670 183H716"/>
-          <text class="edge-label" x="693" y="171">ranges</text>
-
-          <g class="box">
-            <rect x="716" y="154" width="166" height="58"/>
-            <text x="799" y="179">Storage</text>
-            <text class="sub" x="799" y="197">local · HTTP · cloud</text>
-          </g>
-
-          <path class="edge return-edge" d="M179 212V250H375V212"/>
-          <text class="edge-label" x="277" y="269">each completion wakes Rumi with its original frame tag</text>
-          <path class="edge return-edge" d="M799 212V244H583V212"/>
-          <text class="edge-label" x="690" y="264">exact bytes return to Karu</text>
-
-          <path class="edge" d="M179 154V105H375V72"/>
-          <text class="edge-label" x="276" y="124">Rumi decodes ready frames while other reads finish</text>
-        </svg>
-        <figcaption>
-          <span class="caption-label">Figure 1</span>
-          <span class="caption-copy">
-            Rumi turns a pixel window into tagged frame ranges. Karu groups those
-            ranges, obtains the required credentials, and retrieves only the needed
-            bytes. Each result keeps its frame tag, so Rumi can decode completed
-            frames while the remaining reads continue.
-          </span>
-        </figcaption>
-      </figure>
-    </main>
-
-    <footer>
-      <span class="footer-credit">Made with <span class="heart" aria-label="love" role="img">♥</span> by <a class="asterisk-credit" href="https://asterisk.coop" rel="noopener noreferrer" aria-label="Asterisk Labs"><img src="asterisk-mark.svg" alt="Asterisk Labs"></a></span>
-    </footer>
-  </article>
+  <footer class="colophon">
+    <span>Made with</span>
+    <span class="heart" role="img" aria-label="love"></span>
+    <span>by</span>
+    <a class="by" href="https://asterisk.coop" rel="noopener noreferrer" aria-label="Asterisk Labs">
+      <img src="assets/svg/asterisk-mark.svg" alt="Asterisk Labs">
+    </a>
+  </footer>
+</div>
+<script src="assets/js/backdrop.js?v=1"></script>
+<script src="assets/js/batch.js?v=4"></script>
+<script src="assets/js/home.js?v=1"></script>
 </body>
 </html>

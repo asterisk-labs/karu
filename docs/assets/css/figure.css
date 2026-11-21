@@ -1,0 +1,297 @@
+/* The hero: one client.submit() of four reads, across your code, the Karu
+   engine and storage. Drawn in the style of the Rumi read: hairline regions,
+   square stages that light violet while they work, and the data as dots. */
+
+.batch {
+  min-width: 0;
+  margin: 0;
+}
+
+/* the call, above the drawing so it keeps its size */
+.batch-call {
+  display: block;
+  min-height: 34px;
+  padding: 4px 0 10px;
+  color: var(--ink-soft);
+  font: 13px/1.5 var(--mono);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.bt-tok-fn { color: #0a5fb4; }
+
+.batch > svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  font-family: var(--mono);
+  overflow: visible;
+}
+
+/* Side by side with the text, the landing is one screen: the drawing takes
+   the height the masthead, the call, the sources and the footer leave. */
+@media (min-width: 861px) {
+  .batch > svg { max-height: calc(100svh - 262px); }
+}
+
+/* the regions, marked by a hairline and their name */
+.bt-band { fill: transparent; }
+.bt-region.is-tint .bt-band { fill: rgba(73, 42, 232, 0.045); }
+
+.bt-rule {
+  stroke: #d4d4d8;
+  stroke-width: 1;
+}
+
+.bt-region-name {
+  fill: var(--faint);
+  font: 600 10px var(--sans);
+  letter-spacing: 0.12em;
+}
+
+.bt-head-label {
+  fill: var(--ink-soft);
+  font: 600 12.5px var(--sans);
+}
+
+.bt-col {
+  fill: var(--faint);
+  font-size: 9.5px;
+}
+
+/* the reads and the buffers of your code */
+.bt-row { opacity: 0; }
+
+.bt-chip,
+.bt-done rect {
+  fill: var(--tone);
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+
+.bt-chip-tag,
+.bt-done-tag {
+  fill: var(--ink);
+  font: 650 10.5px var(--sans);
+}
+
+.is-dark .bt-chip-tag,
+.is-dark .bt-done-tag,
+.is-dark .bt-range-tag { fill: #fff; }
+
+.bt-cell {
+  fill: var(--ink-soft);
+  font-size: 11px;
+}
+
+.bt-buffer-box { fill: var(--bg); }
+
+.bt-buffer-fill { fill: var(--tone); }
+
+.bt-buffer-rule {
+  stroke: rgba(0, 0, 0, 0.14);
+  stroke-width: 1;
+}
+
+.bt-buffer-edge {
+  fill: none;
+  stroke: #b8b8bf;
+  stroke-width: 1.3;
+  transition: stroke 160ms ease;
+}
+
+.bt-buffer.is-done .bt-buffer-edge {
+  stroke: var(--ink);
+  stroke-width: 1.8;
+}
+
+.bt-buffer-tag {
+  fill: var(--ink);
+  font: 650 13px var(--sans);
+}
+
+.bt-buffer-size {
+  fill: var(--dim);
+  font-size: 9px;
+}
+
+.bt-next {
+  fill: var(--ink-soft);
+  font-size: 11px;
+}
+
+/* the engine, four stages that light while they work */
+.bt-stage-box {
+  fill: var(--bg);
+  stroke: #c9cbd3;
+  stroke-width: 1.3;
+  transition: fill 180ms ease, stroke 180ms ease;
+}
+
+.bt-stage.is-lit .bt-stage-box {
+  fill: #f1eefe;
+  stroke: var(--violet);
+  stroke-width: 1.8;
+}
+
+.bt-stage-title {
+  fill: var(--ink-soft);
+  font: 600 12px var(--sans);
+  transition: fill 180ms ease;
+}
+
+.bt-stage.is-lit .bt-stage-title { fill: var(--violet); }
+
+.bt-stage-main {
+  fill: var(--ink);
+  font: 650 16px var(--sans);
+}
+
+.bt-stage-detail {
+  fill: var(--dim);
+  font: 400 10.5px var(--sans);
+}
+
+.bt-done {
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+/* wires, arrowheads, and the requests down to storage */
+.bt-link {
+  fill: none;
+  stroke: #c9cbd3;
+  stroke-width: 1.4;
+}
+
+.bt-head {
+  fill: none;
+  stroke: #9a9ca6;
+  stroke-width: 1.5;
+}
+
+.bt-request {
+  fill: none;
+  stroke: #c9cbd3;
+  stroke-width: 1.4;
+  opacity: 0;
+  transition: stroke 160ms ease;
+}
+
+.bt-request.is-live {
+  stroke: var(--violet);
+  stroke-width: 1.8;
+}
+
+.bt-request-label {
+  fill: var(--ink-soft);
+  font-size: 10.5px;
+  opacity: 0;
+}
+
+/* storage: the object and its reads */
+.bt-uri {
+  fill: var(--ink-soft);
+  font-size: 11.5px;
+}
+
+.bt-object {
+  fill: #ececef;
+  stroke: var(--ink);
+  stroke-width: 1.3;
+}
+
+.bt-ruler {
+  fill: var(--faint);
+  font-size: 9.5px;
+}
+
+.bt-range { opacity: 0; }
+
+.bt-range rect {
+  fill: var(--tone);
+  stroke: var(--ink);
+  stroke-width: 1.3;
+}
+
+.bt-range-tag {
+  fill: var(--ink);
+  font: 650 13px var(--sans);
+}
+
+.bt-gap {
+  fill: url(#bt-hatch);
+  stroke: var(--ink);
+  stroke-width: 1.3;
+}
+
+.bt-gap-label {
+  fill: var(--dim);
+  font-size: 9.5px;
+}
+
+.bt-span-edge {
+  fill: none;
+  stroke: var(--violet);
+  stroke-width: 1.6;
+}
+
+/* the data in flight */
+.bt-control {
+  fill: var(--violet);
+  opacity: 0;
+}
+
+.bt-packet {
+  stroke: var(--ink);
+  stroke-width: 0.8;
+  opacity: 0;
+}
+
+/* the two sources to pick, styled as the Rumi routes */
+.batch-carousel {
+  width: max-content;
+  max-width: 100%;
+  margin: 1px auto 0;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+
+.batch-carousel__dot {
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: color 160ms ease, border-color 160ms ease;
+}
+
+.batch-carousel__dot:hover,
+.batch-carousel__dot:focus-visible { color: var(--ink-soft); }
+
+.batch-carousel__dot:focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; }
+
+.batch-carousel__dot.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bt-buffer-edge,
+  .bt-stage-box,
+  .bt-stage-title,
+  .bt-request,
+  .bt-done { transition: none; }
+}
+
+@media (max-width: 560px) {
+  .batch-call { font-size: 11px; white-space: normal; }
+}

@@ -1,0 +1,128 @@
+/* The configuration page. The alias note, the option tables and the two
+   inline figures, the priority chain and the path from configuration to a
+   request. */
+
+.content .config-detail {
+  color: var(--dim);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* An option name or a default stays on one line, the purpose wraps */
+.content .spec td:not(:last-child) code {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+.config-priority svg,
+.config-flow svg {
+  width: 100%;
+  height: auto;
+  font-family: var(--sans);
+}
+
+.priority-guide,
+.config-lane {
+  fill: var(--violet);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.priority-box rect,
+.config-box rect {
+  fill: var(--panel-soft, rgba(0, 0, 0, 0.035));
+  stroke: var(--edge);
+}
+
+.priority-box.accent rect,
+.config-box.accent rect {
+  fill: var(--violet-soft, rgba(73, 42, 232, 0.13));
+  stroke: var(--violet);
+}
+
+.priority-box text,
+.config-box text {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  text-anchor: middle;
+}
+
+.priority-box .sub,
+.config-box .sub {
+  fill: var(--dim);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.priority-edge,
+.config-edge {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.1;
+}
+
+.priority-edge { marker-end: url(#priority-arrow); }
+.config-edge { marker-end: url(#config-arrow); }
+.config-edge.dashed { stroke-dasharray: 4 4; }
+
+#priority-arrow path,
+#config-arrow path { fill: var(--faint); }
+
+.priority-note,
+.config-note {
+  fill: var(--dim);
+  font-size: 12px;
+  text-anchor: middle;
+}
+
+/* On a phone the figures keep a readable size and scroll inside their frame,
+   and each option is a short block, its name and default on one line and the
+   purpose under them */
+@media (max-width: 600px) {
+  .config-priority svg,
+  .config-flow svg {
+    width: 640px;
+    max-width: none;
+  }
+
+  .content .spec,
+  .content .spec thead,
+  .content .spec tbody {
+    display: block;
+  }
+
+  .content .spec tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--hair);
+  }
+
+  .content .spec thead tr {
+    border-top: 1px solid var(--hair);
+  }
+
+  .content .spec th,
+  .content .spec td,
+  .content .spec tr:first-child > * {
+    padding: 0;
+    border: 0;
+  }
+
+  .content .spec tr > :last-child {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+  }
+
+  .content .spec td:first-child code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

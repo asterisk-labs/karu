@@ -1,0 +1,390 @@
+/* How Karu reads. The drawn figures, the grids beside them and the side notes, on top of reading.css. */
+
+:root {
+  --panel-soft: rgba(0, 0, 0, 0.035);
+  --violet-soft: rgba(73, 42, 232, 0.13);
+}
+
+.content .section-intro {
+  color: var(--ink);
+}
+
+/* Inline SVG figures, drawn on the page and scrolled sideways on a phone */
+
+.story-figure svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  font-family: var(--sans);
+}
+
+.story-figure marker path {
+  fill: var(--dim);
+}
+
+.flow-stage {
+  fill: var(--violet);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.flow-card rect,
+.gate-card rect,
+.outcome-card rect,
+.path-pill rect {
+  fill: var(--bg);
+  stroke: var(--dim);
+  stroke-opacity: 0.45;
+  stroke-width: 1.1;
+}
+
+.flow-card.accent rect,
+.gate-card rect {
+  stroke: var(--violet);
+  stroke-opacity: 1;
+  stroke-width: 1.3;
+}
+
+.outcome-card.final rect {
+  fill: var(--panel-soft);
+  stroke: var(--ink);
+  stroke-opacity: 0.6;
+}
+
+.flow-card text,
+.gate-card text,
+.outcome-card text,
+.wait-block text,
+.decision-card text,
+.network-step text {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  text-anchor: middle;
+}
+
+.flow-card .sub,
+.gate-card .sub,
+.outcome-card .sub,
+.decision-card .sub,
+.network-step .sub {
+  fill: var(--dim);
+  font-size: 9.5px;
+  font-weight: 400;
+}
+
+.flow-arrow,
+.retry-loop {
+  fill: none;
+  stroke: var(--dim);
+  stroke-width: 1.1;
+}
+
+.retry-loop {
+  stroke: var(--violet);
+  stroke-dasharray: 4 3;
+}
+
+.flow-baseline,
+.timeline {
+  fill: none;
+  stroke: var(--faint);
+  stroke-opacity: 0.5;
+}
+
+.flow-dot {
+  fill: var(--violet);
+}
+
+.flow-note {
+  fill: var(--dim);
+  font-size: 9.5px;
+  text-anchor: middle;
+}
+
+.flow-note.left { text-anchor: start; }
+.flow-note.right { text-anchor: end; }
+
+.time-label,
+.range-label,
+.gap-label {
+  fill: var(--faint);
+  font-family: var(--mono);
+  font-size: 8.5px;
+}
+
+.time-label,
+.range-label.end { text-anchor: end; }
+.gap-label { text-anchor: middle; }
+
+.object-track { fill: var(--wash-deep); }
+
+.object-before {
+  fill: var(--faint);
+  fill-opacity: 0.18;
+}
+
+.object-range {
+  fill: var(--violet-soft);
+  stroke: var(--violet);
+}
+
+.object-range.second {
+  fill: var(--violet);
+  fill-opacity: 0.05;
+}
+
+.merged-range {
+  fill: var(--faint);
+  fill-opacity: 0.14;
+  stroke: var(--dim);
+}
+
+.range-tick,
+.range-bracket,
+.network-bracket {
+  fill: none;
+  stroke: var(--dim);
+}
+
+.network-bracket { stroke: var(--violet); }
+
+.range-byte {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 500;
+  text-anchor: middle;
+}
+
+.wait-block rect { fill: var(--wash-deep); }
+
+.wait-block.accent rect,
+.decision-card path,
+.success-ring {
+  fill: var(--violet-soft);
+  stroke: var(--violet);
+}
+
+.success-check {
+  fill: none;
+  stroke: var(--violet);
+  stroke-width: 2;
+}
+
+.cursor-mark {
+  stroke: var(--violet);
+  stroke-width: 1.5;
+}
+
+.cursor-head { fill: var(--violet); }
+
+.network-step circle {
+  fill: var(--bg);
+  stroke: var(--dim);
+  stroke-opacity: 0.45;
+}
+
+.network-step.accent circle {
+  fill: var(--violet-soft);
+  stroke: var(--violet);
+  stroke-opacity: 1;
+  stroke-width: 1.3;
+}
+
+.path-pill text {
+  fill: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 9px;
+  text-anchor: middle;
+}
+
+/* Grids and strips of square cells on hairlines */
+
+.process-strip,
+.concept-grid,
+.guard-grid,
+.definition-grid,
+.credential-sources,
+.protocol-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 1.6em 0;
+  border: 1px solid var(--edge);
+  background: var(--edge);
+}
+
+.process-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.concept-grid.three,
+.definition-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.process-strip > div,
+.concept-grid > div,
+.guard-grid > div,
+.definition-grid > div,
+.credential-sources > div,
+.protocol-pair > div {
+  min-width: 0;
+  padding: 14px 16px 15px;
+  background: var(--bg);
+}
+
+.protocol-pair > div { background: var(--wash); }
+
+.content .process-strip b,
+.content .concept-grid b,
+.content .definition-grid b,
+.content .credential-sources b,
+.guard-grid span,
+.protocol-pair span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--violet);
+  font: 500 12px/1.4 var(--mono);
+}
+
+.process-strip span {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+
+.content .concept-grid p,
+.content .guard-grid p,
+.content .definition-grid p,
+.content .credential-sources p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.content .protocol-pair code {
+  display: block;
+  padding: 0;
+  background: none;
+  color: var(--ink);
+  font: 400 12.5px/1.7 var(--mono);
+}
+
+/* Rows of label and text, drawn like table.spec */
+
+.control-stack,
+.guide-glossary {
+  margin: 1.6em 0;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.control-stack > div,
+.guide-glossary > div {
+  display: grid;
+  grid-template-columns: 136px minmax(0, 1fr);
+  column-gap: 18px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hair);
+}
+
+.control-stack > div:first-child,
+.guide-glossary > div:first-child {
+  border-top: 1px solid var(--hair);
+}
+
+.control-stack span,
+.guide-glossary dt {
+  grid-row: span 2;
+  color: var(--dim);
+  font: 500 13px/1.75 var(--sans);
+}
+
+.content .control-stack p {
+  margin: 0;
+}
+
+.control-stack small {
+  grid-column: 2;
+  margin-top: 4px;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.guide-glossary dd {
+  color: var(--ink-soft);
+}
+
+/* Side notes. A takeaway is a reading.css note. A technical note sits on a soft panel. */
+
+.takeaway b {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.technical-note {
+  margin: 1.8em 0;
+  padding: 16px 20px 18px;
+  border-left: 3px solid var(--violet);
+  background: var(--panel-soft);
+}
+
+.technical-note > span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--violet);
+  font: 500 12px/1.4 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.content .technical-note p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.content .technical-note p + p {
+  margin-top: 0.7em;
+}
+
+.content .technical-note code {
+  background: var(--bg);
+}
+
+@media (max-width: 600px) {
+  .story-figure { padding-bottom: 14px; }
+  .story-figure svg { min-width: 560px; }
+
+  .story-figure figcaption {
+    position: sticky;
+    left: 0;
+  }
+
+  .concept-grid,
+  .concept-grid.three,
+  .guard-grid,
+  .definition-grid,
+  .credential-sources,
+  .protocol-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .process-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .technical-note { padding: 14px 16px 16px; }
+}
+
+@media (max-width: 480px) {
+  .control-stack > div,
+  .guide-glossary > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .control-stack span,
+  .guide-glossary dt { grid-row: auto; }
+
+  .control-stack small { grid-column: 1; }
+}

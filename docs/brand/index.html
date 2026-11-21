@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="description" content="The Karu mark, logos, colours, icons and the files to download.">
+<title>Karu · Brand</title>
+<link rel="icon" href="assets/png/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/png/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=League+Spartan:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/reading.css?v=3">
+<style>
+    .kit-hero { display: grid; grid-template-columns: minmax(0, 240px) 1fr; gap: 40px; align-items: center; margin: 24px 0 8px; }
+    .kit-hero img { width: 100%; }
+    .kit-hero dl { display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; margin: 0; font-size: 14px; }
+    .kit-hero dt { color: var(--dim); }
+    .kit-hero dd { margin: 0; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin-top: 14px; }
+    .tile { border: 1px solid var(--edge); }
+    .tile .art { display: grid; place-items: center; height: 170px; padding: 22px; }
+    .tile .art img { width: auto; height: auto; max-width: 100%; max-height: 126px; }
+    .tile .art.night { background: #111; }
+    .tile .art.paper { background: #fff; }
+    .tile .meta { display: flex; justify-content: space-between; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--edge); font-size: 12px; }
+    .tile .meta a { color: var(--violet); text-decoration: none; }
+    .tile .meta a + a { margin-left: 10px; }
+    .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; margin-top: 14px; }
+    .swatch { border: 1px solid var(--edge); font-size: 12px; }
+    .swatch span { display: block; height: 80px; }
+    .swatch p { margin: 0; padding: 8px 10px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .sizes { display: flex; align-items: end; gap: 28px; margin-top: 14px; flex-wrap: wrap; }
+    .sizes figure { margin: 0; font-size: 12px; color: var(--dim); text-align: center; }
+    .sizes img { display: block; margin: 0 auto 6px; }
+    .rules { max-width: 70ch; font-size: 14px; padding-left: 18px; }
+    .rules li { margin: 4px 0; }
+    .download { display: inline-block; margin-top: 14px; padding: 10px 16px; border: 1px solid var(--ink); color: var(--ink); font-size: 14px; text-decoration: none; }
+    .download:hover { background: var(--ink); color: #fff; }
+    @media (max-width: 640px) {
+      .kit-hero { grid-template-columns: 1fr; }
+      .kit-hero img { max-width: 200px; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <a class="lockup" href="../index.html" aria-label="Karu home">
+      <img class="marksvg" src="../assets/svg/karu-mark.svg" alt="">
+      <span class="wm-sm">karu</span>
+    </a>
+
+    <div class="offsite" aria-label="Project links">
+      <a href="https://github.com/asterisk-labs/karu" title="GitHub" aria-label="Karu on GitHub" rel="noopener noreferrer">
+        <svg class="github" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"></path></svg>
+      </a>
+      <a class="rumi" href="https://asterisk.coop/rumi/" title="Rumi" aria-label="Rumi, the raster format that reads through Karu" rel="noopener noreferrer">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 1.8h5v2.7h-5zM3.7 5.2h8.6v2.7H3.7zM2.6 8.6h10.8v2.7H2.6zM1.6 12h12.8v2.7H1.6z"></path></svg>
+        <img class="mark-color" src="../assets/svg/rumi-mark.svg" alt="" width="16" height="16">
+      </a>
+      <a class="asterisk" href="https://asterisk.coop" title="asterisk labs" aria-label="asterisk labs" rel="noopener noreferrer">
+        <img class="mark-mono" src="../assets/svg/asterisk-mark-black.svg" alt="" width="16" height="18">
+        <img class="mark-color" src="../assets/svg/asterisk-mark-color.svg" alt="" width="16" height="18">
+      </a>
+    </div>
+
+    <nav class="nav" aria-label="Sections">
+      <a href="../how-karu-reads.html">How Karu reads</a>
+      <a href="../configuration.html">Configuration</a>
+    </nav>
+  </header>
+
+  <main class="doc">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">Karu</p>
+      <ol class="toc-pages">
+        <li><a href="../how-karu-reads.html">How Karu reads</a></li>
+        <li><a href="../configuration.html">Configuration</a></li>
+        <li><a href="index.html" class="here" aria-current="page">Brand</a></li>
+      </ol>
+    </nav>
+
+    <article class="content">
+<h1>Brand</h1>
+      <ul class="facts">
+        <li>Karu is the Quechua word for far. Its mark is a khipu, the knotted cords the Inca used to keep records that runners carried across the Andes.</li>
+      </ul>
+
+      <section class="kit-hero" aria-label="The mark">
+        <img src="assets/svg/karu-mark.svg" alt="The Karu mark, a khipu with four coloured cords hanging from a black cord.">
+        <dl>
+          <dt>Top cord</dt><dd>The remote object, a file on disk, over HTTP or in a bucket.</dd>
+          <dt>Hanging cords</dt><dd>One byte-range read each.</dd>
+          <dt>Knots</dt><dd>The offset where each read lands.</dd>
+          <dt>Motion</dt><dd>One batched read. All four reads start together, the bytes flow down at their own pace, and the reads finish out of order, as Karu completes them.</dd>
+        </dl>
+      </section>
+      <p>The colours and the black outline come from <a href="https://asterisk.coop/rumi/">Rumi</a>, which stores its frames on top of Karu. The cords end square, and nothing in the mark has rounded corners.</p>
+
+      <h2 class="part" id="the-logo">The logo</h2>
+      <p>The mark sits beside or above the wordmark, set in League Spartan SemiBold and drawn as outlines.</p>
+      <div class="tiles">
+        <div class="tile"><div class="art paper"><img src="assets/svg/logo-horizontal-color.svg" alt="Horizontal Karu logo"></div>
+          <div class="meta">horizontal <span><a href="assets/svg/logo-horizontal-color.svg" download>svg</a><a href="assets/png/logo-horizontal-color.png" download>png</a></span></div></div>
+        <div class="tile"><div class="art paper"><img src="assets/svg/logo-stacked-color.svg" alt="Stacked Karu logo"></div>
+          <div class="meta">stacked <span><a href="assets/svg/logo-stacked-color.svg" download>svg</a><a href="assets/png/logo-stacked-color.png" download>png</a></span></div></div>
+        <div class="tile"><div class="art paper"><img src="assets/svg/karu-mark-color.svg" alt="Karu mark"></div>
+          <div class="meta">mark <span><a href="assets/svg/karu-mark-color.svg" download>svg</a><a href="assets/svg/karu-mark.svg" download>animated</a><a href="assets/png/karu-mark-color.png" download>png</a></span></div></div>
+        <div class="tile"><div class="art paper"><img src="assets/svg/karu-wordmark-black.svg" alt="Karu wordmark"></div>
+          <div class="meta">wordmark <span><a href="assets/svg/karu-wordmark-black.svg" download>svg</a></span></div></div>
+      </div>
+
+      <h2 class="part" id="on-dark-backgrounds">On dark backgrounds</h2>
+      <p>On dark backgrounds the outline turns white and the colours stay.</p>
+      <div class="tiles">
+        <div class="tile"><div class="art night"><img src="assets/svg/logo-horizontal-dark.svg" alt="Horizontal Karu logo on a dark background"></div>
+          <div class="meta">horizontal <span><a href="assets/svg/logo-horizontal-dark.svg" download>svg</a><a href="assets/png/logo-horizontal-dark.png" download>png</a></span></div></div>
+        <div class="tile"><div class="art night"><img src="assets/svg/logo-stacked-dark.svg" alt="Stacked Karu logo on a dark background"></div>
+          <div class="meta">stacked <span><a href="assets/svg/logo-stacked-dark.svg" download>svg</a><a href="assets/png/logo-stacked-dark.png" download>png</a></span></div></div>
+        <div class="tile"><div class="art night"><img src="assets/svg/karu-mark-white.svg" alt="Karu mark with a white outline"></div>
+          <div class="meta">mark <span><a href="assets/svg/karu-mark-white.svg" download>svg</a></span></div></div>
+        <div class="tile"><div class="art night"><img src="assets/svg/karu-wordmark-white.svg" alt="White Karu wordmark"></div>
+          <div class="meta">wordmark <span><a href="assets/svg/karu-wordmark-white.svg" download>svg</a></span></div></div>
+      </div>
+
+      <h2 class="part" id="one-colour">One colour</h2>
+      <p>For print, stamps and places that take a single ink.</p>
+      <div class="tiles">
+        <div class="tile"><div class="art paper"><img src="assets/svg/logo-horizontal-black.svg" alt="Karu logo in black"></div>
+          <div class="meta">black <span><a href="assets/svg/logo-horizontal-black.svg" download>logo</a><a href="assets/svg/karu-mark-black.svg" download>mark</a></span></div></div>
+        <div class="tile"><div class="art night"><img src="assets/svg/logo-horizontal-white.svg" alt="Karu logo in white"></div>
+          <div class="meta">white <span><a href="assets/svg/logo-horizontal-white.svg" download>logo</a><a href="assets/svg/karu-mark-mono-white.svg" download>mark</a></span></div></div>
+      </div>
+
+      <h2 class="part" id="colour">Colour</h2>
+      <p>The four cords keep this order from left to right. The site accent is the violet of the Karu pages.</p>
+      <div class="swatches">
+        <div class="swatch"><span style="background:#492ae8"></span><p>violet #492AE8</p></div>
+        <div class="swatch"><span style="background:#f05b7f"></span><p>pink #F05B7F</p></div>
+        <div class="swatch"><span style="background:#f7cc09"></span><p>yellow #F7CC09</p></div>
+        <div class="swatch"><span style="background:#c4ffc2"></span><p>mint #C4FFC2</p></div>
+        <div class="swatch"><span style="background:#000"></span><p>ink #000000</p></div>
+        <div class="swatch"><span style="background:#111"></span><p>night #111111</p></div>
+        <div class="swatch"><span style="background:#4e04eb"></span><p>accent #4E04EB</p></div>
+      </div>
+
+      <h2 class="part" id="type">Type</h2>
+      <p>The wordmark is League Spartan SemiBold, always lowercase and always as outlines, so it never depends on an installed font. Page text uses Arial, as the rest of the Karu site does.</p>
+
+      <h2 class="part" id="small-sizes">Small sizes</h2>
+      <p>Below 64 pixels the knots blur, so favicons use three heavy cords without knots. Keep the full mark at 24 pixels or more, and leave a margin around it as wide as one knot.</p>
+      <div class="sizes">
+        <figure><img src="assets/png/favicon-16.png" width="16" height="16" alt="16 pixel icon">16</figure>
+        <figure><img src="assets/png/favicon-32.png" width="32" height="32" alt="32 pixel icon">32</figure>
+        <figure><img src="assets/png/favicon-48.png" width="48" height="48" alt="48 pixel icon">48</figure>
+        <figure><img src="assets/png/favicon-180.png" width="90" height="90" alt="180 pixel icon">180</figure>
+        <figure><img src="assets/svg/karu-mark-color.svg" width="24" height="24" alt="Karu mark at 24 pixels">mark at 24</figure>
+      </div>
+
+      <h2 class="part" id="do-not">Do not</h2>
+      <ul class="rules">
+        <li>Round the cord ends, the boxes around the mark or the icon corners.</li>
+        <li>Stretch, rotate or tilt the mark.</li>
+        <li>Change the colours or their order.</li>
+        <li>Set the wordmark in another font or with capitals.</li>
+        <li>Put the colour mark on a busy photo. Use the one-colour mark there.</li>
+      </ul>
+
+      <h2 class="part" id="icons-and-avatars">Icons and avatars</h2>
+      <div class="tiles">
+        <div class="tile"><div class="art paper"><img src="assets/svg/icon-color.svg" alt="Karu app icon"></div>
+          <div class="meta">icon <span><a href="assets/svg/icon-color.svg" download>svg</a><a href="assets/png/favicon-512.png" download>png</a></span></div></div>
+        <div class="tile"><div class="art night"><img src="assets/svg/icon-dark.svg" alt="Karu dark app icon"></div>
+          <div class="meta">dark icon <span><a href="assets/svg/icon-dark.svg" download>svg</a></span></div></div>
+        <div class="tile"><div class="art paper"><img src="assets/svg/avatar-ink.svg" alt="Karu avatar on night"></div>
+          <div class="meta">avatar night <span><a href="assets/svg/avatar-ink.svg" download>svg</a><a href="assets/png/avatar-ink.png" download>png</a></span></div></div>
+        <div class="tile"><div class="art paper"><img src="assets/svg/avatar-violet.svg" alt="Karu avatar on violet"></div>
+          <div class="meta">avatar violet <span><a href="assets/svg/avatar-violet.svg" download>svg</a><a href="assets/png/avatar-violet.png" download>png</a></span></div></div>
+        <div class="tile"><div class="art paper"><img src="assets/svg/avatar-yellow.svg" alt="Karu avatar on yellow"></div>
+          <div class="meta">avatar yellow <span><a href="assets/svg/avatar-yellow.svg" download>svg</a><a href="assets/png/avatar-yellow.png" download>png</a></span></div></div>
+        <div class="tile"><div class="art paper"><img src="assets/svg/avatar-mint.svg" alt="Karu avatar on mint"></div>
+          <div class="meta">avatar mint <span><a href="assets/svg/avatar-mint.svg" download>svg</a><a href="assets/png/avatar-mint.png" download>png</a></span></div></div>
+      </div>
+
+      <h2 class="part" id="everything-in-one-download">Everything in one download</h2>
+      <p>Every svg and png on this page, with a short readme.</p>
+      <a class="download" href="assets/karu-brand-kit.zip" download>Download the Karu brand kit</a>
+    </article>
+
+    <nav class="toc onpage" aria-label="On this page">
+      <p class="toc-title">On this page</p>
+      <ol class="toc-sections">
+        <li><a href="#the-logo">The logo</a></li>
+        <li><a href="#on-dark-backgrounds">On dark backgrounds</a></li>
+        <li><a href="#one-colour">One colour</a></li>
+        <li><a href="#colour">Colour</a></li>
+        <li><a href="#type">Type</a></li>
+        <li><a href="#small-sizes">Small sizes</a></li>
+        <li><a href="#do-not">Do not</a></li>
+        <li><a href="#icons-and-avatars">Icons and avatars</a></li>
+        <li><a href="#everything-in-one-download">Everything in one download</a></li>
+      </ol>
+    </nav>
+  </main>
+
+  <footer class="colophon">
+    <span>Made with</span>
+    <span class="heart" role="img" aria-label="love"></span>
+    <span>by</span>
+    <a class="by" href="https://asterisk.coop" rel="noopener noreferrer" aria-label="Asterisk Labs">
+      <img src="../assets/svg/asterisk-mark.svg" alt="Asterisk Labs">
+    </a>
+  </footer>
+</div>
+<script src="../assets/js/toc.js" defer></script>
+</body>
+</html>
