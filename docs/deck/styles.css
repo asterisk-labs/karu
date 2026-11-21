@@ -1,0 +1,634 @@
+/* The Karu deck, on the shell of the Rumi deck. Each slide adds its own block below,
+   every selector under the slide's sNN class. */
+*, *::before, *::after { box-sizing: border-box; }
+/* clip, not hidden, so focusing a control inside a scaled slide never scrolls the page */
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; overflow: clip; }
+:root {
+  color-scheme: light;
+  --ink: #000;
+  --soft: #2b2f36;
+  --dim: #5c6370;
+  --faint: #8a919c;
+  --rule: #dedede;
+  --line: #c9cbd3;
+  --grey: #ececef;
+  --violet: #492ae8;
+  --violet-soft: #ebe7fd;
+  --mint: #26745f;
+  --bg: #fff;
+  --edge: rgba(0, 0, 0, .1);
+  --ink-soft: #1d2025;
+  --wash: #f6f6f4;
+  --wash-deep: #eeeeeb;
+  --sans: 'League Spartan', Inter, ui-sans-serif, system-ui, sans-serif;
+  --mono: 'JetBrains Mono', 'SFMono-Regular', monospace;
+}
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--sans);
+}
+.deck {
+  position: relative;
+  flex: none;
+  width: 960px;
+  height: 540px;
+  transform-origin: center;
+  background: #fff;
+  box-shadow: 0 18px 55px #0002;
+}
+.slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 48px 24px;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .22s ease;
+  overflow: hidden;
+}
+.slide.active { opacity: 1; pointer-events: auto; }
+.slide.cover { align-items: center; justify-content: center; padding: 0; }
+.cover-asterisk { position: absolute; top: 32px; right: 48px; display: block; width: 185px; height: auto; }
+.cover-inner { display: flex; align-items: center; gap: 32px; }
+.cover-logo { display: block; width: 116px; height: 116px; }
+.cover h1 { margin: 0 0 12px; font-size: 92px; line-height: .86; font-weight: 700; }
+.cover p { margin: 0; color: var(--soft); font-size: 25px; }
+.closing .cover-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 20px; }
+.closing h1 { margin: 0; }
+.end-install { display: inline-flex; align-items: center; gap: 12px; padding: 10px 22px; border: 0; background: var(--wash); color: var(--ink); cursor: pointer; font: 500 20px var(--mono); }
+.end-install::before { color: var(--violet); content: "$"; }
+.end-install::after { color: var(--faint); font: 400 14px var(--sans); content: "copy"; }
+.end-install.is-copied::after { color: var(--violet); content: "copied"; }
+.end-links { display: flex; gap: 12px; }
+.end-links a { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border: 1px solid var(--violet); color: var(--violet); font: 500 17px var(--sans); text-decoration: none; }
+.end-links a:hover,
+.end-links a:focus-visible { background: #ece9fd; outline: none; }
+.slide header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 10px;
+  margin-bottom: 16px;
+}
+.brand { display: flex; align-items: center; gap: 8px; }
+.brand-icon { display: block; width: 30px; height: 30px; }
+.brand-name { font-size: 26px; font-weight: 700; letter-spacing: -.045em; }
+.count { color: var(--dim); font: 500 11px var(--mono); }
+h1 {
+  font-size: 40px;
+  line-height: 1;
+  letter-spacing: -.042em;
+  font-weight: 600;
+  margin: 0;
+}
+.title-mark { position: relative; isolation: isolate; display: inline-block; }
+.title-mark::before { position: absolute; inset: .56em -.06em .02em -.04em; z-index: -1; content: ''; background: #c4ffc2; transform: rotate(-.8deg); }
+.title-mark.red::before { background: #ffc4c2; }
+p { margin: 0; }
+code, pre { font-family: var(--mono); font-variant-ligatures: none; }
+.mono { font-family: var(--mono); }
+
+/* Shared figure parts. */
+.fig {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 22px;
+}
+.who { font-size: 26px; font-weight: 600; letter-spacing: -.03em; line-height: 1; }
+.who span { display: block; margin-top: 4px; color: var(--dim); font-size: 14px; font-weight: 400; letter-spacing: 0; }
+.end-install.is-plain::before { content: none; }
+
+/* 11 The call, in the colours of the docs code blocks. */
+.code {
+  align-self: center;
+  margin: 0;
+  padding: 12px 20px;
+  background: var(--wash);
+  color: var(--ink);
+  font: 13.5px/1.65 var(--mono);
+  font-variant-ligatures: none;
+}
+.tok-fn { color: #0a5fb4; }
+.tok-str { color: #17803d; }
+.tok-num { color: #c2410c; }
+.tok-kw { color: #492ae8; }
+.tok-com { color: #8a919c; }
+
+/* 11 and 12 The CPU and GPU reads, one lane for each library, drawn like the read of the landing page. */
+.path-fig { gap: 12px; }
+.path-fig svg { display: block; width: 100%; height: auto; overflow: visible; cursor: pointer; }
+.pt-band { fill: transparent; }
+.pt-band.is-gpu { fill: rgba(73, 42, 232, .05); }
+.pt-rule { stroke: #d4d4d8; stroke-width: 1; }
+.pt-region { fill: var(--faint); font: 600 10.5px var(--sans); letter-spacing: .12em; text-anchor: end; }
+.pt-lane-rule { stroke: #ececef; stroke-width: 1; }
+.pt-lane-name { fill: var(--ink-soft); font: 600 15px var(--sans); transition: fill 180ms ease; }
+.pt-lane-sub { fill: var(--faint); font: 400 12px var(--sans); }
+.pt-lane.is-now .pt-lane-name { fill: var(--violet); }
+.pt-line,
+.pt-trail { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.pt-line { stroke: #d4d4d8; }
+.pt-trail { stroke: rgba(73, 42, 232, .55); }
+.pt-stop { fill: var(--bg); stroke: #b8b8bf; stroke-width: 1.6; transition: fill 180ms ease, stroke 180ms ease; }
+.pt-title { fill: var(--ink-soft); font: 500 14.5px var(--sans); text-anchor: middle; transition: fill 180ms ease; }
+.pt-detail { fill: var(--dim); font: 400 12px var(--sans); text-anchor: middle; }
+.pt-size { fill: var(--faint); font: 650 15px var(--sans); transition: fill 180ms ease; }
+.pt-size.is-key { font-size: 17px; }
+.pt-size.is-lit { fill: var(--ink); }
+.pt-size.is-key.is-lit { fill: var(--violet); }
+.pt-station.is-lit .pt-stop { fill: var(--violet); stroke: var(--violet); }
+.pt-station.is-lit .pt-title { fill: var(--violet); }
+.pt-packet { opacity: 0; pointer-events: none; }
+.pt-dot { fill: var(--violet); }
+.pt-glow { fill: var(--violet); opacity: .18; }
+.path-note { color: var(--dim); font-size: 14.5px; line-height: 1.3; text-align: center; }
+
+.progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  height: 3px;
+  background: var(--violet);
+  transition: width .25s ease;
+}
+.site-back {
+  position: fixed;
+  top: 13px;
+  left: 15px;
+  z-index: 1000;
+  color: var(--soft);
+  font: 500 12px var(--mono);
+  text-decoration: none;
+}
+.site-back:hover, .site-back:focus-visible { color: var(--violet); }
+.is-embedded, .is-embedded body { background: white; }
+.is-embedded .site-back { display: none; }
+@media (prefers-reduced-motion: reduce) { .slide, .progress { transition: none; } }
+@media print {
+  html, body { height: auto; overflow: visible; background: white; }
+  .deck { width: 960px; height: auto; transform: none !important; box-shadow: none; }
+  .slide { position: relative; width: 960px; height: 540px; opacity: 1; pointer-events: auto; page-break-after: always; break-after: page; }
+  .site-back, .progress { display: none; }
+}
+
+/* 02 The Asterisk stack for AI, the Rumi deck's figure with Karu in violet. */
+.s02 .st-wrap { flex: 1; min-height: 0; margin: 0; display: flex; align-items: center; }
+.s02 .st-fig { width: 100%; height: auto; overflow: visible; }
+.s02 .st-fig text { font-family: var(--sans); fill: var(--ink); }
+.s02 .st-fig .st-layer { font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; fill: var(--dim); }
+.s02 .st-box { fill: #f6f6f4; stroke: #777; stroke-width: 1.2; }
+.s02 .st-open { fill: none; stroke: #999; stroke-dasharray: 5 4; }
+.s02 .st-karu { fill: #ece9fd; stroke: #492ae8; stroke-width: 2.4; }
+.s02 .st-fig .st-name { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.s02 .st-fig .st-text { font-size: 14px; fill: var(--dim); }
+.s02 .st-call { fill: none; stroke: #777; stroke-width: 1.5; }
+.s02 .st-call.on { stroke: #492ae8; stroke-width: 2; }
+.s02 .st-hold { fill: none; stroke: #777; stroke-width: 1.5; stroke-dasharray: 4 3; }
+.s02 .st-fig .st-tag { font: 500 11px var(--mono); fill: var(--dim); text-anchor: middle; }
+
+/* 03 Round trips, the request comparison of the Rumi deck on a shared time axis. Each read is a
+   short request, a long wait and a thin bar of bytes, so the wait visibly dominates. */
+.s03 .s03-fig { margin: 0; gap: 26px; }
+.s03 .s03-trips { --who: 176px; --u: 134px; --beat: .7s; position: relative; display: grid; grid-template-columns: var(--who) 1fr 128px; row-gap: 34px; align-items: center; }
+/* one hairline per round trip, behind every lane */
+.s03 .s03-trips::before { position: absolute; top: 24px; bottom: 0; left: var(--who); width: calc(4 * var(--u) + 1px); content: ''; background: repeating-linear-gradient(90deg, #e6e6ea 0 1px, transparent 1px var(--u)); }
+.s03 .s03-axis-who { color: var(--faint); font: 600 11px var(--sans); letter-spacing: .12em; text-transform: uppercase; }
+.s03 .s03-axis { position: relative; height: 14px; }
+.s03 .s03-axis span { position: absolute; left: calc(var(--k) * var(--u)); transform: translateX(-50%); color: var(--faint); font: 500 11px/14px var(--mono); }
+.s03 .s03-who { font-size: 19px; font-weight: 600; letter-spacing: -.02em; line-height: 1; color: var(--ink-soft); }
+.s03 .s03-who span { display: block; margin-top: 4px; color: var(--dim); font-size: 13px; font-weight: 400; letter-spacing: 0; }
+.s03 .s03-who.is-karu { color: var(--violet); }
+.s03 .s03-lane { position: relative; z-index: 1; }
+.s03 .s03-row { position: relative; height: 28px; }
+.s03 .s03-row + .s03-row { margin-top: 8px; }
+.s03 .s03-row > span { position: absolute; top: 0; bottom: 0; left: calc(var(--t) * var(--u)); width: calc(var(--d) * var(--u)); display: flex; align-items: center; justify-content: center; white-space: nowrap; font: 500 12px var(--mono); }
+.s03 .s03-req { background: var(--grey); color: var(--soft); }
+.s03 .s03-req.is-karu { background: var(--violet); color: #fff; }
+.s03 .s03-bytes { background: #f7cc09; }
+/* the dashed wait of the Rumi request comparison, its label above the dashes */
+.s03 .s03-wait { background: repeating-linear-gradient(90deg, var(--line) 0 4px, transparent 4px 8px) center / 100% 2px no-repeat; }
+/* the legend sits on the first read only */
+.s03 .s03-wait i, .s03 .s03-bytes i { position: absolute; top: -15px; color: var(--faint); font: 500 11px/1 var(--mono); font-style: normal; }
+.s03 .s03-n { color: var(--dim); font: 500 14px var(--mono); text-align: right; }
+.s03 .s03-n.is-karu { color: var(--violet); }
+
+/* 04 Batches, six reads submitted at once and handed back as each one finishes. One code
+   block that grows, its newest lines in full ink, beside a timeline of the same reads. */
+.s04 .s04-wr { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 14px; }
+.s04 .s04-tabs { display: flex; gap: 20px; }
+.s04 .s04-tabs button { padding: 4px 0; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--dim); font: 500 12px var(--mono); cursor: pointer; }
+/* by data-step, not aria-selected, so the tab is right before the script runs */
+.s04[data-step="1"] .s04-tabs [data-to="1"],
+.s04[data-step="2"] .s04-tabs [data-to="2"],
+.s04[data-step="3"] .s04-tabs [data-to="3"] { border-color: var(--ink); color: var(--ink); }
+.s04 .s04-main { display: grid; grid-template-columns: 404px 1fr; gap: 24px; align-items: center; }
+
+/* Every line is in the markup. Lines of later steps stay out, older ones turn grey. */
+.s04 .s04-code { --c-fn: #9aa0a8; --c-kw: #9aa0a8; --c-num: #9aa0a8; --c-com: #9aa0a8; margin: 0; height: 278px; padding: 14px 18px; background: var(--wash); color: #9aa0a8; font: 12px/1.6 var(--mono); white-space: pre; overflow: hidden; }
+.s04 .s04-code .ln { display: block; }
+.s04 .s04-code .tok-fn { color: var(--c-fn); }
+.s04 .s04-code .tok-kw { color: var(--c-kw); }
+.s04 .s04-code .tok-num { color: var(--c-num); }
+.s04 .s04-code .tok-com { color: var(--c-com); }
+.s04[data-step="1"] .ln[data-k="2"], .s04[data-step="1"] .ln[data-k="3"],
+.s04[data-step="2"] .ln[data-k="3"] { display: none; }
+.s04[data-step="1"] .ln[data-k="1"],
+.s04[data-step="2"] .ln[data-k="2"],
+.s04[data-step="3"] .ln[data-k="3"] { --c-fn: #0a5fb4; --c-kw: #492ae8; --c-num: #c2410c; --c-com: #8a919c; color: var(--ink); }
+/* the tag and the drain call get marked on the step they appear, again each time the
+   slide comes back, since the mark waits for .active */
+.s04.active[data-step="1"] .ln[data-k="1"] .s04-pat,
+.s04.active[data-step="3"] .ln[data-k="3"] .s04-pat { padding: 0 2px; background: linear-gradient(#c4ffc2, #c4ffc2) no-repeat left center / 0 100%; font-weight: 700; animation: s04-mark 650ms cubic-bezier(.4, 0, .2, 1) 250ms forwards; }
+@keyframes s04-mark { to { background-size: 100% 100%; } }
+
+.s04 .s04-note p { display: none; color: var(--ink-soft); font-size: 18px; line-height: 1.35; }
+.s04 .s04-note .title-mark { color: var(--ink); font-weight: 600; }
+.s04 .s04-note .mono { font-size: 16px; }
+.s04[data-step="1"] .s04-note [data-k="1"],
+.s04[data-step="2"] .s04-note [data-k="2"],
+.s04[data-step="3"] .s04-note [data-k="3"] { display: block; }
+
+/* The timeline. Bars grow at one speed, 7ms for each unit of x, so they finish in the
+   order of their lengths, and every landing waits exactly as long as its bar. */
+.s04 .s04-fig { display: block; width: 100%; height: auto; overflow: visible; }
+.s04 .f-cap, .s04 .f-lane, .s04 .f-now text { fill: var(--dim); font: 500 11px var(--mono); }
+.s04 .f-axis, .s04 .f-t0 { fill: none; stroke: var(--line); stroke-width: 1; }
+.s04 .f-head { fill: var(--line); }
+.s04 .f-tracks path { stroke: #ececef; stroke-width: 1; }
+.s04 .f-rule { stroke: var(--rule); stroke-width: 1; }
+.s04 .f-slot rect { fill: #fff; stroke: var(--line); stroke-width: 1; transition: fill 200ms ease, stroke 200ms ease; }
+.s04 .f-slot text { fill: var(--dim); font: 500 11px var(--mono); text-anchor: middle; transition: fill 200ms ease; }
+.s04 .f-bar { width: 0; fill: #ece9fd; transition: width 560ms linear, fill 200ms ease; }
+.s04 .f-dot { fill: var(--violet); opacity: 0; transition: opacity 150ms ease; }
+.s04 .f-chip { opacity: 0; transition: opacity 150ms ease; }
+.s04 .f-chip rect { fill: var(--violet); }
+.s04 .f-chip text { fill: #fff; font: 600 11px var(--mono); text-anchor: middle; }
+.s04 .f-now { opacity: 0; transform: translateX(64px); transition: transform 560ms linear, opacity 200ms ease; }
+.s04 .f-now path { stroke: var(--violet); stroke-width: 1; stroke-dasharray: 3 3; }
+.s04 .f-now text { fill: var(--violet); }
+
+/* 2, everything in flight up to the cursor */
+.s04[data-step="2"] .f-bar { width: 80px; }
+.s04[data-step="2"] .f-now { opacity: 1; transform: translateX(144px); }
+/* 3, the cursor runs on, each read lands when it reaches the end of its bar */
+.s04[data-step="3"] .f-bar { width: calc(var(--l) * 1px); fill: #d9d3fb; transition: width calc(var(--t) * 7ms) linear, fill 200ms ease calc(var(--t) * 7ms); }
+.s04[data-step="3"] .f-now { opacity: 1; transform: translateX(396px); transition: transform 1764ms linear, opacity 200ms ease; }
+.s04[data-step="3"] .f-dot,
+.s04[data-step="3"] .f-chip { opacity: 1; transition-delay: calc(var(--t) * 7ms); }
+.s04[data-step="3"] .f-slot rect { fill: #ece9fd; stroke: var(--violet); transition-delay: calc(var(--t) * 7ms); }
+.s04[data-step="3"] .f-slot text { fill: var(--violet); transition-delay: calc(var(--t) * 7ms); }
+
+@media (prefers-reduced-motion: reduce) {
+  .s04 .s04-fig *, .s04 .s04-fig { transition: none !important; }
+  .s04 .s04-pat { animation: none !important; background-size: 100% 100% !important; }
+}
+
+/* 05 Gap and ratio, when a read joins the request. One panel per limit, its rule beside the reads and the requests it makes.
+   A panel plays when its step comes up: the request grows left to right at one pace and
+   each verdict appears as the request reaches its hole. */
+.s05 .lm { gap: 14px; }
+.s05 .lm-p { display: grid; grid-template-columns: 196px 1fr; gap: 28px; align-items: center; transition: opacity 250ms ease; }
+.s05[data-step="1"] .lm-p2 { opacity: .35; }
+.s05 .lm-k { color: var(--ink); font: 600 21px var(--sans); letter-spacing: -.02em; }
+.s05 .lm-k b { margin-left: 6px; color: var(--violet); font: 600 18px var(--mono); letter-spacing: 0; }
+.s05 .lm-rule { margin-top: 5px; color: var(--ink-soft); font-size: 14px; line-height: 1.35; }
+.s05 .lm-say code { display: block; margin-top: 6px; color: var(--faint); font-size: 11px; white-space: nowrap; }
+.s05 .lm-fig { position: relative; height: 142px; }
+.s05 .lm-fig > span { position: absolute; }
+.s05 .lm-row { left: 0; color: var(--faint); font: 600 11px var(--sans); letter-spacing: .12em; text-transform: uppercase; }
+.s05 .lm-obj { left: 78px; right: 0; top: 34px; height: 28px; background: #eeeeeb; }
+.s05 .lm-rd, .s05 .lm-dots { top: 34px; height: 28px; display: flex; align-items: center; justify-content: center; background: var(--violet); color: #fff; font: 600 11px var(--mono); }
+.s05 .lm-dots { background: none; color: var(--violet); font-size: 16px; }
+/* each hole with its size, bracketed under the object */
+.s05 .lm-hb { top: 65px; height: 5px; border: 1px solid #9a9aa2; border-top: 0; }
+.s05 .lm-hl, .s05 .lm-tick { top: 74px; color: var(--dim); font: 500 11px var(--mono); white-space: nowrap; translate: -50% 0; }
+.s05 .lm-hl.is-size { color: var(--violet); }
+.s05 .lm-tick { top: 66px; }
+.s05 .lm-tick.is-end { translate: -100% 0; }
+.s05 .lm-tick.is-start { translate: 0 0; }
+/* how far one request may reach, measured from its first byte */
+.s05 .lm-fig.has-ruler { height: 158px; }
+.s05 .lm-ruler { top: 146px; height: 9px; border: solid var(--violet); border-width: 0 1px; background: linear-gradient(var(--violet), var(--violet)) center / 100% 1px no-repeat; }
+.s05 .lm-ruler i { position: absolute; left: 50%; top: -3px; padding: 0 6px; translate: -50% 0; background: #fff; color: var(--violet); font: 500 11px/1 var(--mono); font-style: normal; white-space: nowrap; }
+/* the requests, read bytes in violet, hole bytes fetched and dropped in orange */
+.s05 .lm-rq { top: 96px; height: 26px; opacity: 0; }
+.s05 .lm-seg { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font: 400 11px var(--sans); white-space: nowrap; }
+.s05 .lm-seg.is-read { background: var(--violet); color: #fff; font: 600 11px var(--mono); }
+.s05 .lm-seg.is-hole { background: #ffeae1; box-shadow: inset 0 0 0 1px #fe6b37; color: #c2410c; }
+.s05 .lm-get { top: 126px; color: var(--violet); font: 700 11px var(--mono); white-space: nowrap; }
+/* a verdict sits over its hole, the measure first, then what the planner does */
+.s05 .lm-vd { top: -4px; display: flex; flex-direction: column; align-items: center; gap: 1px; translate: -50% 0; color: var(--violet); font: 500 12px/15px var(--sans); white-space: nowrap; }
+.s05 .lm-vd b { color: var(--ink-soft); font: 500 11px/15px var(--mono); }
+.s05 .lm-vd.is-split { color: #c2410c; }
+.s05 .lm-in { opacity: 0; }
+
+.s05.active[data-step="1"] .lm-p1 .lm-rq,
+.s05.active[data-step="2"] .lm-p1 .lm-rq,
+.s05.active[data-step="2"] .lm-p2 .lm-rq { animation: s05-grow var(--d) linear var(--t) both; }
+.s05.active[data-step="1"] .lm-p1 .lm-in,
+.s05.active[data-step="2"] .lm-p1 .lm-in,
+.s05.active[data-step="2"] .lm-p2 .lm-in { animation: s05-pop 300ms ease var(--t) both; }
+@keyframes s05-grow { from { opacity: 1; clip-path: inset(-2px 100% -2px 0); } to { opacity: 1; clip-path: inset(-2px 0 -2px 0); } }
+@keyframes s05-pop { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .s05 .lm-rq, .s05 .lm-in { animation-duration: 1ms !important; animation-delay: 0s !important; }
+}
+
+/* 06 Span and parts, how far one request grows. One panel per limit, its rule beside the reads and the requests it makes.
+   A panel plays when its step comes up: the request grows left to right at one pace and
+   each verdict appears as the request reaches its hole. */
+.s06 .lm { gap: 14px; }
+.s06 .lm-p { display: grid; grid-template-columns: 196px 1fr; gap: 28px; align-items: center; transition: opacity 250ms ease; }
+.s06[data-step="1"] .lm-p2 { opacity: .35; }
+.s06 .lm-k { color: var(--ink); font: 600 21px var(--sans); letter-spacing: -.02em; }
+.s06 .lm-k b { margin-left: 6px; color: var(--violet); font: 600 18px var(--mono); letter-spacing: 0; }
+.s06 .lm-rule { margin-top: 5px; color: var(--ink-soft); font-size: 14px; line-height: 1.35; }
+.s06 .lm-say code { display: block; margin-top: 6px; color: var(--faint); font-size: 11px; white-space: nowrap; }
+.s06 .lm-fig { position: relative; height: 142px; }
+.s06 .lm-fig > span { position: absolute; }
+.s06 .lm-row { left: 0; color: var(--faint); font: 600 11px var(--sans); letter-spacing: .12em; text-transform: uppercase; }
+.s06 .lm-obj { left: 78px; right: 0; top: 34px; height: 28px; background: #eeeeeb; }
+.s06 .lm-rd, .s06 .lm-dots { top: 34px; height: 28px; display: flex; align-items: center; justify-content: center; background: var(--violet); color: #fff; font: 600 11px var(--mono); }
+.s06 .lm-dots { background: none; color: var(--violet); font-size: 16px; }
+/* each hole with its size, bracketed under the object */
+.s06 .lm-hb { top: 65px; height: 5px; border: 1px solid #9a9aa2; border-top: 0; }
+.s06 .lm-hl, .s06 .lm-tick { top: 74px; color: var(--dim); font: 500 11px var(--mono); white-space: nowrap; translate: -50% 0; }
+.s06 .lm-hl.is-size { color: var(--violet); }
+.s06 .lm-tick { top: 66px; }
+.s06 .lm-tick.is-end { translate: -100% 0; }
+.s06 .lm-tick.is-start { translate: 0 0; }
+/* how far one request may reach, measured from its first byte */
+.s06 .lm-fig.has-ruler { height: 158px; }
+.s06 .lm-ruler { top: 146px; height: 9px; border: solid var(--violet); border-width: 0 1px; background: linear-gradient(var(--violet), var(--violet)) center / 100% 1px no-repeat; }
+.s06 .lm-ruler i { position: absolute; left: 50%; top: -3px; padding: 0 6px; translate: -50% 0; background: #fff; color: var(--violet); font: 500 11px/1 var(--mono); font-style: normal; white-space: nowrap; }
+/* the requests, read bytes in violet, hole bytes fetched and dropped in orange */
+.s06 .lm-rq { top: 96px; height: 26px; opacity: 0; }
+.s06 .lm-seg { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font: 400 11px var(--sans); white-space: nowrap; }
+.s06 .lm-seg.is-read { background: var(--violet); color: #fff; font: 600 11px var(--mono); }
+.s06 .lm-seg.is-hole { background: #ffeae1; box-shadow: inset 0 0 0 1px #fe6b37; color: #c2410c; }
+.s06 .lm-get { top: 126px; color: var(--violet); font: 700 11px var(--mono); white-space: nowrap; }
+/* a verdict sits over its hole, the measure first, then what the planner does */
+.s06 .lm-vd { top: -4px; display: flex; flex-direction: column; align-items: center; gap: 1px; translate: -50% 0; color: var(--violet); font: 500 12px/15px var(--sans); white-space: nowrap; }
+.s06 .lm-vd b { color: var(--ink-soft); font: 500 11px/15px var(--mono); }
+.s06 .lm-vd.is-split { color: #c2410c; }
+.s06 .lm-in { opacity: 0; }
+
+.s06.active[data-step="1"] .lm-p1 .lm-rq,
+.s06.active[data-step="2"] .lm-p1 .lm-rq,
+.s06.active[data-step="2"] .lm-p2 .lm-rq { animation: s06-grow var(--d) linear var(--t) both; }
+.s06.active[data-step="1"] .lm-p1 .lm-in,
+.s06.active[data-step="2"] .lm-p1 .lm-in,
+.s06.active[data-step="2"] .lm-p2 .lm-in { animation: s06-pop 300ms ease var(--t) both; }
+@keyframes s06-grow { from { opacity: 1; clip-path: inset(-2px 100% -2px 0); } to { opacity: 1; clip-path: inset(-2px 0 -2px 0); } }
+@keyframes s06-pop { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .s06 .lm-rq, .s06 .lm-in { animation-duration: 1ms !important; animation-delay: 0s !important; }
+}
+
+/* 07 Seven backends, one row each, and the request the selected path becomes. */
+.s07 .bk { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 16px; }
+.s07 .bk-table { display: flex; flex-direction: column; }
+/* Header and rows share one grid so the four columns line up without a table. */
+.s07 .bk-head,
+.s07 .bk-row { display: grid; grid-template-columns: 128px 236px 270px 1fr; column-gap: 14px; align-items: center; padding: 0 10px 0 9px; border-left: 3px solid transparent; }
+.s07 .bk-head { height: 22px; border-bottom: 1px solid var(--rule); color: var(--dim); font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.s07 .bk-row { width: 100%; height: 27px; margin: 0; border-top: 0; border-right: 0; border-bottom: 1px solid #ececef; background: none; color: inherit; font: inherit; padding-top: 2px; text-align: left; cursor: pointer; transition: background 160ms ease; }
+.s07 .bk-row:hover { background: var(--wash); }
+.s07 .bk-row:focus-visible { outline: 1px solid var(--violet); outline-offset: -1px; }
+.s07 .bk-row[aria-selected="true"] { border-left-color: var(--violet); background: #ece9fd; }
+/* League Spartan sits high beside the mono paths; drop it onto their baseline. */
+.s07 .bk-name,
+.s07 .bk-how { position: relative; top: 1.5px; }
+.s07 .bk-name { color: var(--ink); font: 600 15px var(--sans); letter-spacing: -.015em; white-space: nowrap; }
+.s07 .bk-row[aria-selected="true"] .bk-name { color: var(--violet); }
+.s07 .bk-row code { overflow: hidden; color: var(--dim); font: 11.5px var(--mono); white-space: nowrap; }
+/* The prefix is what picks the backend, so it reads first. */
+.s07 .bk-row code b { color: var(--ink); font-weight: 500; }
+.s07 .bk-row[aria-selected="true"] code b { color: var(--violet); }
+.s07 .bk-how { color: var(--soft); font: 13.5px var(--sans); white-space: nowrap; }
+.s07 .bk-row.is-window { margin-top: 8px; }
+.s07 .bk-row.is-window .bk-name { color: var(--dim); }
+.s07 .bk-row.is-window code { grid-column: 2 / 4; }
+
+.s07 .bk-out { display: flex; align-items: stretch; }
+.s07 .bk-read { flex: none; display: flex; flex-direction: column; justify-content: center; gap: 3px; width: 150px; padding: 0 16px; border: 2px solid var(--violet); background: #ece9fd; }
+.s07 .bk-read b { margin-bottom: 2px; font: 600 16px var(--sans); letter-spacing: -.02em; }
+.s07 .bk-read code { color: var(--ink-soft); font: 12.5px var(--mono); }
+.s07 .bk-arrow { flex: none; align-self: center; width: 44px; height: 12px; margin: 0 6px; }
+.s07 .bk-arrow-line { fill: none; stroke: var(--violet); stroke-width: 2; }
+.s07 .bk-arrow-head { fill: var(--violet); }
+.s07 .bk-req { flex: 1; min-width: 0; height: 100px; padding: 10px 16px; background: var(--wash); }
+.s07 .bk-card { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
+.s07 .bk-card[hidden] { display: none; }
+.s07 .bk-card pre { margin: 0; color: var(--ink); font: 12.5px/1.6 var(--mono); white-space: pre; overflow: hidden; }
+.s07 .bk-kw { color: var(--violet); font-weight: 500; }
+.s07 .bk-h { color: var(--dim); }
+.s07 .bk-say { color: var(--dim); font: 13.5px var(--sans); white-space: nowrap; }
+.s07 .bk-say code { color: var(--ink-soft); font-size: 12px; }
+
+/* 08 What a streaming DataLoader needs. One row per thing a training loop does, what that
+   asks of storage, and the Karu behaviour that answers it. */
+.s08 .dln { gap: 14px; }
+.s08 .dln-grid { display: grid; grid-template-columns: 1fr 1.15fr 1.2fr; column-gap: 28px; }
+.s08 .dln-grid > div { padding: 8px 0; border-top: 1px solid var(--rule); }
+.s08 .dln-grid > .dln-col { padding: 0 0 6px; border-top: 0; color: var(--dim); font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.s08 .dln-col.is-karu { color: var(--violet); }
+.s08 .dln-who { color: var(--ink); font-size: 16.5px; font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
+.s08 .dln-who span,
+.s08 .dln-karu span { display: block; margin-top: 3px; color: var(--faint); font-size: 12.5px; font-weight: 400; letter-spacing: 0; }
+.s08 .dln-need { align-self: stretch; color: var(--ink-soft); font-size: 15px; line-height: 1.2; }
+.s08 .dln-karu { color: var(--violet); font-size: 15.5px; font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
+.s08 .dln-karu span { color: var(--dim); }
+.s08 .dln-karu span.is-mono { font: 400 11.5px var(--mono); }
+
+/* 09 Why not object_store. The two libraries under their language logos, compared on what a
+   DataLoader worker meets: fork, how results come back, and how many objects one call reads. */
+.s09 .v8 { gap: 10px; }
+.s09 .v8-fig { display: block; width: 100%; height: auto; overflow: visible; }
+.s09 .v8-fig text { font-family: var(--sans); fill: var(--ink-soft); }
+.s09 .v8-fig .v8-name { font-size: 22px; font-weight: 600; letter-spacing: -.02em; fill: var(--ink); }
+.s09 .v8-fig .v8-name.is-karu { fill: var(--violet); }
+.s09 .v8-fig .v8-sub { font-size: 12.5px; fill: var(--dim); }
+.s09 .v8-rule { fill: none; stroke: var(--rule); stroke-width: 1; }
+.s09 .v8-fig .v8-k { font: 600 14px var(--mono); fill: var(--ink); }
+.s09 .v8-fig .v8-ks { font-size: 12px; fill: var(--faint); }
+.s09 .v8-box { fill: #fff; stroke: #9a9aa2; stroke-width: 1; }
+.s09 .v8-fig .v8-boxl { font: 500 11px var(--mono); fill: var(--dim); }
+/* a thread is a small square: violet for Karu, grey for tokio, dashed orange when fork left it behind */
+.s09 .v8-t { fill: var(--violet); }
+.s09 .v8-t.is-grey { fill: #a7a7b0; }
+.s09 .v8-t.is-gone { fill: none; stroke: #fe6b37; stroke-width: 1; stroke-dasharray: 2 1.5; }
+.s09 .v8-arrow { fill: none; stroke: #9a9aa2; stroke-width: 1.2; }
+.s09 .v8-head { fill: #9a9aa2; }
+.s09 .v8-fig .v8-fork { font: 500 11px var(--mono); fill: var(--dim); text-anchor: middle; }
+.s09 .v8-fig .v8-say { font-size: 13.5px; fill: var(--ink-soft); }
+.s09 .v8-fig .v8-say.is-karu { fill: var(--violet); }
+.s09 .v8-fig .v8-say.is-bad { fill: #c2410c; }
+.s09 .v8-bar { fill: #d9d3fb; }
+.s09 .v8-bar.is-grey { fill: #dcdce1; }
+.s09 .v8-dot { fill: var(--violet); }
+.s09 .v8-dot.is-late { fill: #7b7b85; }
+.s09 .v8-wait { fill: none; stroke: #7b7b85; stroke-width: 1; stroke-dasharray: 3 3; }
+/* the objects row, each file a grey bar with its reads, joined to the calls that fetch them */
+.s09 .v8-obj { fill: #eeeeeb; }
+.s09 .v8-fig .v8-objl { font: 500 11px var(--mono); fill: var(--dim); text-anchor: end; }
+.s09 .v8-r { fill: var(--violet); }
+.s09 .v8-r.is-grey { fill: #a7a7b0; }
+.s09 .v8-link { fill: none; stroke: #9a9aa2; stroke-width: 1.2; }
+.s09 .v8-link.is-karu { stroke: var(--violet); }
+.s09 .v8-call { fill: #fff; stroke: #9a9aa2; stroke-width: 1.2; }
+.s09 .v8-call.is-karu { fill: #ece9fd; stroke: var(--violet); }
+.s09 .v8-fig .v8-calll { font: 500 11px var(--mono); fill: var(--dim); text-anchor: middle; }
+.s09 .v8-fig .v8-calll.is-karu { fill: var(--violet); font-weight: 600; }
+
+/* 10 The engine, one per client: caller threads hand work in, each violet I/O thread runs 16 transfers
+   at once on its timeline, blocking work stays below. */
+.s10 .en-wrap { flex: 1; min-height: 0; margin: 0; display: flex; flex-direction: column; justify-content: center; gap: 18px; }
+.s10 .en-fig { display: block; width: 100%; height: auto; overflow: visible; }
+.s10 .en-fig text { font-family: var(--sans); fill: var(--ink); }
+.s10 .en-fig .en-layer { font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; fill: var(--dim); }
+.s10 .en-fig .en-aside { font: 400 12.5px var(--sans); fill: var(--dim); }
+.s10 .en-fig .en-mono { font-family: var(--mono); font-size: 11.5px; }
+.s10 .en-box { fill: #f6f6f4; stroke: #777; stroke-width: 1.2; }
+/* the engine is the subject, so it gets the violet edge and a wash of its fill */
+.s10 .en-engine { fill: rgba(73, 42, 232, .035); stroke: #492ae8; stroke-width: 1.6; }
+.s10 .en-fig .en-who { font-size: 14px; font-weight: 500; }
+.s10 .en-call { fill: none; stroke: #777; stroke-width: 1.4; }
+.s10 .en-call.on { stroke: #492ae8; stroke-width: 1.8; }
+.s10 .en-back { fill: none; stroke: #777; stroke-width: 1.4; stroke-dasharray: 4 3; }
+.s10 .en-fig .en-call-tag { font: 500 11px var(--mono); fill: var(--dim); text-anchor: middle; }
+.s10 .en-fig .en-call-tag.on { fill: #492ae8; }
+.s10 .en-fig .en-small { font: 500 11px var(--mono); fill: var(--dim); }
+.s10 .en-fig .en-val { fill: var(--ink); font-weight: 700; }
+.s10 .en-queue { fill: #fff; stroke: #777; stroke-width: 1.2; }
+.s10 .en-ticks rect { fill: #c9cbd3; }
+.s10 .en-loop { fill: #fff; stroke: #492ae8; stroke-width: 1.6; }
+.s10 .en-fig .en-loop-name { font-size: 14px; font-weight: 600; fill: #492ae8; letter-spacing: -.01em; }
+.s10 .en-fig .en-loop-name.is-small { font-size: 12.5px; }
+.s10 .en-fig .en-loop-sub { font: 400 11px var(--mono); fill: #6b5ce0; }
+.s10 .en-fig .en-loop-sub.is-on { fill: #492ae8; font-weight: 700; }
+/* a transfer is a wait for the server, then bytes; the light part is why one thread can hold 16 */
+.s10 .en-w { fill: #c4baf7; }
+.s10 .en-b { fill: #492ae8; }
+/* threads 2 to 4 repeat thread 1 at a quarter of the height, so they get less contrast */
+.s10 .is-dense .en-w { fill: #ddd7fb; }
+.s10 .is-dense .en-b { fill: #9384f2; }
+.s10 .en-now { fill: none; stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 2; }
+.s10 .en-fig .en-key { font: 400 11.5px var(--sans); fill: var(--dim); }
+/* on arrival, time runs left to right once and the playhead leaves the finished batch behind */
+.s10 .en-head { fill: none; stroke: #492ae8; stroke-width: 1.4; opacity: 0; }
+.s10.active .en-time { animation: s10-sweep 2.6s linear both; }
+.s10.active .en-head { animation: s10-head 2.6s linear both; }
+@keyframes s10-sweep { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes s10-head { 0% { opacity: 1; transform: translateX(0); } 92% { opacity: 1; } 100% { opacity: 0; transform: translateX(286px); } }
+.s10 .en-conn path { fill: none; stroke: #492ae8; stroke-width: 1.4; opacity: .5; }
+.s10 .en-fig .en-conn-tag { font-size: 12.5px; font-weight: 600; fill: #492ae8; }
+.s10 .en-rule { fill: none; stroke: #c9cbd3; stroke-width: 1; stroke-dasharray: 4 3; }
+.s10 .en-fig .en-name { font-size: 15px; font-weight: 600; letter-spacing: -.02em; }
+.s10 .en-fig .en-text { font-size: 12px; fill: var(--dim); }
+.s10 .en-fig .en-store { font-size: 18px; font-weight: 600; letter-spacing: -.02em; text-anchor: middle; }
+.s10 .en-fig .en-store-sub { font-size: 13px; fill: var(--dim); text-anchor: middle; }
+.s10 .en-stats { fill: #f6f6f4; }
+.s10 .en-fig .en-stats-head { font: 700 11.5px var(--mono); }
+.s10 .en-fig .en-stats-note { font-size: 11px; fill: var(--faint); text-anchor: end; }
+.s10 .en-fig .en-stats-col { font: 500 11px var(--mono); fill: var(--dim); text-anchor: end; }
+.s10 .en-fig .en-stats-key { font: 400 11.5px var(--mono); fill: var(--soft); }
+.s10 .en-fig .en-stats-val { font: 500 11.5px var(--mono); text-anchor: end; }
+.s10 .en-fig .en-stats-val.on { fill: #492ae8; font-weight: 700; }
+
+/* 11 Whole-object downloads, the probe, the slots that walk the object, the publish and the failure. */
+.s11 .dl { gap: 16px; }
+.s11 .dl-top { display: flex; align-items: center; gap: 14px; }
+.s11 .dl-new { color: var(--faint); font: 600 11px var(--sans); letter-spacing: .12em; text-transform: uppercase; }
+.s11 .dl-tabs { display: flex; gap: 20px; margin-right: auto; }
+.s11 .dl-tabs button { padding: 4px 0; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--dim); font: 500 12px var(--mono); cursor: pointer; }
+.s11 .dl-tabs button[aria-selected="true"] { border-color: var(--ink); color: var(--ink); }
+.s11 .dl-code { margin: 0; padding: 6px 14px; background: var(--wash); color: var(--ink); font: 12.5px/1.6 var(--mono); font-variant-ligatures: none; }
+.s11 .dl-fig { display: block; width: 100%; height: auto; overflow: visible; cursor: pointer; }
+.s11 .dl-note { position: relative; height: 22px; color: var(--ink-soft); font-size: 16px; line-height: 22px; }
+.s11 .dl-note span { position: absolute; inset: 0; }
+
+/* Step text and marks: listed steps show, the rest fade out. */
+.s11 [data-show] { opacity: 0; transition: opacity 260ms ease; }
+.s11[data-step="1"] [data-show~="1"],
+.s11[data-step="2"] [data-show~="2"],
+.s11[data-step="3"] [data-show~="3"],
+.s11[data-step="4"] [data-show~="4"] { opacity: 1; }
+/* Size, ETag and the temporary file are known only once the probe has answered. */
+.s11 .dl-fig[data-phase="probe"] .dl-after-probe { opacity: 0; }
+.s11 .dl-after-probe, .s11 .dl-temp { transition: opacity 320ms ease; }
+
+.s11 .dl-rule { stroke: #ececef; stroke-width: 1; }
+.s11 .dl-name { fill: var(--ink-soft); font: 600 15px var(--sans); }
+.s11 .dl-sub { fill: var(--faint); font: 400 12px var(--sans); }
+.s11 .dl-mono { font-family: var(--mono); font-size: 11.5px; }
+.s11 .dl-tag { fill: var(--soft); font: 400 12px var(--sans); }
+.s11 .dl-tag.dl-mono { font-family: var(--mono); font-size: 11px; }
+.s11 .dl-faint { fill: var(--faint); }
+.s11 .dl-dim { fill: none; stroke: var(--faint); stroke-width: 1; }
+.s11 .dl-val { fill: var(--ink-soft); font: 500 14px var(--mono); }
+.s11 .dl-val.dl-key { fill: var(--violet); font-size: 16px; font-weight: 700; }
+.s11 .dl-vsub { fill: var(--faint); font: 400 12px var(--sans); }
+.s11 .dl-bad { fill: #fe6b37; }
+.s11 .dl-done { fill: var(--ink); }
+
+/* Bars: the object is grey, in-flight ranges violet-soft, the probe yellow, written bytes violet. */
+.s11 .dl-frame { fill: none; stroke: #c9cbd3; stroke-width: 1; }
+.s11 .dl-cell { fill: #ececef; transition: fill 200ms ease; }
+.s11 .dl-cell.is-flight { fill: #cfc6fb; }
+.s11 .dl-cell.is-probe { fill: #f7cc09; }
+.s11 .dl-sep { stroke: #fff; stroke-width: 1; }
+.s11 .dl-temp-bg { fill: #fff; }
+.s11 .dl-tcell { fill: transparent; transition: fill 160ms ease, opacity 400ms ease; }
+.s11 .dl-tcell.is-done { fill: var(--violet); }
+.s11 .dl-tcell.is-probe.is-done { fill: #f7cc09; }
+.s11 .dl-tsep { stroke: #fff; stroke-width: 1; }
+
+.s11 .dl-req { stroke: var(--violet); stroke-width: 1; stroke-dasharray: 3 3; }
+.s11 .dl-probe-buf { fill: #f7cc09; }
+.s11 .dl-slot { transition: transform 340ms cubic-bezier(.4, 0, .2, 1), opacity 260ms ease; }
+.s11 .dl-slot rect { fill: #ece9fd; stroke: var(--violet); stroke-width: 1; transition: fill 260ms ease, stroke 260ms ease; }
+.s11 .dl-slot .dl-write { stroke: var(--violet); stroke-width: 1.5; opacity: 0; transition: opacity 260ms ease; }
+.s11 .dl-slot.is-write .dl-write { opacity: 1; transition: none; }
+.s11 .dl-slot.is-idle { opacity: 0; }
+.s11 .dl-slot.is-hit rect { fill: #ffeae1; stroke: #fe6b37; transition-delay: 250ms; }
+.s11 .dl-slot.is-hit .dl-req { stroke: #fe6b37; transition: stroke 260ms ease 250ms; }
+.s11 .dl-fig.is-jump .dl-slot,
+.s11 .dl-fig.is-jump .dl-cell,
+.s11 .dl-fig.is-jump .dl-tcell { transition: none; }
+.s11 .dl-fail { fill: #fe6b37; font: 400 11px var(--mono); }
+
+.s11 .dl-dest { fill: none; stroke: #c9cbd3; stroke-width: 1; stroke-dasharray: 4 3; transition: fill 300ms ease, stroke 300ms ease; }
+.s11 .dl-dest-text { fill: var(--faint); font: 400 12px var(--sans); text-anchor: middle; }
+.s11 .dl-dest-text.dl-mono { font-family: var(--mono); font-size: 11.5px; }
+.s11 .dl-dest-text.dl-done { fill: var(--ink); }
+.s11 .dl-dest-text.dl-bad { fill: #fe6b37; }
+.s11 .dl-publish line { stroke: var(--violet); stroke-width: 1.5; }
+.s11 .dl-publish text { fill: var(--violet); font: 500 12px var(--sans); }
+
+/* Publish: the temporary name gives way to the destination. */
+.s11[data-step="3"] .dl-temp { opacity: .35; transition-delay: 200ms; }
+.s11[data-step="3"] .dl-dest { fill: #ece9fd; stroke: var(--violet); stroke-dasharray: none; transition-delay: 350ms; }
+.s11[data-step="3"] [data-show~="3"] { transition-delay: 350ms; }
+.s11[data-step="3"] .dl-publish { transition-delay: 0ms; }
+/* Failure: the 412 lands first, then the written bytes go with the temporary file. */
+.s11[data-step="4"] .dl-tcell.is-done { opacity: .18; transition-delay: 700ms; }
+.s11[data-step="4"] .dl-temp-frame { stroke: #fe6b37; stroke-dasharray: 4 3; transition: stroke 300ms ease 700ms; }
+.s11[data-step="4"] .dl-dest { stroke: #fe6b37; transition-delay: 900ms; }
+.s11[data-step="4"] [data-show~="4"] { transition-delay: 250ms; }
+.s11[data-step="4"] .dl-temp [data-show~="4"],
+.s11[data-step="4"] .dl-dest-text[data-show~="4"] { transition-delay: 800ms; }
+@media (prefers-reduced-motion: reduce) {
+  .s11 [data-show], .s11 .dl-slot, .s11 .dl-slot rect, .s11 .dl-cell, .s11 .dl-tcell, .s11 .dl-temp, .s11 .dl-dest, .s11 .dl-after-probe { transition: none !important; }
+}

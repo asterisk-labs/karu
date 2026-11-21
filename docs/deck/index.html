@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="How Karu turns the byte ranges a format needs into few, verified requests to local files, HTTP and object stores.">
+  <title>Karu · byte-range transport</title>
+  <link rel="icon" href="../assets/svg/karu-mark-color.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=League+Spartan:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=0ec11de9a7">
+  <script defer src="app.js?v=0ec11de9a7"></script>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+  <a class="site-back" href="../" aria-label="Back to the Karu website">←</a>
+
+  <main class="deck" id="deck" aria-label="Karu byte-range transport">
+    <section class="slide cover active s01" aria-label="Karu cover">
+      <img class="cover-asterisk" src="fig/asterisk_banner.svg" alt="Asterisk Labs">
+      <div class="cover-inner">
+        <img class="cover-logo" src="../assets/svg/karu-mark-color.svg" alt="">
+        <div class="cover-copy">
+          <h1>karu</h1>
+          <p>Stateless byte-range transport</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide s02" aria-label="The Asterisk stack for AI">
+  <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">02 / 12</span></header>
+  <h1>Karu is one layer of the <span class="title-mark">Asterisk stack for AI</span></h1>
+  <figure class="st-wrap">
+    <svg class="st-fig" viewBox="0 0 864 376" role="img" aria-label="The Asterisk stack for AI, with arrows from caller to callee. The model calls TACO and Rumi. TACO calls cozip, Rumi and Karu. cozip calls Karu and can hold Rumi files. Rumi calls GeoZL, which runs on OpenZL, and Karu. Karu, highlighted, reads the bytes for all of them.">
+      <defs>
+        <marker id="s02-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#777"/></marker>
+        <marker id="s02-arrow-on" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#492ae8"/></marker>
+      </defs>
+      <text class="st-layer" x="0" y="32">training</text>
+      <text class="st-layer" x="0" y="112">datasets</text>
+      <text class="st-layer" x="0" y="192">files</text>
+      <text class="st-layer" x="0" y="272">codecs</text>
+      <text class="st-layer" x="0" y="352">bytes</text>
+      <rect class="st-box st-open" x="132" y="0" width="732" height="54"/>
+      <text class="st-name" x="148" y="24">PyTorch, JAX, TensorFlow</text>
+      <text class="st-text" x="148" y="44">your model, fed tensors through DLPack on a CPU or a GPU</text>
+      <rect class="st-box" x="132" y="80" width="440" height="54"/>
+      <text class="st-name" x="148" y="104">TACO</text>
+      <text class="st-text" x="148" y="124">AI-ready datasets, one sample per example</text>
+      <rect class="st-box" x="172" y="160" width="280" height="54"/>
+      <text class="st-name" x="188" y="184">cozip</text>
+      <text class="st-text" x="188" y="204">a ZIP you open like a table</text>
+      <rect class="st-box" x="512" y="160" width="352" height="54"/>
+      <text class="st-name" x="528" y="184">Rumi</text>
+      <text class="st-text" x="528" y="204">tensors read by window, band and time</text>
+      <rect class="st-box" x="512" y="240" width="270" height="54"/>
+      <text class="st-name" x="528" y="264">GeoZL</text>
+      <text class="st-text" x="528" y="284">Earth observation codecs, on OpenZL</text>
+      <rect class="st-box st-karu" x="132" y="320" width="732" height="54"/>
+      <text class="st-name" x="148" y="344">Karu</text>
+      <text class="st-text" x="148" y="364">batched byte-range reads from files, HTTP, S3, GCS, Azure, Hugging Face and Source Cooperative</text>
+      <image href="../assets/svg/karu-mark-color.svg" x="816" y="327" width="40" height="40"/>
+      <path class="st-call" d="M300 54 V78" marker-end="url(#s02-arrow)"/>
+      <path class="st-call" d="M300 134 V158" marker-end="url(#s02-arrow)"/>
+      <path class="st-call" d="M540 134 V158" marker-end="url(#s02-arrow)"/>
+      <path class="st-call" d="M700 54 V158" marker-end="url(#s02-arrow)"/>
+      <path class="st-call" d="M640 214 V238" marker-end="url(#s02-arrow)"/>
+      <path class="st-call on" d="M152 134 V318" marker-end="url(#s02-arrow-on)"/>
+      <path class="st-call on" d="M300 214 V318" marker-end="url(#s02-arrow-on)"/>
+      <path class="st-call on" d="M823 214 V318" marker-end="url(#s02-arrow-on)"/>
+      <path class="st-hold" d="M452 190 H508" marker-end="url(#s02-arrow)"/>
+      <text class="st-tag" x="481" y="182">holds</text>
+    </svg>
+  </figure>
+</section>
+
+    <section class="slide s03" aria-label="Remote reads are bound by round trips">
+  <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">03 / 12</span></header>
+  <h1>Remote reads are bound by <span class="title-mark">round trips</span>, not bytes</h1>
+  <figure class="fig s03-fig">
+    <div class="s03-trips" role="img" aria-label="Four separate ranges, A to D, read two ways on a time axis in round trips. Each read is a short request, a long wait for the store and a thin bar of bytes at the end. One read at a time asks for the next range only after the last one arrives, four round trips. A Karu batch asks for all four at once and they all arrive after one round trip.">
+      <div class="s03-axis-who">time in round trips</div>
+      <div class="s03-axis"><span style="--k:0">0</span><span style="--k:1">1</span><span style="--k:2">2</span><span style="--k:3">3</span><span style="--k:4">4</span></div>
+      <div></div>
+
+      <div class="s03-who">One read at a time<span>asks after the last arrives</span></div>
+      <div class="s03-lane">
+        <div class="s03-row">
+          <span class="s03-req" style="--t:0;--d:.16">A</span><span class="s03-wait" style="--t:0.16;--d:.74"><i>waiting</i></span><span class="s03-bytes" style="--t:0.9;--d:.1"><i>bytes</i></span>
+          <span class="s03-req" style="--t:1;--d:.16">B</span><span class="s03-wait" style="--t:1.16;--d:.74"></span><span class="s03-bytes" style="--t:1.9;--d:.1"></span>
+          <span class="s03-req" style="--t:2;--d:.16">C</span><span class="s03-wait" style="--t:2.16;--d:.74"></span><span class="s03-bytes" style="--t:2.9;--d:.1"></span>
+          <span class="s03-req" style="--t:3;--d:.16">D</span><span class="s03-wait" style="--t:3.16;--d:.74"></span><span class="s03-bytes" style="--t:3.9;--d:.1"></span>
+        </div>
+      </div>
+      <div class="s03-n" style="--t:4">4 round trips</div>
+
+      <div class="s03-who is-karu">Karu batch<span>every known range at once</span></div>
+      <div class="s03-lane">
+        <div class="s03-row"><span class="s03-req is-karu" style="--t:0;--d:.16">A</span><span class="s03-wait" style="--t:0.16;--d:.74"></span><span class="s03-bytes" style="--t:0.9;--d:.1"></span></div>
+        <div class="s03-row"><span class="s03-req is-karu" style="--t:0;--d:.16">B</span><span class="s03-wait" style="--t:0.16;--d:.74"></span><span class="s03-bytes" style="--t:0.9;--d:.1"></span></div>
+        <div class="s03-row"><span class="s03-req is-karu" style="--t:0;--d:.16">C</span><span class="s03-wait" style="--t:0.16;--d:.74"></span><span class="s03-bytes" style="--t:0.9;--d:.1"></span></div>
+        <div class="s03-row"><span class="s03-req is-karu" style="--t:0;--d:.16">D</span><span class="s03-wait" style="--t:0.16;--d:.74"></span><span class="s03-bytes" style="--t:0.9;--d:.1"></span></div>
+      </div>
+      <div class="s03-n is-karu" style="--t:1">1 round trip</div>
+    </div>
+    <p class="path-note">An example with four separate ranges. Karu keeps up to 64 remote transfers in flight by default.</p>
+  </figure>
+</section>
+
+    <section class="slide s04" aria-label="Batches complete one by one" data-steps="3" data-step="1">
+  <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">04 / 12</span></header>
+  <h1>Give Karu <span class="title-mark">every range</span> you know</h1>
+  <div class="s04-wr">
+    <div class="s04-tabs" role="tablist" aria-label="Steps">
+      <button type="button" role="tab" data-to="1">the reads</button>
+      <button type="button" role="tab" data-to="2">submit</button>
+      <button type="button" role="tab" data-to="3">next</button>
+    </div>
+    <div class="s04-main">
+      <pre class="s04-code"><code><span class="ln" data-k="1"><span class="tok-com">// six tiles of one remote scene</span></span><span class="ln" data-k="1">std::array&lt;karu::Read, <span class="tok-num">6</span>&gt; reads;</span><span class="ln" data-k="1"><span class="tok-kw">for</span> (<span class="tok-kw">int</span> i = <span class="tok-num">0</span>; i &lt; <span class="tok-num">6</span>; ++i)</span><span class="ln" data-k="1">    reads[i] = {.object = &amp;scene, .offset = off[i],</span><span class="ln" data-k="1">        .destination = tile[i], <span class="s04-pat">.tag = &amp;tile[i]</span>};</span><span class="ln" data-k="2"> </span><span class="ln" data-k="2"><span class="tok-kw">auto</span> batch = client.<span class="tok-fn">submit</span>(reads).<span class="tok-fn">value</span>();</span><span class="ln" data-k="3"> </span><span class="ln" data-k="3"><span class="tok-kw">for</span> (;;) {</span><span class="ln" data-k="3">    <span class="tok-kw">auto</span> ev = <span class="s04-pat">batch.<span class="tok-fn">next</span>()</span>.<span class="tok-fn">value</span>();</span><span class="ln" data-k="3">    <span class="tok-kw">if</span> (ev.state == karu::BatchState::end) <span class="tok-kw">break</span>;</span><span class="ln" data-k="3">    <span class="tok-com">// each event: tag, status, bytes_read</span></span><span class="ln" data-k="3">}</span></code></pre>
+      <svg class="s04-fig" viewBox="0 0 436 228" role="img" aria-label="Six reads, tile 0 to tile 5, start together at submit and finish at different times. next returns them in the order they finish, tiles 3, 5, 0, 1, 4 and 2, and each fills its own buffer.">
+        <path class="f-axis" d="M64 20 H428"/>
+        <path class="f-head" d="M432 20 L426 17 V23 Z"/>
+        <text class="f-cap" x="64" y="12" text-anchor="middle">submit</text>
+        <text class="f-cap" x="432" y="12" text-anchor="end">time</text>
+        <path class="f-t0" d="M64 24 V208"/>
+        <g class="f-tracks">
+          <path d="M64 40 H432"/><path d="M64 64 H432"/><path d="M64 88 H432"/>
+          <path d="M64 112 H432"/><path d="M64 136 H432"/><path d="M64 160 H432"/>
+        </g>
+        <path class="f-rule" d="M0 178 H432"/>
+        <text class="f-lane" x="0" y="200">next()</text>
+        <!-- the moment shown, under the bars and chips so it never crosses a label -->
+        <g class="f-now"><path d="M0 24 V208"/><text x="0" y="223" text-anchor="middle">now</text></g>
+
+        <!-- one row per read: its buffer, its transfer, and the moment it lands; --l is the
+             transfer length and --t how long after the step 2 cursor it finishes -->
+        <g class="f-read" style="--l:202;--t:122">
+          <g class="f-slot"><rect x="0" y="31" width="52" height="18"/><text x="26" y="44">tile[0]</text></g>
+          <rect class="f-bar" x="64" y="34" height="12"/><circle class="f-dot" cx="266" cy="40" r="3.5"/>
+        </g>
+        <g class="f-read" style="--l:246;--t:166">
+          <g class="f-slot"><rect x="0" y="55" width="52" height="18"/><text x="26" y="68">tile[1]</text></g>
+          <rect class="f-bar" x="64" y="58" height="12"/><circle class="f-dot" cx="310" cy="64" r="3.5"/>
+        </g>
+        <g class="f-read" style="--l:332;--t:252">
+          <g class="f-slot"><rect x="0" y="79" width="52" height="18"/><text x="26" y="92">tile[2]</text></g>
+          <rect class="f-bar" x="64" y="82" height="12"/><circle class="f-dot" cx="396" cy="88" r="3.5"/>
+        </g>
+        <g class="f-read" style="--l:118;--t:38">
+          <g class="f-slot"><rect x="0" y="103" width="52" height="18"/><text x="26" y="116">tile[3]</text></g>
+          <rect class="f-bar" x="64" y="106" height="12"/><circle class="f-dot" cx="182" cy="112" r="3.5"/>
+        </g>
+        <g class="f-read" style="--l:288;--t:208">
+          <g class="f-slot"><rect x="0" y="127" width="52" height="18"/><text x="26" y="140">tile[4]</text></g>
+          <rect class="f-bar" x="64" y="130" height="12"/><circle class="f-dot" cx="352" cy="136" r="3.5"/>
+        </g>
+        <g class="f-read" style="--l:162;--t:82">
+          <g class="f-slot"><rect x="0" y="151" width="52" height="18"/><text x="26" y="164">tile[5]</text></g>
+          <rect class="f-bar" x="64" y="154" height="12"/><circle class="f-dot" cx="226" cy="160" r="3.5"/>
+        </g>
+
+        <!-- completions in the order next() returns them, each carrying its tag -->
+        <g class="f-chip" style="--t:38"><rect x="172" y="188" width="20" height="16"/><text x="182" y="200">3</text></g>
+        <g class="f-chip" style="--t:82"><rect x="216" y="188" width="20" height="16"/><text x="226" y="200">5</text></g>
+        <g class="f-chip" style="--t:122"><rect x="256" y="188" width="20" height="16"/><text x="266" y="200">0</text></g>
+        <g class="f-chip" style="--t:166"><rect x="300" y="188" width="20" height="16"/><text x="310" y="200">1</text></g>
+        <g class="f-chip" style="--t:208"><rect x="342" y="188" width="20" height="16"/><text x="352" y="200">4</text></g>
+        <g class="f-chip" style="--t:252"><rect x="386" y="188" width="20" height="16"/><text x="396" y="200">2</text></g>
+      </svg>
+    </div>
+    <div class="s04-note">
+      <p data-k="1">Describe every read up front, each with a <span class="title-mark">tag</span> of your own.</p>
+      <p data-k="2"><span class="mono">submit</span> queues all six and <span class="title-mark">returns at once</span>, without waiting for any bytes.</p>
+      <p data-k="3"><span class="mono">next()</span> hands back each read <span class="title-mark">as it finishes</span>, with its tag and its own status.</p>
+    </div>
+  </div>
+</section>
+
+    <section class="slide s05" aria-label="Nearby ranges share one request" data-steps="2" data-step="1">
+  <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">05 / 12</span></header>
+  <h1>Nearby ranges <span class="title-mark">share one request</span></h1>
+  <div class="fig lm">
+    <div class="lm-p lm-p1">
+      <div class="lm-say"><p class="lm-k">Gap <b>1 MiB</b></p><p class="lm-rule">The next read joins the request when the hole before it is at most 1 MiB.</p><code>KARU_COALESCE_GAP</code></div>
+      <div class="lm-fig" role="img" aria-label="Reads A, B and C. The 512 KiB hole between A and B is under the 1 MiB gap, so GET 1 takes A, the hole and B. The 2 MiB hole before C is over it, so C starts GET 2.">
+        <span class="lm-row" style="top:40px">reads</span>
+        <span class="lm-row" style="top:102px">requests</span>
+        <span class="lm-obj"></span>
+        <span class="lm-rd" style="left:84px;width:100px">A</span>
+        <span class="lm-rd" style="left:234px;width:100px">B</span>
+        <span class="lm-rd" style="left:504px;width:100px">C</span>
+        <span class="lm-hb" style="left:184px;width:50px"></span><span class="lm-hl" style="left:209px">512 KiB</span>
+        <span class="lm-hb" style="left:334px;width:170px"></span><span class="lm-hl" style="left:419px">2 MiB</span>
+        <span class="lm-rq" style="left:84px;width:250px;--t:0.2s;--d:1.14s"><span class="lm-seg is-read" style="left:0px;width:100px">A</span><span class="lm-seg is-hole" style="left:100px;width:50px">dropped</span><span class="lm-seg is-read" style="left:150px;width:100px">B</span></span><span class="lm-get lm-in" style="left:84px;--t:0.2s">GET 1</span>
+        <span class="lm-rq" style="left:504px;width:100px;--t:2.2s;--d:0.45s"><span class="lm-seg is-read" style="left:0px;width:100px">C</span></span><span class="lm-get lm-in" style="left:504px;--t:2.2s">GET 2</span>
+        <span class="lm-vd lm-in is-join" style="left:209px;--t:0.65s"><b>hole 512 KiB</b>&le; 1 MiB, joins</span>
+        <span class="lm-vd lm-in is-split" style="left:419px;--t:1.7400000000000002s"><b>hole 2 MiB</b>&gt; 1 MiB, new request</span>
+      </div>
+    </div>
+    <div class="lm-p lm-p2">
+      <div class="lm-say"><p class="lm-k">Ratio <b>16&times;</b></p><p class="lm-rule">The next read joins only if the request then fetches at most 16 times the bytes asked.</p><code>KARU_COALESCE_AMPLIFICATION</code></div>
+      <div class="lm-fig" role="img" aria-label="Three 32 KiB reads, A, B and C, with 768 KiB holes, each under the gap. GET 1 with A, the hole and B fetches 32 + 768 + 32 = 832 KiB for the 64 KiB asked, 13 times, under 16. Adding C would fetch 1,632 KiB for 96 KiB, 17 times, so C starts GET 2.">
+        <span class="lm-row" style="top:40px">reads</span>
+        <span class="lm-row" style="top:102px">requests</span>
+        <span class="lm-obj"></span>
+        <span class="lm-rd" style="left:84px;width:22px">A</span>
+        <span class="lm-rd" style="left:226px;width:22px">B</span>
+        <span class="lm-rd" style="left:368px;width:22px">C</span>
+        <span class="lm-hb" style="left:106px;width:120px"></span><span class="lm-hl" style="left:166px">768 KiB</span>
+        <span class="lm-hb" style="left:248px;width:120px"></span><span class="lm-hl" style="left:308px">768 KiB</span>
+        <span class="lm-hl is-size" style="left:95px">32 KiB</span>
+        <span class="lm-hl is-size" style="left:237px">32 KiB</span>
+        <span class="lm-hl is-size" style="left:379px">32 KiB</span>
+        <span class="lm-rq" style="left:84px;width:164px;--t:0.2s;--d:0.75s"><span class="lm-seg is-read" style="left:0px;width:22px"></span><span class="lm-seg is-hole" style="left:22px;width:120px">dropped</span><span class="lm-seg is-read" style="left:142px;width:22px"></span></span><span class="lm-get lm-in" style="left:84px;--t:0.2s">GET 1</span>
+        <span class="lm-rq" style="left:368px;width:22px;--t:1.75s;--d:0.3s"><span class="lm-seg is-read" style="left:0px;width:22px"></span></span><span class="lm-get lm-in" style="left:368px;--t:1.75s">GET 2</span>
+        <span class="lm-vd lm-in is-join" style="left:166px;--t:0.57s"><b>832 KiB for 64 KiB asked</b>13&times;, &le; 16&times;, joins</span>
+        <span class="lm-vd lm-in is-split" style="left:360px;--t:1.45s"><b>1,632 KiB for 96 KiB asked</b>17&times;, &gt; 16&times;, new request</span>
+      </div>
+    </div>
+    <p class="path-note">You only pass each read's offset and size. Karu measures the holes and ratios itself, with its defaults.</p>
+  </div>
+</section>
+
+    <section class="slide s06" aria-label="A merged request has two ceilings" data-steps="2" data-step="1">
+  <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">06 / 12</span></header>
+  <h1>A merged request <span class="title-mark">has two ceilings</span></h1>
+  <div class="fig lm">
+    <div class="lm-p lm-p1">
+      <div class="lm-say"><p class="lm-k">Span <b>64 MiB</b></p><p class="lm-rule">A request covers at most 64 MiB, from its first byte to its last.</p><code>KARU_COALESCE_LIMIT</code></div>
+      <div class="lm-fig has-ruler" role="img" aria-label="Three 24 MiB reads, A, B and C, with 512 KiB holes. GET 1 takes A and B, 48.5 MiB. Adding C would make it 73 MiB, over 64 MiB, so C starts GET 2.">
+        <span class="lm-row" style="top:40px">reads</span>
+        <span class="lm-row" style="top:102px">requests</span>
+        <span class="lm-obj"></span>
+        <span class="lm-rd" style="left:84px;width:170px">A</span>
+        <span class="lm-rd" style="left:266px;width:170px">B</span>
+        <span class="lm-rd" style="left:448px;width:170px">C</span>
+        <span class="lm-hb" style="left:254px;width:12px"></span><span class="lm-hl" style="left:260px">512 KiB</span>
+        <span class="lm-hb" style="left:436px;width:12px"></span><span class="lm-hl" style="left:442px">512 KiB</span>
+        <span class="lm-ruler" style="left:84px;width:453px"><i>64 MiB from the first byte</i></span>
+        <span class="lm-rq" style="left:84px;width:352px;--t:0.2s;--d:1.6s"><span class="lm-seg is-read" style="left:0px;width:170px">A</span><span class="lm-seg is-hole" style="left:170px;width:12px"></span><span class="lm-seg is-read" style="left:182px;width:170px">B</span></span><span class="lm-get lm-in" style="left:84px;--t:0.2s">GET 1</span>
+        <span class="lm-rq" style="left:448px;width:170px;--t:2.4s;--d:0.77s"><span class="lm-seg is-read" style="left:0px;width:170px">C</span></span><span class="lm-get lm-in" style="left:448px;--t:2.4s">GET 2</span>
+        <span class="lm-vd lm-in is-join" style="left:260px;--t:0.97s"><b>A + B = 48.5 MiB</b>&le; 64 MiB, joins</span>
+        <span class="lm-vd lm-in is-split" style="left:442px;--t:2.2s"><b>+ C = 73 MiB</b>&gt; 64 MiB, new request</span>
+      </div>
+    </div>
+    <div class="lm-p lm-p2">
+      <div class="lm-say"><p class="lm-k">Parts <b>1024</b></p><p class="lm-rule">A request carries at most 1024 reads, even when they touch.</p><code>KARU_COALESCE_PARTS</code></div>
+      <div class="lm-fig" role="img" aria-label="A run of touching reads. GET 1 takes reads 1 to 1024, the most one request carries, and read 1025 starts GET 2.">
+        <span class="lm-row" style="top:40px">reads</span>
+        <span class="lm-row" style="top:102px">requests</span>
+        <span class="lm-obj"></span>
+        <span class="lm-rd" style="left:84px;width:18px"></span>
+        <span class="lm-rd" style="left:104px;width:18px"></span>
+        <span class="lm-rd" style="left:124px;width:18px"></span>
+        <span class="lm-rd" style="left:144px;width:18px"></span>
+        <span class="lm-rd" style="left:164px;width:18px"></span>
+        <span class="lm-rd" style="left:184px;width:18px"></span>
+        <span class="lm-rd" style="left:204px;width:18px"></span>
+        <span class="lm-rd" style="left:224px;width:18px"></span>
+        <span class="lm-rd" style="left:304px;width:18px"></span>
+        <span class="lm-rd" style="left:324px;width:18px"></span>
+        <span class="lm-rd" style="left:344px;width:18px"></span>
+        <span class="lm-rd" style="left:364px;width:18px"></span>
+        <span class="lm-rd" style="left:384px;width:18px"></span>
+        <span class="lm-rd" style="left:404px;width:18px"></span>
+        <span class="lm-rd" style="left:424px;width:18px"></span>
+        <span class="lm-rd" style="left:444px;width:18px"></span>
+        <span class="lm-rd" style="left:464px;width:18px"></span>
+        <span class="lm-rd" style="left:484px;width:18px"></span>
+        <span class="lm-rd" style="left:504px;width:18px"></span>
+        <span class="lm-dots" style="left:244px;width:60px">&hellip;</span>
+        <span class="lm-tick is-start" style="left:84px">read 1</span>
+        <span class="lm-tick is-end" style="left:462px">read 1024</span>
+        <span class="lm-rq" style="left:84px;width:378px;--t:0.2s;--d:1.72s"><span class="lm-seg is-read" style="left:0px;width:378px">reads 1 to 1024</span></span><span class="lm-get lm-in" style="left:84px;--t:0.2s">GET 1</span>
+        <span class="lm-rq" style="left:464px;width:58px;--t:2.5s;--d:0.4s"><span class="lm-seg is-read" style="left:0px;width:58px">1025</span></span><span class="lm-get lm-in" style="left:464px;--t:2.5s">GET 2</span>
+        <span class="lm-vd lm-in is-split" style="left:463px;--t:2.2199999999999998s"><b>1,024 reads</b>full, new request</span>
+      </div>
+    </div>
+    <p class="path-note">Holes not to scale. Local files merge only ranges that touch, and a gap of 0 turns merging off.</p>
+  </div>
+</section>
+
+    <section class="slide s07" aria-label="One contract, seven backends">
+      <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">07 / 12</span></header>
+      <h1><span class="title-mark">One contract</span>, seven backends</h1>
+      <div class="bk">
+        <div class="bk-table" role="tablist" aria-label="Backend" data-interactive>
+          <div class="bk-head" aria-hidden="true"><span>backend</span><span>URI</span><span>GDAL path</span><span>reached by</span></div>
+          <button type="button" class="bk-row" role="tab" data-bk="file" aria-selected="false"><span class="bk-name">Local files</span><code><b>file://</b>/data/scene.tif</code><code>/data/scene.tif</code><span class="bk-how">positional read</span></button>
+          <button type="button" class="bk-row" role="tab" data-bk="http" aria-selected="false"><span class="bk-name">HTTP(S)</span><code><b>https://</b>example.com/scene.tif</code><code><b>/vsicurl/</b>https://example.com/scene.tif</code><span class="bk-how">range GET</span></button>
+          <button type="button" class="bk-row" role="tab" data-bk="s3" aria-selected="true"><span class="bk-name">S3</span><code><b>s3://</b>bucket/scene.tif</code><code><b>/vsis3/</b>bucket/scene.tif</code><span class="bk-how">signed range GET</span></button>
+          <button type="button" class="bk-row" role="tab" data-bk="gcs" aria-selected="false"><span class="bk-name">GCS</span><code><b>gs://</b>bucket/scene.tif</code><code><b>/vsigs/</b>bucket/scene.tif</code><span class="bk-how">signed range GET</span></button>
+          <button type="button" class="bk-row" role="tab" data-bk="azure" aria-selected="false"><span class="bk-name">Azure</span><code><b>az://</b>container/scene.tif</code><code><b>/vsiaz/</b>container/scene.tif</code><span class="bk-how">signed range GET</span></button>
+          <button type="button" class="bk-row" role="tab" data-bk="hf" aria-selected="false"><span class="bk-name">Hugging Face</span><code><b>hf://</b>datasets/org/repo/scene.tif</code><code><b>/vsihf/</b>datasets/org/repo/scene.tif</code><span class="bk-how">range GET, token if set</span></button>
+          <button type="button" class="bk-row" role="tab" data-bk="source" aria-selected="false"><span class="bk-name">Source Cooperative</span><code><b>source://</b>account/product/scene.tif</code><code><b>/vsisource/</b>account/product/scene.tif</code><span class="bk-how">anonymous range GET</span></button>
+          <button type="button" class="bk-row is-window" role="tab" data-bk="subfile" aria-selected="false"><span class="bk-name">Inside an object</span><code><b>/vsisubfile/</b>4194304_8388608,/vsis3/bucket/archive.zip</code><span class="bk-how">inner request, shifted</span></button>
+        </div>
+        <div class="bk-out">
+          <div class="bk-read"><b>one read</b><code>offset <span class="tok-num">1048576</span></code><code>length <span class="tok-num">65536</span></code></div>
+          <svg class="bk-arrow" viewBox="0 0 44 12" aria-hidden="true"><path class="bk-arrow-line" d="M0 6 H35"/><path class="bk-arrow-head" d="M34 1 L43 6 L34 11 Z"/></svg>
+          <div class="bk-req">
+            <div class="bk-card" data-bk="file" role="tabpanel" hidden><pre><code>fd = <span class="tok-fn">open</span>(<span class="tok-str">"/data/scene.tif"</span>, O_RDONLY | O_CLOEXEC)
+<span class="tok-fn">pread</span>(fd, buf, <span class="tok-num">65536</span>, <span class="tok-num">1048576</span>)</code></pre><p class="bk-say"><code>file://</code> only drops the scheme. No URL, no HTTP.</p></div>
+            <div class="bk-card" data-bk="http" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://example.com/scene.tif
+<span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span></code></pre><p class="bk-say"><code>/vsicurl/</code> is dropped and the URL is sent as written.</p></div>
+            <div class="bk-card" data-bk="s3" role="tabpanel"><pre><code><span class="bk-kw">GET</span> https://bucket.s3.us-east-1.amazonaws.com/scene.tif
+<span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span>
+<span class="bk-h">Authorization:</span> AWS4-HMAC-SHA256 Credential=…</code></pre><p class="bk-say">Both spellings are one object, <code>/vsis3/bucket/scene.tif</code>.</p></div>
+            <div class="bk-card" data-bk="gcs" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://storage.googleapis.com/bucket/scene.tif
+<span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span>
+<span class="bk-h">Authorization:</span> Bearer …</code></pre><p class="bk-say">Both spellings are one object, <code>/vsigs/bucket/scene.tif</code>.</p></div>
+            <div class="bk-card" data-bk="azure" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://account.blob.core.windows.net/container/scene.tif
+<span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span>
+<span class="bk-h">Authorization:</span> SharedKey account:…</code></pre><p class="bk-say"><code>abfs://</code> and <code>/vsiadls/</code> reach Data Lake at <code>account.dfs.core.windows.net</code>.</p></div>
+            <div class="bk-card" data-bk="hf" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://huggingface.co/datasets/org/repo/resolve/main/scene.tif
+<span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span></code></pre><p class="bk-say">Large files redirect to a CDN. Karu follows, without the token.</p></div>
+            <div class="bk-card" data-bk="source" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://data.source.coop/account/product/scene.tif
+<span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span></code></pre><p class="bk-say">Path style and unsigned until Source credentials are set.</p></div>
+            <div class="bk-card" data-bk="subfile" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://bucket.s3.us-east-1.amazonaws.com/archive.zip
+<span class="bk-h">Range:</span> bytes=<span class="tok-num">5242880</span>-<span class="tok-num">5308415</span>
+<span class="bk-h">Authorization:</span> AWS4-HMAC-SHA256 Credential=…</code></pre><p class="bk-say">Offsets add. As a URI, <code>s3://bucket/archive.zip#bytes=4194304-12582911</code>.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide s08" aria-label="What a streaming DataLoader needs">
+  <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">08 / 12</span></header>
+  <h1>What a <span class="title-mark">streaming DataLoader</span> needs</h1>
+  <div class="fig dln">
+    <div class="dln-grid">
+      <div class="dln-col">the DataLoader</div><div class="dln-col">so it needs</div><div class="dln-col is-karu">Karu</div>
+
+      <div class="dln-who">forks its workers<span>one process per worker</span></div>
+      <div class="dln-need">storage that works in every child</div>
+      <div class="dln-karu">builds a new engine per process<span>pid checked on every call</span></div>
+
+      <div class="dln-who">shuffles samples<span>a batch touches many files</span></div>
+      <div class="dln-need">small windows from many objects at once</div>
+      <div class="dln-karu">one submit for every object<span>nearby ranges merged per object</span></div>
+
+      <div class="dln-who">decodes on the CPU<span>while the GPU trains</span></div>
+      <div class="dln-need">each window as soon as it lands</div>
+      <div class="dln-karu">completions in arrival order<span class="is-mono">batch.next()</span></div>
+
+      <div class="dln-who">fills preallocated buffers<span>one per batch tensor</span></div>
+      <div class="dln-need">bytes written where the tensor lives</div>
+      <div class="dln-karu">writes into the span you pass<span>no extra copy for remote ranges</span></div>
+
+      <div class="dln-who">runs for days<span>millions of requests</span></div>
+      <div class="dln-need">errors and expiring tokens absorbed</div>
+      <div class="dln-karu">retries, resumes, refreshes credentials<span class="is-mono">KARU_MAX_ATTEMPTS 8</span></div>
+
+      <div class="dln-who">reads a live dataset<span>files can be rewritten</span></div>
+      <div class="dln-need">never two versions in one sample</div>
+      <div class="dln-karu">fails with 412 instead<span class="is-mono">Read::if_match</span></div>
+    </div>
+    <p class="path-note">Streaming means training reads its samples straight from object storage, with no local copy of the dataset.</p>
+  </div>
+</section>
+
+    <section class="slide s09" aria-label="Why not object_store">
+  <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">09 / 12</span></header>
+  <h1>Why not <span class="title-mark">object_store</span>?</h1>
+  <div class="fig v8">
+    <svg class="v8-fig" viewBox="0 0 864 330" role="img" aria-label="Karu, a C++23 library, against object_store, the Rust library of Apache Arrow. After fork, a Karu worker builds a new engine with its own threads, while a worker inherits the tokio runtime of object_store without its threads. Karu hands back each of four reads as it lands, while get_ranges returns all of them when the last one ends. A Karu batch takes reads from three files at once, while get_ranges takes one object per call, so the caller makes three calls and gathers them.">
+      <!-- the two libraries, each under its language -->
+      <image href="fig/cpp-logo.svg" x="150" y="2" width="30" height="34"/>
+      <text class="v8-name is-karu" x="192" y="22">Karu</text>
+      <text class="v8-sub" x="192" y="40">C++23, used by Rumi, TACO and cozip</text>
+      <image href="fig/rust-logo.svg" x="520" y="3" width="32" height="32"/>
+      <text class="v8-name" x="564" y="22">object_store</text>
+      <text class="v8-sub" x="564" y="40">Rust, Apache Arrow</text>
+      <path class="v8-rule" d="M0 54H864M505 62V326"/>
+
+      <text class="v8-k" x="0" y="84">after fork()</text>
+      <text class="v8-ks" x="0" y="100">in a DataLoader worker</text>
+      <rect class="v8-box" x="150" y="64" width="118" height="48"/><text class="v8-boxl" x="160" y="80">main</text><rect class="v8-t" x="160" y="92" width="8" height="8"/><rect class="v8-t" x="172" y="92" width="8" height="8"/><rect class="v8-t" x="184" y="92" width="8" height="8"/><rect class="v8-t" x="196" y="92" width="8" height="8"/>
+      <path class="v8-arrow" d="M272 88H314"/><path class="v8-head" d="M314 84.5L320 88L314 91.5Z"/>
+      <text class="v8-fork" x="293" y="81">fork</text>
+      <rect class="v8-box" x="322" y="64" width="118" height="48"/><text class="v8-boxl" x="332" y="80">worker</text><rect class="v8-t is-new" x="332" y="92" width="8" height="8"/><rect class="v8-t is-new" x="344" y="92" width="8" height="8"/><rect class="v8-t is-new" x="356" y="92" width="8" height="8"/><rect class="v8-t is-new" x="368" y="92" width="8" height="8"/>
+      <text class="v8-say is-karu" x="150" y="130">builds a new engine, threads and connections</text>
+      <rect class="v8-box" x="520" y="64" width="118" height="48"/><text class="v8-boxl" x="530" y="80">main</text><rect class="v8-t is-grey" x="530" y="92" width="8" height="8"/><rect class="v8-t is-grey" x="542" y="92" width="8" height="8"/><rect class="v8-t is-grey" x="554" y="92" width="8" height="8"/><rect class="v8-t is-grey" x="566" y="92" width="8" height="8"/><rect class="v8-t is-grey" x="578" y="92" width="8" height="8"/><rect class="v8-t is-grey" x="590" y="92" width="8" height="8"/><rect class="v8-t is-grey" x="602" y="92" width="8" height="8"/>
+      <path class="v8-arrow" d="M642 88H684"/><path class="v8-head" d="M684 84.5L690 88L684 91.5Z"/>
+      <text class="v8-fork" x="663" y="81">fork</text>
+      <rect class="v8-box" x="692" y="64" width="118" height="48"/><text class="v8-boxl" x="702" y="80">worker</text><rect class="v8-t is-gone" x="702" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="714" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="726" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="738" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="750" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="762" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="774" y="92" width="8" height="8"/>
+      <text class="v8-say is-bad" x="520" y="130">inherits the tokio runtime without its threads</text>
+
+      <text class="v8-k" x="0" y="164">results</text>
+      <text class="v8-ks" x="0" y="180">four reads in flight</text>
+      <rect class="v8-bar" x="150" y="148" width="120" height="7"/><rect class="v8-bar" x="150" y="159" width="196" height="7"/><rect class="v8-bar" x="150" y="170" width="88" height="7"/><rect class="v8-bar" x="150" y="181" width="158" height="7"/><circle class="v8-dot" cx="270" cy="151.5" r="3.5"/><circle class="v8-dot" cx="346" cy="162.5" r="3.5"/><circle class="v8-dot" cx="238" cy="173.5" r="3.5"/><circle class="v8-dot" cx="308" cy="184.5" r="3.5"/>
+      <text class="v8-say is-karu" x="150" y="212">each read is yours the moment it lands</text>
+      <rect class="v8-bar is-grey" x="520" y="148" width="120" height="7"/><rect class="v8-bar is-grey" x="520" y="159" width="196" height="7"/><rect class="v8-bar is-grey" x="520" y="170" width="88" height="7"/><rect class="v8-bar is-grey" x="520" y="181" width="158" height="7"/>
+      <path class="v8-wait" d="M724 142V192"/><circle class="v8-dot is-late" cx="724" cy="151.5" r="3.5"/><circle class="v8-dot is-late" cx="724" cy="162.5" r="3.5"/><circle class="v8-dot is-late" cx="724" cy="173.5" r="3.5"/><circle class="v8-dot is-late" cx="724" cy="184.5" r="3.5"/>
+      <text class="v8-say" x="520" y="212">get_ranges returns them all when the last ends</text>
+
+      <text class="v8-k" x="0" y="252">objects</text>
+      <text class="v8-ks" x="0" y="268">a DataLoader batch</text>
+      <rect class="v8-obj" x="214" y="228" width="160" height="14"/><text class="v8-objl" x="208" y="239">a.rumi</text><rect class="v8-r " x="254" y="228" width="22" height="14"/><rect class="v8-r " x="318" y="228" width="18" height="14"/><rect class="v8-obj" x="214" y="250" width="160" height="14"/><text class="v8-objl" x="208" y="261">b.rumi</text><rect class="v8-r " x="284" y="250" width="26" height="14"/><rect class="v8-r " x="346" y="250" width="20" height="14"/><rect class="v8-obj" x="214" y="272" width="160" height="14"/><text class="v8-objl" x="208" y="283">c.rumi</text><rect class="v8-r " x="240" y="272" width="20" height="14"/><rect class="v8-r " x="306" y="272" width="30" height="14"/><path class="v8-link is-karu" d="M374 235C400 235 398 257 424 257"/><path class="v8-link is-karu" d="M374 257C400 257 398 257 424 257"/><path class="v8-link is-karu" d="M374 279C400 279 398 257 424 257"/><rect class="v8-call is-karu" x="426" y="243" width="56" height="28"/><text class="v8-calll is-karu" x="454" y="261">submit</text>
+      <text class="v8-say is-karu" x="150" y="316">one batch takes reads from every object</text>
+      <rect class="v8-obj" x="584" y="228" width="180" height="14"/><text class="v8-objl" x="578" y="239">a.rumi</text><rect class="v8-r is-grey" x="624" y="228" width="22" height="14"/><rect class="v8-r is-grey" x="688" y="228" width="18" height="14"/><rect class="v8-obj" x="584" y="250" width="180" height="14"/><text class="v8-objl" x="578" y="261">b.rumi</text><rect class="v8-r is-grey" x="654" y="250" width="26" height="14"/><rect class="v8-r is-grey" x="716" y="250" width="20" height="14"/><rect class="v8-obj" x="584" y="272" width="180" height="14"/><text class="v8-objl" x="578" y="283">c.rumi</text><rect class="v8-r is-grey" x="610" y="272" width="20" height="14"/><rect class="v8-r is-grey" x="676" y="272" width="30" height="14"/><path class="v8-link" d="M764 235H780"/><rect class="v8-call" x="782" y="228" width="82" height="14"/><text class="v8-calll" x="823" y="239">get_ranges</text><path class="v8-link" d="M764 257H780"/><rect class="v8-call" x="782" y="250" width="82" height="14"/><text class="v8-calll" x="823" y="261">get_ranges</text><path class="v8-link" d="M764 279H780"/><rect class="v8-call" x="782" y="272" width="82" height="14"/><text class="v8-calll" x="823" y="283">get_ranges</text>
+      <text class="v8-say" x="520" y="316">one get_ranges per object, you gather them</text>
+    </svg>
+    <p class="path-note">Both merge nearby ranges and fetch in parallel, but get_ranges cannot send If-Match, so a file replaced mid-read can mix two versions.</p>
+  </div>
+</section>
+
+    <section class="slide s10" aria-label="The engine">
+      <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">10 / 12</span></header>
+      <h1>Four I/O threads keep <span class="title-mark">64 transfers in flight</span></h1>
+      <figure class="en-wrap">
+        <svg class="en-fig" viewBox="0 0 864 344" role="img" aria-label="Three caller threads submit reads; the planner turns them into transfers in one queue that every I/O thread takes from. Four I/O threads run in parallel, each a libcurl multi loop with 16 transfers in flight at once on one thread, since a transfer spends most of its time waiting for the server. A timeline for each thread shows a batch of 256 transfers, 4 back to back in each of the 64 slots: each a wait, then bytes arriving, and the next one starting as soon as a slot frees. Completions go back to the callers through next. Connections stay warm and TLS sessions are shared. Every batch shares the credential cache and its 4 workers, DNS answers kept 60 seconds, and CA certificates. Batch stats, with example values, show the second batch on the same client opening no new connections.">
+          <defs>
+            <marker id="s10-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#777"/></marker>
+            <marker id="s10-arrow-on" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#492ae8"/></marker>
+          </defs>
+
+          <text class="en-layer" x="0" y="12">caller threads</text>
+          <text class="en-layer" x="140" y="12">engine</text>
+          <text class="en-aside" x="194" y="12">one per client, rebuilt after <tspan class="en-mono">fork()</tspan></text>
+          <text class="en-layer" x="652" y="12">storage</text>
+
+          <!-- callers only hand work in and take completions out -->
+          <rect class="en-box" x="0" y="60" width="92" height="34"/>
+          <rect class="en-box" x="0" y="112" width="92" height="34"/>
+          <rect class="en-box" x="0" y="164" width="92" height="34"/>
+          <text class="en-who" x="14" y="82">thread 1</text>
+          <text class="en-who" x="14" y="134">thread 2</text>
+          <text class="en-who" x="14" y="186">thread 3</text>
+          <text class="en-call-tag on" x="115" y="62">submit</text>
+          <text class="en-call-tag" x="115" y="218">next</text>
+          <path class="en-call on" d="M92 71 H154" marker-end="url(#s10-arrow-on)"/>
+          <path class="en-call on" d="M92 123 H154" marker-end="url(#s10-arrow-on)"/>
+          <path class="en-call on" d="M92 175 H154" marker-end="url(#s10-arrow-on)"/>
+          <path class="en-back" d="M140 84 H94" marker-end="url(#s10-arrow)"/>
+          <path class="en-back" d="M140 136 H94" marker-end="url(#s10-arrow)"/>
+          <path class="en-back" d="M140 188 H94" marker-end="url(#s10-arrow)"/>
+
+          <rect class="en-engine" x="140" y="24" width="484" height="316"/>
+
+          <!-- one shared queue; a thread takes work only while it has a free slot -->
+          <text class="en-small" x="176" y="42" text-anchor="middle">queue</text>
+          <rect class="en-queue" x="156" y="50" width="40" height="162"/>
+          <g class="en-ticks"><rect x="162" y="56" width="28" height="5"/><rect x="162" y="65" width="28" height="5"/><rect x="162" y="74" width="28" height="5"/><rect x="162" y="83" width="28" height="5"/><rect x="162" y="92" width="28" height="5"/><rect x="162" y="101" width="28" height="5"/><rect x="162" y="110" width="28" height="5"/><rect x="162" y="119" width="28" height="5"/><rect x="162" y="128" width="28" height="5"/><rect x="162" y="137" width="28" height="5"/><rect x="162" y="146" width="28" height="5"/><rect x="162" y="155" width="28" height="5"/><rect x="162" y="164" width="28" height="5"/><rect x="162" y="173" width="28" height="5"/><rect x="162" y="182" width="28" height="5"/><rect x="162" y="191" width="28" height="5"/><rect x="162" y="200" width="28" height="5"/></g>
+          <path class="en-call" d="M196 86 H210" marker-end="url(#s10-arrow)"/>
+          <path class="en-call" d="M196 140 H210" marker-end="url(#s10-arrow)"/>
+          <path class="en-call" d="M196 170 H210" marker-end="url(#s10-arrow)"/>
+          <path class="en-call" d="M196 200 H210" marker-end="url(#s10-arrow)"/>
+
+          <text class="en-small" x="214" y="42">KARU_IO_THREADS <tspan class="en-val">4</tspan><tspan class="en-aside">, in parallel</tspan></text>
+          <rect class="en-w" x="436" y="34" width="12" height="8"/><text class="en-key" x="453" y="42">waiting</text>
+          <rect class="en-b" x="502" y="34" width="12" height="8"/><text class="en-key" x="519" y="42">bytes</text>
+          <text class="en-key" x="602" y="42" text-anchor="end">time →</text>
+
+          <!-- each thread is one libcurl multi loop: 16 transfers at once, the next taken when one ends -->
+          <rect class="en-loop" x="212" y="50" width="400" height="72"/>
+          <rect class="en-loop" x="212" y="128" width="400" height="24"/>
+          <rect class="en-loop" x="212" y="158" width="400" height="24"/>
+          <rect class="en-loop" x="212" y="188" width="400" height="24"/>
+          <text class="en-loop-name" x="222" y="70">I/O thread 1</text>
+          <text class="en-loop-sub" x="222" y="87">libcurl multi</text>
+          <text class="en-loop-sub is-on" x="222" y="110">16 in flight</text>
+          <text class="en-loop-name is-small" x="222" y="144">I/O thread 2</text>
+          <text class="en-loop-name is-small" x="222" y="174">I/O thread 3</text>
+          <text class="en-loop-name is-small" x="222" y="204">I/O thread 4</text>
+          <g class="en-time">
+          <g class="en-lanes"><rect class="en-w" x="316" y="55" width="26.4" height="3.1"/><rect class="en-b" x="342.4" y="55" width="23.1" height="3.1"/><rect class="en-w" x="366.4" y="55" width="33.7" height="3.1"/><rect class="en-b" x="400.1" y="55" width="31.6" height="3.1"/><rect class="en-w" x="432.5" y="55" width="34.7" height="3.1"/><rect class="en-b" x="467.2" y="55" width="25.1" height="3.1"/><rect class="en-w" x="493" y="55" width="22.5" height="3.1"/><rect class="en-b" x="515.5" y="55" width="14.3" height="3.1"/><rect class="en-w" x="316" y="59" width="21.3" height="3.1"/><rect class="en-b" x="337.3" y="59" width="14.5" height="3.1"/><rect class="en-w" x="352.6" y="59" width="19.4" height="3.1"/><rect class="en-b" x="372" y="59" width="17.9" height="3.1"/><rect class="en-w" x="390.7" y="59" width="37.1" height="3.1"/><rect class="en-b" x="427.8" y="59" width="17.3" height="3.1"/><rect class="en-w" x="445.9" y="59" width="21.9" height="3.1"/><rect class="en-b" x="467.8" y="59" width="18" height="3.1"/><rect class="en-w" x="316" y="62.9" width="45.5" height="3.1"/><rect class="en-b" x="361.5" y="62.9" width="18.7" height="3.1"/><rect class="en-w" x="381" y="62.9" width="36.3" height="3.1"/><rect class="en-b" x="417.2" y="62.9" width="25.5" height="3.1"/><rect class="en-w" x="443.5" y="62.9" width="41.3" height="3.1"/><rect class="en-b" x="484.8" y="62.9" width="39.6" height="3.1"/><rect class="en-w" x="525.3" y="62.9" width="42.4" height="3.1"/><rect class="en-b" x="567.7" y="62.9" width="32.8" height="3.1"/><rect class="en-w" x="316" y="66.8" width="21.5" height="3.1"/><rect class="en-b" x="337.5" y="66.8" width="19.4" height="3.1"/><rect class="en-w" x="357.7" y="66.8" width="33.2" height="3.1"/><rect class="en-b" x="390.9" y="66.8" width="15.6" height="3.1"/><rect class="en-w" x="407.3" y="66.8" width="26.8" height="3.1"/><rect class="en-b" x="434.1" y="66.8" width="15.9" height="3.1"/><rect class="en-w" x="450.8" y="66.8" width="37.7" height="3.1"/><rect class="en-b" x="488.5" y="66.8" width="27.1" height="3.1"/><rect class="en-w" x="316" y="70.8" width="31" height="3.1"/><rect class="en-b" x="347" y="70.8" width="29.3" height="3.1"/><rect class="en-w" x="377.1" y="70.8" width="20.1" height="3.1"/><rect class="en-b" x="397.2" y="70.8" width="16.8" height="3.1"/><rect class="en-w" x="414.8" y="70.8" width="39.6" height="3.1"/><rect class="en-b" x="454.4" y="70.8" width="27.1" height="3.1"/><rect class="en-w" x="482.3" y="70.8" width="30.9" height="3.1"/><rect class="en-b" x="513.2" y="70.8" width="18.2" height="3.1"/><rect class="en-w" x="316" y="74.8" width="31.6" height="3.1"/><rect class="en-b" x="347.6" y="74.8" width="24.2" height="3.1"/><rect class="en-w" x="372.6" y="74.8" width="47.2" height="3.1"/><rect class="en-b" x="419.8" y="74.8" width="25" height="3.1"/><rect class="en-w" x="445.6" y="74.8" width="28.6" height="3.1"/><rect class="en-b" x="474.2" y="74.8" width="17.1" height="3.1"/><rect class="en-w" x="492.1" y="74.8" width="41" height="3.1"/><rect class="en-b" x="533.1" y="74.8" width="18.2" height="3.1"/><rect class="en-w" x="316" y="78.7" width="38.9" height="3.1"/><rect class="en-b" x="354.9" y="78.7" width="30.2" height="3.1"/><rect class="en-w" x="385.9" y="78.7" width="42.7" height="3.1"/><rect class="en-b" x="428.6" y="78.7" width="38.5" height="3.1"/><rect class="en-w" x="467.8" y="78.7" width="36.1" height="3.1"/><rect class="en-b" x="503.9" y="78.7" width="18" height="3.1"/><rect class="en-w" x="522.7" y="78.7" width="25.1" height="3.1"/><rect class="en-b" x="547.8" y="78.7" width="16.2" height="3.1"/><rect class="en-w" x="316" y="82.7" width="23.2" height="3.1"/><rect class="en-b" x="339.2" y="82.7" width="12.7" height="3.1"/><rect class="en-w" x="352.7" y="82.7" width="44.3" height="3.1"/><rect class="en-b" x="397" y="82.7" width="26.5" height="3.1"/><rect class="en-w" x="424.2" y="82.7" width="43.3" height="3.1"/><rect class="en-b" x="467.5" y="82.7" width="32.8" height="3.1"/><rect class="en-w" x="501.1" y="82.7" width="42.5" height="3.1"/><rect class="en-b" x="543.7" y="82.7" width="24.9" height="3.1"/><rect class="en-w" x="316" y="86.6" width="37.2" height="3.1"/><rect class="en-b" x="353.2" y="86.6" width="24.7" height="3.1"/><rect class="en-w" x="378.7" y="86.6" width="52.7" height="3.1"/><rect class="en-b" x="431.3" y="86.6" width="21.7" height="3.1"/><rect class="en-w" x="453.9" y="86.6" width="36.7" height="3.1"/><rect class="en-b" x="490.6" y="86.6" width="20.1" height="3.1"/><rect class="en-w" x="511.5" y="86.6" width="24.1" height="3.1"/><rect class="en-b" x="535.6" y="86.6" width="12.8" height="3.1"/><rect class="en-w" x="316" y="90.6" width="46.8" height="3.1"/><rect class="en-b" x="362.8" y="90.6" width="18.3" height="3.1"/><rect class="en-w" x="381.9" y="90.6" width="41.4" height="3.1"/><rect class="en-b" x="423.3" y="90.6" width="32.2" height="3.1"/><rect class="en-w" x="456.3" y="90.6" width="34" height="3.1"/><rect class="en-b" x="490.2" y="90.6" width="18.5" height="3.1"/><rect class="en-w" x="509.6" y="90.6" width="21.1" height="3.1"/><rect class="en-b" x="530.7" y="90.6" width="14" height="3.1"/><rect class="en-w" x="316" y="94.5" width="22.1" height="3.1"/><rect class="en-b" x="338.1" y="94.5" width="19.9" height="3.1"/><rect class="en-w" x="358.9" y="94.5" width="24.6" height="3.1"/><rect class="en-b" x="383.5" y="94.5" width="12.2" height="3.1"/><rect class="en-w" x="396.5" y="94.5" width="22.3" height="3.1"/><rect class="en-b" x="418.8" y="94.5" width="17.9" height="3.1"/><rect class="en-w" x="437.5" y="94.5" width="36.5" height="3.1"/><rect class="en-b" x="474" y="94.5" width="16.3" height="3.1"/><rect class="en-w" x="316" y="98.5" width="22.7" height="3.1"/><rect class="en-b" x="338.7" y="98.5" width="15.2" height="3.1"/><rect class="en-w" x="354.7" y="98.5" width="42" height="3.1"/><rect class="en-b" x="396.6" y="98.5" width="18.5" height="3.1"/><rect class="en-w" x="415.9" y="98.5" width="50.7" height="3.1"/><rect class="en-b" x="466.5" y="98.5" width="22.7" height="3.1"/><rect class="en-w" x="490.1" y="98.5" width="28" height="3.1"/><rect class="en-b" x="518.1" y="98.5" width="19.4" height="3.1"/><rect class="en-w" x="316" y="102.4" width="35.6" height="3.1"/><rect class="en-b" x="351.6" y="102.4" width="15.7" height="3.1"/><rect class="en-w" x="368" y="102.4" width="42.7" height="3.1"/><rect class="en-b" x="410.7" y="102.4" width="37.4" height="3.1"/><rect class="en-w" x="448.9" y="102.4" width="23.4" height="3.1"/><rect class="en-b" x="472.3" y="102.4" width="19.1" height="3.1"/><rect class="en-w" x="492.2" y="102.4" width="27.4" height="3.1"/><rect class="en-b" x="519.6" y="102.4" width="17.8" height="3.1"/><rect class="en-w" x="316" y="106.3" width="34.8" height="3.1"/><rect class="en-b" x="350.8" y="106.3" width="27.6" height="3.1"/><rect class="en-w" x="379.1" y="106.3" width="20.2" height="3.1"/><rect class="en-b" x="399.4" y="106.3" width="13.9" height="3.1"/><rect class="en-w" x="414.1" y="106.3" width="32.3" height="3.1"/><rect class="en-b" x="446.4" y="106.3" width="19.4" height="3.1"/><rect class="en-w" x="466.6" y="106.3" width="52.1" height="3.1"/><rect class="en-b" x="518.7" y="106.3" width="27.8" height="3.1"/><rect class="en-w" x="316" y="110.3" width="37.4" height="3.1"/><rect class="en-b" x="353.4" y="110.3" width="21.4" height="3.1"/><rect class="en-w" x="375.6" y="110.3" width="34" height="3.1"/><rect class="en-b" x="409.6" y="110.3" width="32.5" height="3.1"/><rect class="en-w" x="442.9" y="110.3" width="51.9" height="3.1"/><rect class="en-b" x="494.8" y="110.3" width="25.4" height="3.1"/><rect class="en-w" x="521" y="110.3" width="51.4" height="3.1"/><rect class="en-b" x="572.4" y="110.3" width="24.7" height="3.1"/><rect class="en-w" x="316" y="114.2" width="31.1" height="3.1"/><rect class="en-b" x="347.1" y="114.2" width="21.8" height="3.1"/><rect class="en-w" x="369.7" y="114.2" width="24.9" height="3.1"/><rect class="en-b" x="394.6" y="114.2" width="14" height="3.1"/><rect class="en-w" x="409.4" y="114.2" width="19" height="3.1"/><rect class="en-b" x="428.4" y="114.2" width="17.9" height="3.1"/><rect class="en-w" x="447.2" y="114.2" width="23.6" height="3.1"/><rect class="en-b" x="470.8" y="114.2" width="20.4" height="3.1"/></g>
+          <g class="en-lanes is-dense"><rect class="en-w" x="316" y="130" width="25.8" height="1.25"/><rect class="en-b" x="341.8" y="130" width="24.6" height="1.25"/><rect class="en-w" x="367.1" y="130" width="18.1" height="1.25"/><rect class="en-b" x="385.3" y="130" width="15.9" height="1.25"/><rect class="en-w" x="401.9" y="130" width="22.5" height="1.25"/><rect class="en-b" x="424.5" y="130" width="16.3" height="1.25"/><rect class="en-w" x="441.6" y="130" width="24.4" height="1.25"/><rect class="en-b" x="466" y="130" width="10.8" height="1.25"/><rect class="en-w" x="316" y="131.2" width="33.8" height="1.25"/><rect class="en-b" x="349.8" y="131.2" width="29.7" height="1.25"/><rect class="en-w" x="380.3" y="131.2" width="26.6" height="1.25"/><rect class="en-b" x="406.9" y="131.2" width="19.5" height="1.25"/><rect class="en-w" x="427.2" y="131.2" width="27.1" height="1.25"/><rect class="en-b" x="454.4" y="131.2" width="24.4" height="1.25"/><rect class="en-w" x="479.5" y="131.2" width="53.8" height="1.25"/><rect class="en-b" x="533.3" y="131.2" width="21.1" height="1.25"/><rect class="en-w" x="316" y="132.5" width="34.2" height="1.25"/><rect class="en-b" x="350.2" y="132.5" width="22.2" height="1.25"/><rect class="en-w" x="373.2" y="132.5" width="19.9" height="1.25"/><rect class="en-b" x="393.1" y="132.5" width="18.2" height="1.25"/><rect class="en-w" x="412.1" y="132.5" width="28.2" height="1.25"/><rect class="en-b" x="440.3" y="132.5" width="22.3" height="1.25"/><rect class="en-w" x="463.4" y="132.5" width="39.6" height="1.25"/><rect class="en-b" x="502.9" y="132.5" width="34.3" height="1.25"/><rect class="en-w" x="316" y="133.8" width="24.9" height="1.25"/><rect class="en-b" x="340.9" y="133.8" width="10.2" height="1.25"/><rect class="en-w" x="351.9" y="133.8" width="31.6" height="1.25"/><rect class="en-b" x="383.5" y="133.8" width="27.8" height="1.25"/><rect class="en-w" x="412.1" y="133.8" width="30.4" height="1.25"/><rect class="en-b" x="442.5" y="133.8" width="29.7" height="1.25"/><rect class="en-w" x="473" y="133.8" width="42.5" height="1.25"/><rect class="en-b" x="515.5" y="133.8" width="16.9" height="1.25"/><rect class="en-w" x="316" y="135" width="49.3" height="1.25"/><rect class="en-b" x="365.3" y="135" width="26.2" height="1.25"/><rect class="en-w" x="392.3" y="135" width="27" height="1.25"/><rect class="en-b" x="419.3" y="135" width="19.5" height="1.25"/><rect class="en-w" x="439.7" y="135" width="28.1" height="1.25"/><rect class="en-b" x="467.8" y="135" width="13.9" height="1.25"/><rect class="en-w" x="482.5" y="135" width="40" height="1.25"/><rect class="en-b" x="522.5" y="135" width="19.6" height="1.25"/><rect class="en-w" x="316" y="136.2" width="27.4" height="1.25"/><rect class="en-b" x="343.4" y="136.2" width="22.5" height="1.25"/><rect class="en-w" x="366.6" y="136.2" width="52.3" height="1.25"/><rect class="en-b" x="419" y="136.2" width="20.7" height="1.25"/><rect class="en-w" x="440.5" y="136.2" width="50.8" height="1.25"/><rect class="en-b" x="491.3" y="136.2" width="24.2" height="1.25"/><rect class="en-w" x="516.3" y="136.2" width="48.6" height="1.25"/><rect class="en-b" x="564.9" y="136.2" width="24.7" height="1.25"/><rect class="en-w" x="316" y="137.5" width="27.6" height="1.25"/><rect class="en-b" x="343.6" y="137.5" width="17.3" height="1.25"/><rect class="en-w" x="361.7" y="137.5" width="25.9" height="1.25"/><rect class="en-b" x="387.6" y="137.5" width="25.2" height="1.25"/><rect class="en-w" x="413.6" y="137.5" width="19.8" height="1.25"/><rect class="en-b" x="433.4" y="137.5" width="15.5" height="1.25"/><rect class="en-w" x="449.7" y="137.5" width="30.3" height="1.25"/><rect class="en-b" x="480" y="137.5" width="16.1" height="1.25"/><rect class="en-w" x="316" y="138.8" width="47.9" height="1.25"/><rect class="en-b" x="363.9" y="138.8" width="32.1" height="1.25"/><rect class="en-w" x="396.8" y="138.8" width="56.7" height="1.25"/><rect class="en-b" x="453.5" y="138.8" width="22.3" height="1.25"/><rect class="en-w" x="476.7" y="138.8" width="46.4" height="1.25"/><rect class="en-b" x="523.1" y="138.8" width="33.6" height="1.25"/><rect class="en-w" x="557.4" y="138.8" width="24.5" height="1.25"/><rect class="en-b" x="581.9" y="138.8" width="20.1" height="1.25"/><rect class="en-w" x="316" y="140" width="23.7" height="1.25"/><rect class="en-b" x="339.7" y="140" width="19.8" height="1.25"/><rect class="en-w" x="360.2" y="140" width="44.7" height="1.25"/><rect class="en-b" x="404.9" y="140" width="19.3" height="1.25"/><rect class="en-w" x="425" y="140" width="45.1" height="1.25"/><rect class="en-b" x="470.1" y="140" width="29.4" height="1.25"/><rect class="en-w" x="500.3" y="140" width="44.2" height="1.25"/><rect class="en-b" x="544.5" y="140" width="21.2" height="1.25"/><rect class="en-w" x="316" y="141.2" width="24.6" height="1.25"/><rect class="en-b" x="340.6" y="141.2" width="13.5" height="1.25"/><rect class="en-w" x="354.9" y="141.2" width="52.3" height="1.25"/><rect class="en-b" x="407.1" y="141.2" width="25.5" height="1.25"/><rect class="en-w" x="433.4" y="141.2" width="42.4" height="1.25"/><rect class="en-b" x="475.8" y="141.2" width="27.7" height="1.25"/><rect class="en-w" x="504.3" y="141.2" width="28.7" height="1.25"/><rect class="en-b" x="533" y="141.2" width="13.9" height="1.25"/><rect class="en-w" x="316" y="142.5" width="33.8" height="1.25"/><rect class="en-b" x="349.8" y="142.5" width="16.2" height="1.25"/><rect class="en-w" x="366.8" y="142.5" width="47.4" height="1.25"/><rect class="en-b" x="414.2" y="142.5" width="33.3" height="1.25"/><rect class="en-w" x="448.3" y="142.5" width="37.7" height="1.25"/><rect class="en-b" x="486.1" y="142.5" width="15.5" height="1.25"/><rect class="en-w" x="502.4" y="142.5" width="37" height="1.25"/><rect class="en-b" x="539.4" y="142.5" width="31.9" height="1.25"/><rect class="en-w" x="316" y="143.8" width="21.4" height="1.25"/><rect class="en-b" x="337.4" y="143.8" width="18.7" height="1.25"/><rect class="en-w" x="356.9" y="143.8" width="52.5" height="1.25"/><rect class="en-b" x="409.4" y="143.8" width="25" height="1.25"/><rect class="en-w" x="435.2" y="143.8" width="28" height="1.25"/><rect class="en-b" x="463.2" y="143.8" width="13" height="1.25"/><rect class="en-w" x="477" y="143.8" width="52.3" height="1.25"/><rect class="en-b" x="529.3" y="143.8" width="28.8" height="1.25"/><rect class="en-w" x="316" y="145" width="31.6" height="1.25"/><rect class="en-b" x="347.6" y="145" width="19.3" height="1.25"/><rect class="en-w" x="367.6" y="145" width="20.3" height="1.25"/><rect class="en-b" x="387.9" y="145" width="20" height="1.25"/><rect class="en-w" x="408.7" y="145" width="51.9" height="1.25"/><rect class="en-b" x="460.6" y="145" width="28.8" height="1.25"/><rect class="en-w" x="490.2" y="145" width="41.8" height="1.25"/><rect class="en-b" x="532.1" y="145" width="17.5" height="1.25"/><rect class="en-w" x="316" y="146.2" width="37.9" height="1.25"/><rect class="en-b" x="353.9" y="146.2" width="16.9" height="1.25"/><rect class="en-w" x="371.7" y="146.2" width="40.3" height="1.25"/><rect class="en-b" x="411.9" y="146.2" width="33.4" height="1.25"/><rect class="en-w" x="446.2" y="146.2" width="26" height="1.25"/><rect class="en-b" x="472.2" y="146.2" width="20.1" height="1.25"/><rect class="en-w" x="493.1" y="146.2" width="28.7" height="1.25"/><rect class="en-b" x="521.7" y="146.2" width="16.9" height="1.25"/><rect class="en-w" x="316" y="147.5" width="27.5" height="1.25"/><rect class="en-b" x="343.5" y="147.5" width="18.9" height="1.25"/><rect class="en-w" x="363.3" y="147.5" width="28.2" height="1.25"/><rect class="en-b" x="391.5" y="147.5" width="12.1" height="1.25"/><rect class="en-w" x="404.3" y="147.5" width="30.6" height="1.25"/><rect class="en-b" x="435" y="147.5" width="20.4" height="1.25"/><rect class="en-w" x="456.1" y="147.5" width="43.4" height="1.25"/><rect class="en-b" x="499.5" y="147.5" width="18.7" height="1.25"/><rect class="en-w" x="316" y="148.8" width="38.1" height="1.25"/><rect class="en-b" x="354.1" y="148.8" width="16.2" height="1.25"/><rect class="en-w" x="371" y="148.8" width="35.9" height="1.25"/><rect class="en-b" x="406.9" y="148.8" width="22.3" height="1.25"/><rect class="en-w" x="429.9" y="148.8" width="29.8" height="1.25"/><rect class="en-b" x="459.8" y="148.8" width="29.3" height="1.25"/><rect class="en-w" x="489.9" y="148.8" width="29.8" height="1.25"/><rect class="en-b" x="519.7" y="148.8" width="25.4" height="1.25"/></g>
+          <g class="en-lanes is-dense"><rect class="en-w" x="316" y="160" width="23.1" height="1.25"/><rect class="en-b" x="339.1" y="160" width="11.1" height="1.25"/><rect class="en-w" x="351" y="160" width="25.5" height="1.25"/><rect class="en-b" x="376.5" y="160" width="16.7" height="1.25"/><rect class="en-w" x="394" y="160" width="42.9" height="1.25"/><rect class="en-b" x="436.9" y="160" width="26" height="1.25"/><rect class="en-w" x="463.7" y="160" width="30.5" height="1.25"/><rect class="en-b" x="494.2" y="160" width="19.2" height="1.25"/><rect class="en-w" x="316" y="161.2" width="40.8" height="1.25"/><rect class="en-b" x="356.8" y="161.2" width="19.9" height="1.25"/><rect class="en-w" x="377.5" y="161.2" width="24.4" height="1.25"/><rect class="en-b" x="401.9" y="161.2" width="14.7" height="1.25"/><rect class="en-w" x="417.4" y="161.2" width="25.8" height="1.25"/><rect class="en-b" x="443.2" y="161.2" width="20.2" height="1.25"/><rect class="en-w" x="464.1" y="161.2" width="43.5" height="1.25"/><rect class="en-b" x="507.6" y="161.2" width="27.6" height="1.25"/><rect class="en-w" x="316" y="162.5" width="40.7" height="1.25"/><rect class="en-b" x="356.7" y="162.5" width="20.3" height="1.25"/><rect class="en-w" x="377.8" y="162.5" width="46.5" height="1.25"/><rect class="en-b" x="424.3" y="162.5" width="31.3" height="1.25"/><rect class="en-w" x="456.5" y="162.5" width="38.8" height="1.25"/><rect class="en-b" x="495.3" y="162.5" width="24.7" height="1.25"/><rect class="en-w" x="520.8" y="162.5" width="38.2" height="1.25"/><rect class="en-b" x="559" y="162.5" width="20.4" height="1.25"/><rect class="en-w" x="316" y="163.8" width="34.4" height="1.25"/><rect class="en-b" x="350.4" y="163.8" width="21.3" height="1.25"/><rect class="en-w" x="372.5" y="163.8" width="40.3" height="1.25"/><rect class="en-b" x="412.8" y="163.8" width="16.7" height="1.25"/><rect class="en-w" x="430.3" y="163.8" width="46.9" height="1.25"/><rect class="en-b" x="477.2" y="163.8" width="20.8" height="1.25"/><rect class="en-w" x="498.8" y="163.8" width="44.2" height="1.25"/><rect class="en-b" x="542.9" y="163.8" width="35.1" height="1.25"/><rect class="en-w" x="316" y="165" width="43.1" height="1.25"/><rect class="en-b" x="359.1" y="165" width="17.8" height="1.25"/><rect class="en-w" x="377.7" y="165" width="39.4" height="1.25"/><rect class="en-b" x="417.1" y="165" width="35" height="1.25"/><rect class="en-w" x="452.9" y="165" width="23.8" height="1.25"/><rect class="en-b" x="476.7" y="165" width="16" height="1.25"/><rect class="en-w" x="493.5" y="165" width="20.7" height="1.25"/><rect class="en-b" x="514.2" y="165" width="16.7" height="1.25"/><rect class="en-w" x="316" y="166.2" width="24.3" height="1.25"/><rect class="en-b" x="340.3" y="166.2" width="13.2" height="1.25"/><rect class="en-w" x="354.3" y="166.2" width="50" height="1.25"/><rect class="en-b" x="404.3" y="166.2" width="21.7" height="1.25"/><rect class="en-w" x="426.8" y="166.2" width="27.2" height="1.25"/><rect class="en-b" x="454" y="166.2" width="14.2" height="1.25"/><rect class="en-w" x="469" y="166.2" width="34.9" height="1.25"/><rect class="en-b" x="503.9" y="166.2" width="30.8" height="1.25"/><rect class="en-w" x="316" y="167.5" width="54.5" height="1.25"/><rect class="en-b" x="370.5" y="167.5" width="22" height="1.25"/><rect class="en-w" x="393.3" y="167.5" width="31.6" height="1.25"/><rect class="en-b" x="424.9" y="167.5" width="12.9" height="1.25"/><rect class="en-w" x="438.6" y="167.5" width="32.3" height="1.25"/><rect class="en-b" x="470.9" y="167.5" width="20.9" height="1.25"/><rect class="en-w" x="492.5" y="167.5" width="55.8" height="1.25"/><rect class="en-b" x="548.3" y="167.5" width="25.9" height="1.25"/><rect class="en-w" x="316" y="168.8" width="24.8" height="1.25"/><rect class="en-b" x="340.8" y="168.8" width="16.9" height="1.25"/><rect class="en-w" x="358.5" y="168.8" width="33.8" height="1.25"/><rect class="en-b" x="392.3" y="168.8" width="25" height="1.25"/><rect class="en-w" x="418.1" y="168.8" width="24.7" height="1.25"/><rect class="en-b" x="442.9" y="168.8" width="18.7" height="1.25"/><rect class="en-w" x="462.3" y="168.8" width="34.7" height="1.25"/><rect class="en-b" x="497" y="168.8" width="34.1" height="1.25"/><rect class="en-w" x="316" y="170" width="36.2" height="1.25"/><rect class="en-b" x="352.2" y="170" width="24.4" height="1.25"/><rect class="en-w" x="377.4" y="170" width="20" height="1.25"/><rect class="en-b" x="397.4" y="170" width="14.9" height="1.25"/><rect class="en-w" x="413.1" y="170" width="39.2" height="1.25"/><rect class="en-b" x="452.3" y="170" width="24.8" height="1.25"/><rect class="en-w" x="477.9" y="170" width="26.6" height="1.25"/><rect class="en-b" x="504.5" y="170" width="10.5" height="1.25"/><rect class="en-w" x="316" y="171.2" width="51.3" height="1.25"/><rect class="en-b" x="367.3" y="171.2" width="20.6" height="1.25"/><rect class="en-w" x="388.7" y="171.2" width="21.8" height="1.25"/><rect class="en-b" x="410.5" y="171.2" width="17.2" height="1.25"/><rect class="en-w" x="428.5" y="171.2" width="24.1" height="1.25"/><rect class="en-b" x="452.6" y="171.2" width="11.8" height="1.25"/><rect class="en-w" x="465.2" y="171.2" width="24.8" height="1.25"/><rect class="en-b" x="490" y="171.2" width="22.2" height="1.25"/><rect class="en-w" x="316" y="172.5" width="38" height="1.25"/><rect class="en-b" x="354" y="172.5" width="16.3" height="1.25"/><rect class="en-w" x="371.1" y="172.5" width="40.9" height="1.25"/><rect class="en-b" x="412" y="172.5" width="32.5" height="1.25"/><rect class="en-w" x="445.3" y="172.5" width="28.9" height="1.25"/><rect class="en-b" x="474.2" y="172.5" width="12.3" height="1.25"/><rect class="en-w" x="487.2" y="172.5" width="40.2" height="1.25"/><rect class="en-b" x="527.4" y="172.5" width="21.3" height="1.25"/><rect class="en-w" x="316" y="173.8" width="19.6" height="1.25"/><rect class="en-b" x="335.6" y="173.8" width="18.7" height="1.25"/><rect class="en-w" x="355.1" y="173.8" width="39.8" height="1.25"/><rect class="en-b" x="394.9" y="173.8" width="27.3" height="1.25"/><rect class="en-w" x="423" y="173.8" width="26.5" height="1.25"/><rect class="en-b" x="449.4" y="173.8" width="11" height="1.25"/><rect class="en-w" x="461.2" y="173.8" width="43.6" height="1.25"/><rect class="en-b" x="504.9" y="173.8" width="20.9" height="1.25"/><rect class="en-w" x="316" y="175" width="26.2" height="1.25"/><rect class="en-b" x="342.2" y="175" width="11.8" height="1.25"/><rect class="en-w" x="354.8" y="175" width="25.6" height="1.25"/><rect class="en-b" x="380.5" y="175" width="11.5" height="1.25"/><rect class="en-w" x="392.8" y="175" width="32.1" height="1.25"/><rect class="en-b" x="424.9" y="175" width="23.7" height="1.25"/><rect class="en-w" x="449.4" y="175" width="42.6" height="1.25"/><rect class="en-b" x="492" y="175" width="17.9" height="1.25"/><rect class="en-w" x="316" y="176.2" width="24.8" height="1.25"/><rect class="en-b" x="340.8" y="176.2" width="22.1" height="1.25"/><rect class="en-w" x="363.7" y="176.2" width="32.8" height="1.25"/><rect class="en-b" x="396.4" y="176.2" width="26.6" height="1.25"/><rect class="en-w" x="423.8" y="176.2" width="21" height="1.25"/><rect class="en-b" x="444.8" y="176.2" width="18.2" height="1.25"/><rect class="en-w" x="463.8" y="176.2" width="19.8" height="1.25"/><rect class="en-b" x="483.7" y="176.2" width="16.6" height="1.25"/><rect class="en-w" x="316" y="177.5" width="27.8" height="1.25"/><rect class="en-b" x="343.8" y="177.5" width="21.2" height="1.25"/><rect class="en-w" x="365.8" y="177.5" width="39.8" height="1.25"/><rect class="en-b" x="405.6" y="177.5" width="30.8" height="1.25"/><rect class="en-w" x="437.1" y="177.5" width="31.3" height="1.25"/><rect class="en-b" x="468.4" y="177.5" width="26.7" height="1.25"/><rect class="en-w" x="496" y="177.5" width="25.5" height="1.25"/><rect class="en-b" x="521.5" y="177.5" width="25.1" height="1.25"/><rect class="en-w" x="316" y="178.8" width="23.2" height="1.25"/><rect class="en-b" x="339.2" y="178.8" width="22.9" height="1.25"/><rect class="en-w" x="362.8" y="178.8" width="43" height="1.25"/><rect class="en-b" x="405.9" y="178.8" width="26.2" height="1.25"/><rect class="en-w" x="432.9" y="178.8" width="26" height="1.25"/><rect class="en-b" x="458.9" y="178.8" width="17" height="1.25"/><rect class="en-w" x="476.8" y="178.8" width="41.3" height="1.25"/><rect class="en-b" x="518.1" y="178.8" width="37.6" height="1.25"/></g>
+          <g class="en-lanes is-dense"><rect class="en-w" x="316" y="190" width="43.7" height="1.25"/><rect class="en-b" x="359.7" y="190" width="29.7" height="1.25"/><rect class="en-w" x="390.2" y="190" width="39.5" height="1.25"/><rect class="en-b" x="429.7" y="190" width="18.3" height="1.25"/><rect class="en-w" x="448.8" y="190" width="32.3" height="1.25"/><rect class="en-b" x="481.1" y="190" width="20.6" height="1.25"/><rect class="en-w" x="502.5" y="190" width="48" height="1.25"/><rect class="en-b" x="550.5" y="190" width="19" height="1.25"/><rect class="en-w" x="316" y="191.2" width="34.5" height="1.25"/><rect class="en-b" x="350.5" y="191.2" width="16" height="1.25"/><rect class="en-w" x="367.3" y="191.2" width="43.5" height="1.25"/><rect class="en-b" x="410.8" y="191.2" width="24.5" height="1.25"/><rect class="en-w" x="436.1" y="191.2" width="30.8" height="1.25"/><rect class="en-b" x="466.9" y="191.2" width="22.6" height="1.25"/><rect class="en-w" x="490.3" y="191.2" width="19.3" height="1.25"/><rect class="en-b" x="509.6" y="191.2" width="17.3" height="1.25"/><rect class="en-w" x="316" y="192.5" width="24.8" height="1.25"/><rect class="en-b" x="340.8" y="192.5" width="12.6" height="1.25"/><rect class="en-w" x="354.2" y="192.5" width="24.8" height="1.25"/><rect class="en-b" x="379" y="192.5" width="21.5" height="1.25"/><rect class="en-w" x="401.3" y="192.5" width="26.1" height="1.25"/><rect class="en-b" x="427.3" y="192.5" width="12" height="1.25"/><rect class="en-w" x="440.1" y="192.5" width="49.1" height="1.25"/><rect class="en-b" x="489.2" y="192.5" width="26.7" height="1.25"/><rect class="en-w" x="316" y="193.8" width="26.3" height="1.25"/><rect class="en-b" x="342.3" y="193.8" width="21.2" height="1.25"/><rect class="en-w" x="364.3" y="193.8" width="28.9" height="1.25"/><rect class="en-b" x="393.2" y="193.8" width="19.2" height="1.25"/><rect class="en-w" x="413.2" y="193.8" width="24.9" height="1.25"/><rect class="en-b" x="438.1" y="193.8" width="16.7" height="1.25"/><rect class="en-w" x="455.6" y="193.8" width="33.2" height="1.25"/><rect class="en-b" x="488.8" y="193.8" width="13.5" height="1.25"/><rect class="en-w" x="316" y="195" width="50.1" height="1.25"/><rect class="en-b" x="366.1" y="195" width="30.7" height="1.25"/><rect class="en-w" x="397.6" y="195" width="32.6" height="1.25"/><rect class="en-b" x="430.2" y="195" width="13.2" height="1.25"/><rect class="en-w" x="444.1" y="195" width="28.3" height="1.25"/><rect class="en-b" x="472.4" y="195" width="20.6" height="1.25"/><rect class="en-w" x="493.8" y="195" width="19.9" height="1.25"/><rect class="en-b" x="513.7" y="195" width="14.2" height="1.25"/><rect class="en-w" x="316" y="196.2" width="34.7" height="1.25"/><rect class="en-b" x="350.7" y="196.2" width="22.1" height="1.25"/><rect class="en-w" x="373.6" y="196.2" width="26.7" height="1.25"/><rect class="en-b" x="400.3" y="196.2" width="17" height="1.25"/><rect class="en-w" x="418.1" y="196.2" width="19.1" height="1.25"/><rect class="en-b" x="437.2" y="196.2" width="15.1" height="1.25"/><rect class="en-w" x="453.1" y="196.2" width="22.5" height="1.25"/><rect class="en-b" x="475.6" y="196.2" width="15.8" height="1.25"/><rect class="en-w" x="316" y="197.5" width="18.2" height="1.25"/><rect class="en-b" x="334.2" y="197.5" width="17.8" height="1.25"/><rect class="en-w" x="352.8" y="197.5" width="26.8" height="1.25"/><rect class="en-b" x="379.6" y="197.5" width="21.8" height="1.25"/><rect class="en-w" x="402.2" y="197.5" width="38.3" height="1.25"/><rect class="en-b" x="440.5" y="197.5" width="23.8" height="1.25"/><rect class="en-w" x="465.2" y="197.5" width="45.2" height="1.25"/><rect class="en-b" x="510.3" y="197.5" width="24.9" height="1.25"/><rect class="en-w" x="316" y="198.8" width="47.5" height="1.25"/><rect class="en-b" x="363.5" y="198.8" width="21" height="1.25"/><rect class="en-w" x="385.2" y="198.8" width="30.1" height="1.25"/><rect class="en-b" x="415.4" y="198.8" width="22.6" height="1.25"/><rect class="en-w" x="438.8" y="198.8" width="43.4" height="1.25"/><rect class="en-b" x="482.1" y="198.8" width="38" height="1.25"/><rect class="en-w" x="520.9" y="198.8" width="44.2" height="1.25"/><rect class="en-b" x="565.1" y="198.8" width="24.7" height="1.25"/><rect class="en-w" x="316" y="200" width="24.7" height="1.25"/><rect class="en-b" x="340.7" y="200" width="11.4" height="1.25"/><rect class="en-w" x="352.9" y="200" width="49.1" height="1.25"/><rect class="en-b" x="401.9" y="200" width="27.8" height="1.25"/><rect class="en-w" x="430.6" y="200" width="47" height="1.25"/><rect class="en-b" x="477.6" y="200" width="22.3" height="1.25"/><rect class="en-w" x="500.7" y="200" width="25" height="1.25"/><rect class="en-b" x="525.7" y="200" width="15.7" height="1.25"/><rect class="en-w" x="316" y="201.2" width="39.8" height="1.25"/><rect class="en-b" x="355.8" y="201.2" width="18.4" height="1.25"/><rect class="en-w" x="375" y="201.2" width="49.6" height="1.25"/><rect class="en-b" x="424.6" y="201.2" width="23.1" height="1.25"/><rect class="en-w" x="448.5" y="201.2" width="43.2" height="1.25"/><rect class="en-b" x="491.8" y="201.2" width="18.8" height="1.25"/><rect class="en-w" x="511.4" y="201.2" width="43.6" height="1.25"/><rect class="en-b" x="555" y="201.2" width="23.2" height="1.25"/><rect class="en-w" x="316" y="202.5" width="22.8" height="1.25"/><rect class="en-b" x="338.8" y="202.5" width="22.2" height="1.25"/><rect class="en-w" x="361.8" y="202.5" width="23.4" height="1.25"/><rect class="en-b" x="385.2" y="202.5" width="17" height="1.25"/><rect class="en-w" x="403" y="202.5" width="26.7" height="1.25"/><rect class="en-b" x="429.7" y="202.5" width="12.3" height="1.25"/><rect class="en-w" x="442.8" y="202.5" width="38.8" height="1.25"/><rect class="en-b" x="481.7" y="202.5" width="22" height="1.25"/><rect class="en-w" x="316" y="203.8" width="41.7" height="1.25"/><rect class="en-b" x="357.7" y="203.8" width="22.5" height="1.25"/><rect class="en-w" x="380.9" y="203.8" width="28.8" height="1.25"/><rect class="en-b" x="409.7" y="203.8" width="28.7" height="1.25"/><rect class="en-w" x="439.2" y="203.8" width="48.1" height="1.25"/><rect class="en-b" x="487.3" y="203.8" width="24.3" height="1.25"/><rect class="en-w" x="512.4" y="203.8" width="35.9" height="1.25"/><rect class="en-b" x="548.3" y="203.8" width="22.2" height="1.25"/><rect class="en-w" x="316" y="205" width="33.8" height="1.25"/><rect class="en-b" x="349.8" y="205" width="31.9" height="1.25"/><rect class="en-w" x="382.5" y="205" width="38.6" height="1.25"/><rect class="en-b" x="421.1" y="205" width="30.9" height="1.25"/><rect class="en-w" x="452.7" y="205" width="21" height="1.25"/><rect class="en-b" x="473.7" y="205" width="16.6" height="1.25"/><rect class="en-w" x="491.1" y="205" width="37.7" height="1.25"/><rect class="en-b" x="528.8" y="205" width="31.4" height="1.25"/><rect class="en-w" x="316" y="206.2" width="49.7" height="1.25"/><rect class="en-b" x="365.7" y="206.2" width="19.9" height="1.25"/><rect class="en-w" x="386.4" y="206.2" width="33.7" height="1.25"/><rect class="en-b" x="420.1" y="206.2" width="24" height="1.25"/><rect class="en-w" x="444.9" y="206.2" width="37.1" height="1.25"/><rect class="en-b" x="482" y="206.2" width="19.9" height="1.25"/><rect class="en-w" x="502.8" y="206.2" width="45.1" height="1.25"/><rect class="en-b" x="547.8" y="206.2" width="25.8" height="1.25"/><rect class="en-w" x="316" y="207.5" width="33.6" height="1.25"/><rect class="en-b" x="349.6" y="207.5" width="31.3" height="1.25"/><rect class="en-w" x="381.7" y="207.5" width="22.8" height="1.25"/><rect class="en-b" x="404.5" y="207.5" width="18.2" height="1.25"/><rect class="en-w" x="423.6" y="207.5" width="39.5" height="1.25"/><rect class="en-b" x="463.1" y="207.5" width="30.2" height="1.25"/><rect class="en-w" x="494.1" y="207.5" width="30.8" height="1.25"/><rect class="en-b" x="524.9" y="207.5" width="30.5" height="1.25"/><rect class="en-w" x="316" y="208.8" width="20.6" height="1.25"/><rect class="en-b" x="336.6" y="208.8" width="16.3" height="1.25"/><rect class="en-w" x="353.7" y="208.8" width="43.3" height="1.25"/><rect class="en-b" x="396.9" y="208.8" width="23.1" height="1.25"/><rect class="en-w" x="420.8" y="208.8" width="37.5" height="1.25"/><rect class="en-b" x="458.3" y="208.8" width="29" height="1.25"/><rect class="en-w" x="488.1" y="208.8" width="35.4" height="1.25"/><rect class="en-b" x="523.5" y="208.8" width="23.4" height="1.25"/></g>
+          </g>
+          <!-- any instant on thread 1 crosses all 16 lanes -->
+          <path class="en-now" d="M404 52 V120"/>
+          <path class="en-head" d="M316 47 V215"/>
+
+          <g class="en-conn"><path d="M612 68 H652"/><path d="M612 86 H652"/><path d="M612 104 H652"/><path d="M612 134 H652"/><path d="M612 140 H652"/><path d="M612 146 H652"/><path d="M612 164 H652"/><path d="M612 170 H652"/><path d="M612 176 H652"/><path d="M612 194 H652"/><path d="M612 200 H652"/><path d="M612 206 H652"/></g>
+          <text class="en-small" x="214" y="234">KARU_CONCURRENCY <tspan class="en-val">64</tspan><tspan class="en-aside">, 16 per thread</tspan></text>
+          <text class="en-conn-tag" x="612" y="234" text-anchor="end">warm connections, TLS shared</text>
+
+          <!-- engine state every batch reuses; blocking work runs on its own threads -->
+          <path class="en-rule" d="M156 248 H608"/>
+          <text class="en-layer" x="156" y="266">shared by every batch</text>
+          <rect class="en-box" x="156" y="274" width="140" height="58"/>
+          <rect class="en-box" x="306" y="274" width="140" height="58"/>
+          <rect class="en-box" x="456" y="274" width="152" height="58"/>
+          <text class="en-name" x="168" y="295">credentials</text>
+          <text class="en-text" x="168" y="311">4 workers</text>
+          <text class="en-text" x="168" y="325">cached, refreshed lazily</text>
+          <text class="en-name" x="318" y="295">DNS answers</text>
+          <text class="en-text" x="318" y="311">off the I/O threads</text>
+          <text class="en-text" x="318" y="325">kept 60 s, rotated</text>
+          <text class="en-name" x="468" y="295">CA certificates</text>
+          <text class="en-text" x="468" y="311">hashed directory first</text>
+          <text class="en-text" x="468" y="325">else a cached bundle</text>
+
+          <rect class="en-box" x="652" y="50" width="212" height="162"/>
+          <text class="en-store" x="758" y="112">object storage</text>
+          <text class="en-store-sub" x="758" y="134">S3, GCS, Azure, HTTP,</text>
+          <text class="en-store-sub" x="758" y="151">Hugging Face,</text>
+          <text class="en-store-sub" x="758" y="168">Source Cooperative</text>
+
+          <!-- the counters a caller reads to tune; values are an example -->
+          <rect class="en-stats" x="652" y="224" width="212" height="116"/>
+          <text class="en-stats-head" x="664" y="243">Batch::stats()</text>
+          <text class="en-stats-note" x="852" y="243">example</text>
+          <text class="en-stats-col" x="796" y="261">batch 1</text>
+          <text class="en-stats-col" x="852" y="261">batch 2</text>
+          <text class="en-stats-key" x="664" y="279">transfers</text>
+          <text class="en-stats-val" x="796" y="279">256</text>
+          <text class="en-stats-val" x="852" y="279">256</text>
+          <text class="en-stats-key" x="664" y="295">retries</text>
+          <text class="en-stats-val" x="796" y="295">0</text>
+          <text class="en-stats-val" x="852" y="295">0</text>
+          <text class="en-stats-key" x="664" y="311">throttled</text>
+          <text class="en-stats-val" x="796" y="311">0</text>
+          <text class="en-stats-val" x="852" y="311">0</text>
+          <text class="en-stats-key" x="664" y="327">new_connections</text>
+          <text class="en-stats-val" x="796" y="327">64</text>
+          <text class="en-stats-val on" x="852" y="327">0</text>
+        </svg>
+        <p class="path-note">A thread waits on its 16 transfers at once and takes the next one the moment a slot frees. Reuse one client.</p>
+      </figure>
+    </section>
+
+    <section class="slide s11" aria-label="Whole-object downloads" data-steps="4" data-step="1">
+  <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">11 / 12</span></header>
+  <h1>Whole objects download in parallel with <span class="title-mark">fixed memory</span></h1>
+  <div class="fig dl">
+    <div class="dl-top">
+      <div class="dl-tabs" role="tablist" aria-label="Steps">
+        <button type="button" role="tab" data-to="1">probe</button>
+        <button type="button" role="tab" data-to="2">parallel ranges</button>
+        <button type="button" role="tab" data-to="3">publish</button>
+        <button type="button" role="tab" data-to="4">on failure</button>
+      </div>
+      <span class="dl-new">unreleased</span>
+      <pre class="dl-code"><code>client.<span class="tok-fn">download</span>(object, <span class="tok-str">"scene.rumi"</span>)</code></pre>
+    </div>
+    <svg class="dl-fig" viewBox="0 0 864 256" role="img" data-interactive data-phase="sized" aria-label="Downloading an example 200 MiB object to scene.rumi. A first read of 1 MiB returns the size and the ETag, and Karu creates a temporary file beside the destination at the full size. The rest goes in 8 MiB ranges, at most 8 in flight, so memory holds 64 MiB at most; each range carries the ETag as If-Match and is written at its offset when it lands, and a progress callback sees every step. Only when every range has landed is the temporary file published as scene.rumi in one step. If the object changes, the next range fails with status 412, and if the callback returns zero the download is cancelled; either way the temporary file is deleted and nothing appears at scene.rumi.">
+      <defs>
+        <marker id="dl13-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#492ae8"/></marker>
+      </defs>
+      <line class="dl-rule" x1="0" y1="64" x2="864" y2="64"/>
+      <line class="dl-rule" x1="0" y1="128" x2="864" y2="128"/>
+      <line class="dl-rule" x1="0" y1="192" x2="864" y2="192"/>
+
+      <text class="dl-name" x="0" y="30">Object</text><text class="dl-sub" x="0" y="46">remote, one version</text>
+      <text class="dl-name" x="0" y="94">Memory</text><text class="dl-sub dl-mono" x="0" y="110">parallelism 8</text>
+      <text class="dl-name" x="0" y="158">Temporary file</text><text class="dl-sub" x="0" y="174">beside the destination</text>
+      <text class="dl-name" x="0" y="222">Destination</text><text class="dl-sub dl-mono" x="0" y="238">scene.rumi</text>
+
+      <!-- the remote object, drawn to scale: a 1 MiB probe, then 8 MiB chunks -->
+      <g class="dl-obj"></g>
+      <rect class="dl-frame" x="172" y="24" width="560" height="16"/>
+      <text class="dl-tag" x="172" y="16" data-show="1">first 1 MiB</text>
+      <g data-show="2 3 4"><path class="dl-dim" d="M175.3 19 V15 H197.2 V19"/><text class="dl-tag dl-mono" x="202" y="18">chunk_size 8 MiB</text></g>
+      <text class="dl-tag dl-mono dl-after-probe" x="732" y="17" text-anchor="end" data-show="1 2 3">ETag "5d41402a"</text>
+      <text class="dl-tag dl-mono dl-bad" x="732" y="17" text-anchor="end" data-show="4">replaced, ETag "7e2b19c0"</text>
+
+      <!-- memory: the probe buffer, then one buffer per slot -->
+      <g class="dl-probe" data-show="1"><line class="dl-req" x1="173.4" y1="41" x2="173.4" y2="87"/><rect class="dl-probe-buf" x="172" y="88" width="2.8" height="16"/></g>
+      <g class="dl-slots"></g>
+      <text class="dl-fail dl-mono" x="0" y="122" data-show="4">412, ETag changed</text>
+
+      <!-- the temporary file, sized at once and filled by offset -->
+      <g class="dl-temp">
+        <g class="dl-after-probe">
+          <rect class="dl-temp-bg" x="172" y="152" width="560" height="16"/>
+          <g class="dl-tmp"></g>
+          <rect class="dl-frame dl-temp-frame" x="172" y="152" width="560" height="16"/>
+        </g>
+        <text class="dl-tag dl-mono dl-faint" x="172" y="145">scene.rumi.karu.part.&lt;pid&gt;.&lt;n&gt;</text>
+        <text class="dl-tag dl-bad" x="732" y="145" text-anchor="end" data-show="4">deleted</text>
+      </g>
+
+      <!-- the destination exists only after the publish -->
+      <rect class="dl-dest" x="172" y="216" width="560" height="16"/>
+      <text class="dl-dest-text" x="452" y="228" data-show="1 2">not visible yet</text>
+      <text class="dl-dest-text dl-mono dl-done" x="452" y="228" data-show="3">scene.rumi</text>
+      <text class="dl-dest-text dl-bad" x="452" y="228" data-show="4">nothing published</text>
+      <g class="dl-publish" data-show="3"><line x1="452" y1="171" x2="452" y2="211" marker-end="url(#dl13-arrow)"/><text x="461" y="187">atomic publish</text></g>
+
+      <!-- values, read along each lane -->
+      <text class="dl-val dl-after-probe" x="864" y="31" text-anchor="end">200 MiB</text>
+      <text class="dl-vsub dl-after-probe" x="864" y="47" text-anchor="end">example size</text>
+      <text class="dl-val" x="864" y="95" text-anchor="end" data-show="1">1 MiB</text>
+      <text class="dl-vsub" x="864" y="111" text-anchor="end" data-show="1">probe buffer</text>
+      <text class="dl-val dl-key" x="864" y="96" text-anchor="end" data-show="2 3 4">64 MiB</text>
+      <text class="dl-vsub" x="864" y="111" text-anchor="end" data-show="2 3 4">at most, 8 × 8 MiB</text>
+      <text class="dl-val dl-progress dl-after-probe" x="864" y="159" text-anchor="end">1 MiB</text>
+      <text class="dl-vsub dl-after-probe" x="864" y="175" text-anchor="end" data-show="1 2 3">progress callback</text>
+      <text class="dl-vsub dl-bad" x="864" y="175" text-anchor="end" data-show="4">or progress returns 0</text>
+      <text class="dl-val" x="864" y="223" text-anchor="end" data-show="3">200 MiB</text>
+      <text class="dl-vsub" x="864" y="239" text-anchor="end" data-show="3">in one step</text>
+    </svg>
+    <p class="dl-note">
+      <span data-show="1">One read of up to 1 MiB returns the first bytes, the size and the ETag.</span>
+      <span data-show="2">Each range asks for that ETag with If-Match and is written at its offset when it lands.</span>
+      <span data-show="3">The destination appears only after every range has landed, and an existing file is not replaced by default.</span>
+      <span data-show="4">A changed ETag or a cancel deletes the temporary file, so no partial destination ever appears.</span>
+    </p>
+  </div>
+</section>
+
+    <section class="slide cover closing s12" aria-label="Thank you">
+      <img class="cover-asterisk" src="fig/asterisk_banner.svg" alt="Asterisk Labs">
+      <div class="cover-inner">
+        <img class="cover-logo" src="../assets/svg/karu-mark-color.svg" alt="">
+        <div class="cover-copy">
+          <h1>Thank you</h1>
+          <button type="button" class="end-install is-plain" data-copy="find_package(karu CONFIG REQUIRED)" aria-label="Copy the CMake line">find_package(karu CONFIG REQUIRED)</button>
+          <p class="end-links">
+            <a href="https://asterisk.coop/karu/" target="_blank" rel="noopener noreferrer">asterisk.coop/karu</a>
+            <a href="https://github.com/asterisk-labs/karu" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"></path></svg>GitHub</a>
+            <a href="https://github.com/asterisk-labs/karu/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    if (new URLSearchParams(window.location.search).has('embed')) document.documentElement.classList.add('is-embedded');
+  </script>
+  <script>
+    // A lane figure (.path-fig). The dot is the data, it moves without
+    // stopping to the lane of the library that handles it, pauses only where the frames are
+    // decoded and grows there, and runs again when its slide comes back or the route is
+    // clicked. The GPU route moves faster and barely pauses to decode, so it ends first,
+    // as on the landing page.
+    (function () {
+      var SPEED = 3.2;
+      var HOLD = 0;
+      var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      document.querySelectorAll('.path-fig').forEach(function (fig) {
+        var svg = fig.querySelector('svg');
+        var points = JSON.parse(svg.dataset.path);
+        var speed = Number(svg.dataset.speed || SPEED);
+        var stations = Array.prototype.slice.call(svg.querySelectorAll('.pt-station'));
+        var sizes = Array.prototype.slice.call(svg.querySelectorAll('.pt-size'));
+        var lanes = Array.prototype.slice.call(svg.querySelectorAll('.pt-lane'));
+        var packet = svg.querySelector('.pt-packet');
+        var trail = svg.querySelector('.pt-trail');
+        var length = trail.getTotalLength();
+        var timers = [];
+        var animations = [];
+        trail.style.strokeDasharray = length;
+        trail.style.strokeDashoffset = length;
+
+        function light(i) {
+          stations[i].classList.add('is-lit');
+          lanes.forEach(function (lane) {
+            lane.classList.toggle('is-now', lane.dataset.lane === stations[i].dataset.lane);
+          });
+          sizes.forEach(function (size) {
+            if (Number(size.dataset.after) === i) size.classList.add('is-lit');
+          });
+        }
+
+        function run() {
+          timers.forEach(window.clearTimeout);
+          animations.forEach(function (animation) { animation.cancel(); });
+          timers = [];
+          stations.concat(sizes).forEach(function (el) { el.classList.remove('is-lit'); });
+          if (reduce) {
+            stations.forEach(function (station, i) { light(i); });
+            trail.style.strokeDashoffset = 0;
+            return;
+          }
+          var stops = [];
+          var t = 0;
+          var walked = 0;
+          var scale = 1;
+          points.forEach(function (point, k) {
+            if (k) {
+              var step = Math.abs(point[0] - points[k - 1][0]) + Math.abs(point[1] - points[k - 1][1]);
+              walked += step;
+              t += step * speed;
+            }
+            stops.push({ t: t, x: point[0], y: point[1], scale: scale, walked: walked });
+            if (point[2] < 0) return;
+            timers.push(window.setTimeout(light.bind(null, point[2]), t));
+            var station = stations[point[2]];
+            if (station.hasAttribute('data-grow')) scale = 1.9;
+            t += Number(station.dataset.hold || HOLD);
+            stops.push({ t: t, x: point[0], y: point[1], scale: scale, walked: walked });
+          });
+          animations = [
+            packet.animate(stops.map(function (stop) {
+              return { offset: stop.t / t, opacity: 1, transform: 'translate(' + stop.x + 'px, ' + stop.y + 'px) scale(' + stop.scale + ')' };
+            }), { duration: t, fill: 'forwards' }),
+            trail.animate(stops.map(function (stop) {
+              return { offset: stop.t / t, strokeDashoffset: length - stop.walked };
+            }), { duration: t, fill: 'forwards' })
+          ];
+        }
+
+        svg.addEventListener('click', run);
+        var slide = fig.closest('.slide');
+        new MutationObserver(function () {
+          if (slide.classList.contains('active')) run();
+        }).observe(slide, { attributes: true, attributeFilter: ['class'] });
+        if (slide.classList.contains('active')) run();
+      });
+    })();
+  </script>
+  <script>
+    // The install command on the closing slide copies itself when clicked.
+    (function () {
+      var button = document.querySelector('.end-install');
+      if (!button || !navigator.clipboard) return;
+      button.addEventListener('click', function () {
+        navigator.clipboard.writeText(button.dataset.copy).then(function () {
+          button.classList.add('is-copied');
+          window.setTimeout(function () { button.classList.remove('is-copied'); }, 1200);
+        });
+      });
+    })();
+  </script>
+  <script>
+    // Slide 4, a batch. The arrows step through it before moving on (app.js), the tabs jump to
+    // a step, and leaving the slide sends it back to step 1. CSS draws every step.
+    (function () {
+      var slide = document.querySelector('.slide.s04');
+      if (!slide) return;
+      var tabs = slide.querySelectorAll('.s04-tabs button');
+
+      function sync() {
+        var step = slide.dataset.step || '1';
+        tabs.forEach(function (btn) {
+          btn.setAttribute('aria-selected', String(btn.dataset.to === step));
+        });
+      }
+
+      tabs.forEach(function (btn) {
+        btn.addEventListener('click', function () { slide.dataset.step = btn.dataset.to; });
+      });
+      new MutationObserver(function (list) {
+        list.forEach(function (m) {
+          if (m.attributeName === 'class' && !slide.classList.contains('active')) slide.dataset.step = '1';
+        });
+        sync();
+      }).observe(slide, { attributes: true, attributeFilter: ['class', 'data-step'] });
+      sync();
+    })();
+  </script>
+  <script>
+    // 05 The two panels play on their steps. Leaving the slide sends it back to step 1, so both
+    // play again from the start the next time it opens.
+    (function () {
+      var slide = document.querySelector('.slide.s05');
+      if (!slide) return;
+      new MutationObserver(function () {
+        if (!slide.classList.contains('active')) slide.dataset.step = '1';
+      }).observe(slide, { attributes: true, attributeFilter: ['class'] });
+    })();
+  </script>
+  <script>
+    // 06 The two panels play on their steps. Leaving the slide sends it back to step 1, so both
+    // play again from the start the next time it opens.
+    (function () {
+      var slide = document.querySelector('.slide.s06');
+      if (!slide) return;
+      new MutationObserver(function () {
+        if (!slide.classList.contains('active')) slide.dataset.step = '1';
+      }).observe(slide, { attributes: true, attributeFilter: ['class'] });
+    })();
+  </script>
+  <script>
+    // The backends slide. Clicking a row shows the request its path becomes, like the
+    // language picker of the Rumi deck. S3 is shown first, so print has a signed request.
+    (function () {
+      var slide = document.querySelector('.slide.s07');
+      if (!slide) return;
+      var rows = Array.prototype.slice.call(slide.querySelectorAll('.bk-row'));
+      var cards = Array.prototype.slice.call(slide.querySelectorAll('.bk-card'));
+      function pick(name) {
+        rows.forEach(function (r) { r.setAttribute('aria-selected', String(r.dataset.bk === name)); });
+        cards.forEach(function (c) { c.hidden = c.dataset.bk !== name; });
+      }
+      rows.forEach(function (r) { r.addEventListener('click', function () { pick(r.dataset.bk); }); });
+      pick('s3');
+    })();
+  </script>
+  <script>
+    // The download of slide 13. The object is drawn to scale at the defaults, a 1 MiB probe and
+    // 8 MiB chunks, and the eight slots replay the loop in src/download.cpp: each range lands
+    // on its own time, is written at its offset, and its slot takes the next chunk. Steps 3 and
+    // 4 show the end of the same run, published or failed at the tenth landing.
+    (function () {
+      var slide = document.querySelector('.slide.s11');
+      if (!slide) return;
+      var svg = slide.querySelector('.dl-fig');
+      var NS = 'http://www.w3.org/2000/svg';
+      var X0 = 172, S = 2.8, SIZE = 200, PROBE = 1, CHUNK = 8, SLOTS = 8, FAIL = 9;
+      // Illustrative transfer times in ms, uneven so ranges land out of order.
+      var DUR = [1150, 980, 1320, 1060, 1240, 900, 1400, 1010, 1180, 950, 1290, 1080, 1360,
+        920, 1210, 1040, 1330, 970, 1120, 1260, 990, 1380, 1070, 1190, 900];
+      var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var progress = svg.querySelector('.dl-progress');
+      var fail = svg.querySelector('.dl-fail');
+      var timers = [];
+
+      var chunks = [];
+      for (var off = PROBE; off < SIZE; off += CHUNK) chunks.push({ off: off, len: Math.min(CHUNK, SIZE - off) });
+
+      function el(name, attrs, parent) {
+        var node = document.createElementNS(NS, name);
+        Object.keys(attrs).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+        parent.appendChild(node);
+        return node;
+      }
+
+      // Cells of the object and of the temporary file, the probe first.
+      var obj = svg.querySelector('.dl-obj');
+      var tmp = svg.querySelector('.dl-tmp');
+      el('rect', { class: 'dl-cell is-probe', x: X0, y: 24, width: PROBE * S, height: 16 }, obj);
+      el('rect', { class: 'dl-tcell is-probe is-done', x: X0, y: 152, width: PROBE * S, height: 16 }, tmp);
+      var objCells = [], tmpCells = [];
+      chunks.forEach(function (c) {
+        var x = X0 + c.off * S;
+        objCells.push(el('rect', { class: 'dl-cell', x: x, y: 24, width: c.len * S, height: 16 }, obj));
+        tmpCells.push(el('rect', { class: 'dl-tcell', x: x, y: 152, width: c.len * S, height: 16 }, tmp));
+      });
+      chunks.forEach(function (c) {
+        var x = X0 + c.off * S;
+        el('line', { class: 'dl-sep', x1: x, y1: 24, x2: x, y2: 40 }, obj);
+        el('line', { class: 'dl-tsep', x1: x, y1: 152, x2: x, y2: 168 }, tmp);
+      });
+
+      // One buffer per slot: the range request above it, the write below it.
+      var slotRoot = svg.querySelector('.dl-slots');
+      var slots = [];
+      for (var s = 0; s < SLOTS; s++) {
+        var g = el('g', { class: 'dl-slot' }, slotRoot);
+        slots.push({
+          g: g,
+          req: el('line', { class: 'dl-req', y1: 41, y2: 87 }, g),
+          rect: el('rect', { y: 88, height: 16 }, g),
+          write: el('line', { class: 'dl-write', y1: 105, y2: 151 }, g)
+        });
+      }
+
+      // Replay the loop once: a slot whose range lands takes the next chunk at once.
+      var events = [];
+      (function () {
+        var held = [], ends = [], next = 0;
+        for (var k = 0; k < SLOTS; k++) { held[k] = next; ends[k] = DUR[next]; next++; }
+        for (;;) {
+          var first = -1;
+          for (k = 0; k < SLOTS; k++) if (held[k] >= 0 && (first < 0 || ends[k] < ends[first])) first = k;
+          if (first < 0) break;
+          var n = next < chunks.length ? next++ : -1;
+          events.push({ t: ends[first], slot: first, chunk: held[first], next: n });
+          held[first] = n;
+          if (n >= 0) ends[first] = ends[first] + DUR[n];
+        }
+      })();
+
+      var state;
+      function reset(held) { state = { held: held, done: chunks.map(function () { return false; }) }; }
+      function apply(ev) { state.done[ev.chunk] = true; state.held[ev.slot] = ev.next; }
+
+      function render(hit) {
+        chunks.forEach(function (c, i) {
+          objCells[i].classList.toggle('is-flight', state.held.indexOf(i) >= 0);
+          tmpCells[i].classList.toggle('is-done', state.done[i]);
+        });
+        slots.forEach(function (sl, k) {
+          var c = state.held[k];
+          sl.g.classList.toggle('is-idle', c < 0);
+          sl.g.classList.toggle('is-hit', k === hit);
+          if (c < 0) return;
+          var w = chunks[c].len * S;
+          sl.g.style.transform = 'translate(' + (X0 + chunks[c].off * S) + 'px, 0)';
+          sl.rect.setAttribute('x', 0.5);
+          sl.rect.setAttribute('width', w - 1);
+          ['req', 'write'].forEach(function (p) { sl[p].setAttribute('x1', w / 2); sl[p].setAttribute('x2', w / 2); });
+        });
+        var mib = PROBE;
+        chunks.forEach(function (c, i) { if (state.done[i]) mib += c.len; });
+        progress.textContent = mib + ' MiB';
+      }
+
+      // Draw a state without letting the slots travel there.
+      function jump(hit) {
+        svg.classList.add('is-jump');
+        slots.forEach(function (sl) { sl.g.classList.remove('is-write'); });
+        render(hit);
+        svg.getBoundingClientRect();
+        svg.classList.remove('is-jump');
+      }
+
+      function later(ms, fn) { timers.push(window.setTimeout(fn, ms)); }
+      function stop() { timers.forEach(window.clearTimeout); timers = []; }
+
+      function show(step) {
+        stop();
+        slide.querySelectorAll('.dl-tabs button').forEach(function (btn) {
+          btn.setAttribute('aria-selected', String(Number(btn.dataset.to) === step));
+        });
+        svg.dataset.phase = 'sized';
+        if (step === 1) {
+          reset(slots.map(function () { return -1; }));
+          jump();
+          if (!reduce) {
+            svg.dataset.phase = 'probe';
+            later(800, function () { svg.dataset.phase = 'sized'; });
+          }
+        } else if (step === 2) {
+          reset(slots.map(function (sl, k) { return k; }));
+          jump();
+          if (reduce) {
+            events.forEach(apply);
+            return render();
+          }
+          events.forEach(function (ev) {
+            var sl = slots[ev.slot];
+            later(300 + ev.t, function () {
+              state.done[ev.chunk] = true;
+              sl.g.classList.add('is-write');
+              render();
+            });
+            later(300 + ev.t + 220, function () {
+              sl.g.classList.remove('is-write');
+              state.held[ev.slot] = ev.next;
+              render();
+            });
+          });
+        } else if (step === 3) {
+          reset(slots.map(function () { return -1; }));
+          events.forEach(apply);
+          jump();
+        } else {
+          reset(slots.map(function (sl, k) { return k; }));
+          events.slice(0, FAIL).forEach(apply);
+          var bad = events[FAIL];
+          fail.setAttribute('x', X0 + chunks[bad.chunk].off * S);
+          jump(bad.slot);
+        }
+      }
+
+      slide.querySelectorAll('.dl-tabs button').forEach(function (btn) {
+        btn.addEventListener('click', function () { slide.dataset.step = btn.dataset.to; });
+      });
+      svg.addEventListener('click', function () { show(Number(slide.dataset.step)); });
+      new MutationObserver(function (list) {
+        list.forEach(function (m) {
+          if (m.attributeName === 'data-step') show(Number(slide.dataset.step));
+          if (m.attributeName === 'class') {
+            if (!slide.classList.contains('active')) slide.dataset.step = '1';
+            else show(Number(slide.dataset.step));
+          }
+        });
+      }).observe(slide, { attributes: true, attributeFilter: ['class', 'data-step'] });
+      show(Number(slide.dataset.step) || 1);
+    })();
+  </script>
+</body>
+</html>
