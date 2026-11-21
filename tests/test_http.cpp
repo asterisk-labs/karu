@@ -1028,10 +1028,29 @@ int main(int argc, char** argv) {
           "signed redirect not followed");
     check(fetch(signed_client, "s3://bucket/region", 0, small) == KARU_OK,
           "S3 region recovered from XML body");
-    check(fetch(signed_client, "s3://bucket/late-region", 0, small) == KARU_OK,
+    check(fetch(signed_client, "s3://late/region", 0, small) == KARU_OK,
           "S3 region recovered after a long XML message");
-    check(fetch(signed_client, "s3://bucket/same-region", 0, small) == KARU_ERR_AUTH,
+    check(fetch(signed_client, "s3://same/region", 0, small) == KARU_ERR_AUTH,
           "matching S3 region not retried");
+    check(fetch(signed_client, "s3://bucket/bad-region", 0, small) == KARU_ERR_AUTH,
+          "malformed S3 region ignored");
+    {
+        // The bucket's region is learned once, then used by other objects,
+        // later batches and size probes of the same client.
+        check(fetch(signed_client, "s3://regional/a", 0, small) == KARU_OK,
+              "S3 bucket region learned");
+        check(fetch(signed_client, "s3://regional/b", 16, small) == KARU_OK,
+              "S3 bucket region reused by another object");
+        karu_locator* regional = nullptr;
+        std::uint64_t regional_size = 0;
+        check(karu_resolve("s3://regional/c", &regional) == KARU_OK, "resolve regional object");
+        check(karu_client_size(signed_client, regional, &regional_size) == KARU_OK,
+              "S3 bucket region reused by a size probe");
+        karu_locator_free(regional);
+        std::array<unsigned char, 1> verdict{};
+        check(fetch(client, base + "/regional-verdict", 0, verdict) == KARU_OK && verdict[0] == 1,
+              "one misrouted request for the whole bucket");
+    }
     karu_client_free(signed_client);
     karu_config_free(signed_config);
 

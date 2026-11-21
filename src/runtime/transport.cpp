@@ -1,6 +1,7 @@
 #include "transport.hpp"
 
 #include "../backends/credentials.hpp"
+#include "../backends/s3_signing.hpp"
 #include "../text.hpp"
 #include "http_response.hpp"
 
@@ -908,7 +909,7 @@ std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy,
 
     const auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
     std::mt19937 random{static_cast<std::mt19937::result_type>(seed)};
-    std::string region_hint;
+    std::string region_hint = request_builder.known_region(locator);
     bool region_retried = false;
     bool credentials_retried = false;
     RequestDeadline deadline;
@@ -982,9 +983,11 @@ std::expected<RangeReply, Failure> get_range(const Locator& locator, CURL* easy,
         if (state.response_region.empty() && locator.resolved.backend == Backend::S3)
             state.response_region = detail::s3_region(error_body);
 
-        if (http_status >= 300 && !region_retried && !state.response_region.empty() &&
+        if (http_status >= 300 && !region_retried &&
+            backends::valid_aws_region(state.response_region) &&
             state.response_region != region_hint && locator.resolved.backend == Backend::S3) {
             region_hint = state.response_region;
+            request_builder.remember_region(locator, region_hint);
             region_retried = true;
             continue;
         }

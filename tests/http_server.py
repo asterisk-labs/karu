@@ -65,6 +65,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     region_retries = 0
     late_region_retries = 0
     same_region_requests = 0
+    regional_lock = threading.Lock()
+    regional_misrouted = 0
     retry_date_requests = 0
     download_retries = 0
     download_lock = threading.Lock()
@@ -365,7 +367,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 b"<Region>us-west-2</Region></Error>",
             )
             return
-        if path == "/bucket/late-region" and Handler.late_region_retries == 0:
+        if path == "/late/region" and Handler.late_region_retries == 0:
             Handler.late_region_retries += 1
             self.reply(
                 400,
@@ -374,7 +376,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 + b"</Message><Region>us-west-2</Region></Error>",
             )
             return
-        if path == "/bucket/same-region" and Handler.same_region_requests == 0:
+        if path.startswith("/regional/"):
+            # The bucket lives in us-west-2 and refuses requests signed for elsewhere.
+            if "/us-west-2/s3/aws4_request" not in self.headers.get("Authorization", ""):
+                with Handler.regional_lock:
+                    Handler.regional_misrouted += 1
+                self.reply(
+                    400,
+                    b"<Error><Code>AuthorizationHeaderMalformed</Code>"
+                    b"<Region>us-west-2</Region></Error>",
+                )
+                return
+        if path == "/regional-verdict":
+            with Handler.regional_lock:
+                learned_once = Handler.regional_misrouted == 1
+            self.reply(206, b"\x01" if learned_once else b"\x00", Content_Range="bytes 0-0/1")
+            return
+        if path == "/bucket/bad-region":
+            self.reply(403, b"forbidden", X_Amz_Bucket_Region="us west/2")
+            return
+        if path == "/same/region" and Handler.same_region_requests == 0:
             Handler.same_region_requests += 1
             self.reply(403, b"forbidden", X_Amz_Bucket_Region="us-east-1")
             return

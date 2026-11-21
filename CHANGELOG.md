@@ -17,6 +17,11 @@ Notable user-visible changes are recorded here.
 
 - Reduce DNS queries and certificate loading during concurrent HTTPS reads.
   DNS lookups run off the I/O threads and cached addresses expire after a minute.
+- A client remembers the region S3 names for a bucket. Without `AWS_REGION`, every
+  object of a bucket outside `us-east-1` repeated one misrouted request per transfer in
+  each batch and size probe.
+- A malformed region in an S3 response is ignored instead of failing the read with
+  `KARU_ERR_CONFIG`.
 
 ## [0.4.0] - 2026-09-27
 

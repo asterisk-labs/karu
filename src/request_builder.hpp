@@ -8,7 +8,10 @@
 
 #include <cstdint>
 #include <expected>
+#include <mutex>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 
 namespace karu {
 
@@ -41,6 +44,11 @@ class RequestBuilder {
 
     void invalidate_credentials(const Locator& locator);
 
+    // The region S3 named for the locator's bucket, or empty. It outlives the
+    // batch, so one wrong-region answer serves every later transfer and probe.
+    [[nodiscard]] std::string known_region(const Locator& locator);
+    void remember_region(const Locator& locator, std::string_view region);
+
     [[nodiscard]] const ConfigSnapshot& config() const noexcept { return config_; }
 
   private:
@@ -50,6 +58,8 @@ class RequestBuilder {
 
     ConfigSnapshot config_;
     CredentialCache credentials_;
+    std::mutex regions_mutex_;
+    std::unordered_map<std::string, std::string> regions_;
 };
 
 } // namespace karu

@@ -209,8 +209,9 @@ Delays:
 Corrections that do not consume attempts, each at most once per transfer:
 
 - S3 region: a response naming another region (`x-amz-bucket-region` or `<Region>` in the
-  error body) re-signs the request for it. The region is remembered for that object for
-  the rest of the batch.
+  error body) re-signs the request for it. The region is remembered for that bucket for
+  the life of the client. A region with characters outside letters, digits and `-` is
+  ignored.
 - Credentials: an authentication rejection that the provider marks as expired
   invalidates the cached credentials and sends the transfer back to a credential worker.
 

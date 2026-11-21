@@ -12,8 +12,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <string_view>
-#include <unordered_map>
 
 namespace karu {
 
@@ -63,8 +61,6 @@ struct karu_batch {
     [[nodiscard]] bool is_cancelled() const;
     // An inherited batch has no workers in the child; its mutex may be locked.
     [[nodiscard]] bool inherited() const;
-    [[nodiscard]] std::string region_hint(std::string_view resource) const;
-    void remember_region(std::string resource, std::string region);
 
     std::shared_ptr<karu::Engine> owner;
     const int owner_process;
@@ -73,7 +69,6 @@ struct karu_batch {
     mutable std::mutex mutex;
     std::condition_variable cv;
     std::deque<karu::Completion> ready;
-    std::unordered_map<std::string, std::string> regions;
     std::size_t pending_parts = 0;
     std::size_t live_transfers = 0;
     std::atomic<bool> cancelled{false};

@@ -93,7 +93,7 @@ Request details:
   that supplied the credentials, else `us-east-1`. When S3 answers with another region
   (`x-amz-bucket-region` header or `<Region>` in the error body), Karu signs again for
   that region once per transfer, outside the attempt budget, and remembers it for that
-  object for the rest of the batch.
+  bucket for the life of the client, so later transfers, batches and probes start there.
 - Endpoint: `AWS_S3_ENDPOINT` (aliases `AWS_ENDPOINT_URL_S3`, `AWS_ENDPOINT_URL`) is a
   service root. The default is `s3.<region>.amazonaws.com` with virtual hosting
   (`bucket.s3.<region>.amazonaws.com`), except that buckets containing a dot use path

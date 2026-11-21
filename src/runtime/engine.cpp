@@ -2,6 +2,7 @@
 
 #include "../backends/contract.hpp"
 #include "../backends/credentials.hpp"
+#include "../backends/s3_signing.hpp"
 #include "../error.hpp"
 #include "../platform.hpp"
 #include "../text.hpp"
@@ -466,10 +467,8 @@ void Engine::start_transfer(IoLoop& loop, std::unique_ptr<Transfer> transfer, bo
                 return;
             }
 
-            if (transfer->region_hint.empty()) {
-                transfer->region_hint =
-                    transfer->batch->region_hint(transfer->locator->resolved.canonical_uri);
-            }
+            if (transfer->region_hint.empty())
+                transfer->region_hint = request_builder_.known_region(*transfer->locator);
             const bool cloud =
                 backends::cloud_provider(transfer->locator->resolved.backend) != nullptr;
             if (cloud && !transfer->credentials_ready) {
@@ -725,13 +724,13 @@ void Engine::io_loop(IoLoop& loop) {
                 transfer->response_region = transport::detail::s3_region(std::string_view(
                     transfer->http_buffers->error_body.data(), transfer->error_body_size));
             }
-            if (!transfer->region_retried && !transfer->response_region.empty() &&
+            if (!transfer->region_retried &&
+                backends::valid_aws_region(transfer->response_region) &&
                 transfer->response_region != transfer->region_hint &&
                 transfer->locator->resolved.backend == Backend::S3) {
                 // The region is part of SigV4, so rebuild and sign the request.
                 transfer->region_hint = transfer->response_region;
-                transfer->batch->remember_region(transfer->locator->resolved.canonical_uri,
-                                                 transfer->response_region);
+                request_builder_.remember_region(*transfer->locator, transfer->response_region);
                 transfer->region_retried = true;
                 recycle_handle(loop, *transfer);
                 loop.pending.push_front(std::move(transfer));
