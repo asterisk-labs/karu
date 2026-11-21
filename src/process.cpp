@@ -97,9 +97,34 @@ void terminate_process(pid_t child, int& status) noexcept {
     wait_for_child(child, status);
 }
 
-std::error_code setup_spawn(posix_spawn_file_actions_t& actions,
-                            posix_spawnattr_t& attributes, int read_descriptor,
-                            int write_descriptor) {
+// Close-on-exec keeps a helper started by another thread from inheriting the
+// write end, which would hold this pipe open until that helper exits.
+int open_pipe(int descriptors[2]) noexcept {
+#ifdef __linux__
+    if (::pipe2(descriptors, O_CLOEXEC) != 0)
+        return -1;
+#else
+    if (::pipe(descriptors) != 0)
+        return -1;
+#endif
+    for (int index = 0; index < 2; ++index) {
+        // dup2 of standard output onto itself would keep the flag.
+        const bool inherit = descriptors[index] == STDOUT_FILENO;
+        const int flags = ::fcntl(descriptors[index], F_GETFD, 0);
+        if (flags < 0 || ::fcntl(descriptors[index], F_SETFD,
+                                 inherit ? flags & ~FD_CLOEXEC : flags | FD_CLOEXEC) < 0) {
+            const int error = errno;
+            ::close(descriptors[0]);
+            ::close(descriptors[1]);
+            errno = error;
+            return -1;
+        }
+    }
+    return 0;
+}
+
+std::error_code setup_spawn(posix_spawn_file_actions_t& actions, posix_spawnattr_t& attributes,
+                            int read_descriptor, int write_descriptor) {
     int status = posix_spawn_file_actions_init(&actions);
     if (status != 0)
         return {status, std::generic_category()};
@@ -254,7 +279,7 @@ run_command(std::string_view command, std::size_t output_limit, std::chrono::mil
 #else
     std::string command_copy(command);
     int descriptors[2]{};
-    if (::pipe(descriptors) != 0)
+    if (open_pipe(descriptors) != 0)
         return std::unexpected(std::error_code(errno, std::generic_category()));
     const int read_descriptor = descriptors[0];
     const int write_descriptor = descriptors[1];

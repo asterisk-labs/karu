@@ -22,6 +22,8 @@ Notable user-visible changes are recorded here.
   each batch and size probe.
 - A malformed region in an S3 response is ignored instead of failing the read with
   `KARU_ERR_CONFIG`.
+- A credential helper no longer inherits the output pipe of a helper started by
+  another thread, which delayed that result until both had exited.
 
 ## [0.4.0] - 2026-09-27
 
