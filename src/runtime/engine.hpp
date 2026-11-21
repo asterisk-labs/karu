@@ -36,11 +36,15 @@ struct CurlShareState {
     std::array<std::mutex, CURL_LOCK_DATA_LAST> locks;
 };
 
-// Owned by the I/O thread. Other threads may call curl_multi_wakeup or set
-// cancellation_pending; transfers arrive through the engine's HTTP queue.
+// Owned by the I/O thread. Other threads may call curl_multi_wakeup, set
+// cancellation_pending or read occupied; transfers arrive through the engine's
+// HTTP queue.
 struct IoLoop {
     std::uint64_t bit = 0;
     std::size_t limit = 0;
+    // Slots in use, as last published by the loop. Producers read it to choose
+    // a loop; it may lag, so no transfer depends on it.
+    std::atomic<std::size_t> occupied{0};
     Multi multi;
     std::thread thread;
     std::vector<Easy> easy_pool;
@@ -88,7 +92,10 @@ class Engine {
     void take_http(IoLoop& loop);
     static void recycle_handle(IoLoop& loop, Transfer& transfer) noexcept;
     void wake_loops() noexcept;
-    void wake_idle_loops(std::size_t count) noexcept;
+    static void publish_occupied(IoLoop& loop) noexcept;
+    // Wake one loop for queued transfers, never `except`.
+    void wake_for_backlog(const IoLoop* except = nullptr) noexcept;
+    void wake_idle_loop() noexcept;
     void stop_workers() noexcept;
     [[nodiscard]] Easy take_size_handle();
     void return_size_handle(Easy handle) noexcept;
@@ -122,7 +129,7 @@ class Engine {
     std::deque<std::unique_ptr<Transfer>> http_queue_;
     std::atomic<std::size_t> http_backlog_{0};
     // Bits mark loops about to poll with spare capacity. Producers clear a
-    // bit before waking that loop; see wake_idle_loops() and io_loop().
+    // bit before waking that loop; see wake_idle_loop() and io_loop().
     std::atomic<std::uint64_t> idle_loops_{0};
 };
 

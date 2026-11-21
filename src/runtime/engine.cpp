@@ -332,14 +332,13 @@ std::unique_ptr<BatchCore> Engine::submit(std::span<const Request> requests,
     notify(file_cv_, files, kFileWorkers);
     notify(credential_cv_, lookups, kCredentialWorkers);
     if (!ready.empty()) {
-        const std::size_t count = ready.size();
         {
             std::lock_guard lock(http_mutex_);
             for (auto& transfer : ready)
                 http_queue_.push_back(std::move(transfer));
             http_backlog_.store(http_queue_.size(), std::memory_order_seq_cst);
         }
-        wake_idle_loops(count);
+        wake_for_backlog();
     }
     return batch;
 }
@@ -351,17 +350,38 @@ void Engine::wake_loops() noexcept {
     }
 }
 
-void Engine::wake_idle_loops(std::size_t count) noexcept {
-    // Prefer the lowest idle loop to reuse connections for serial reads.
-    // Clear its bit first so concurrent producers choose different loops.
+void Engine::publish_occupied(IoLoop& loop) noexcept {
+    loop.occupied.store(loop.active.size() + loop.pending.size() + loop.resolving.size(),
+                        std::memory_order_seq_cst);
+}
+
+void Engine::wake_for_backlog(const IoLoop* except) noexcept {
+    // One loop is woken and take_http() wakes the next while work is left, so
+    // loops fill in index order and serial batches return to the loop that
+    // holds their warm connections. That loop is often still finishing the
+    // previous batch and not marked idle; the wakeup is kept for its next poll.
+    for (auto& loop : loops_) {
+        if (loop.get() == except || loop->occupied.load(std::memory_order_seq_cst) >= loop->limit) {
+            continue;
+        }
+        idle_loops_.fetch_and(~loop->bit, std::memory_order_seq_cst);
+        curl_multi_wakeup(loop->multi.get());
+        return;
+    }
+    // Every published count is full, but one may lag behind a loop with room.
+    wake_idle_loop();
+}
+
+void Engine::wake_idle_loop() noexcept {
+    // Clear the bit first so concurrent producers choose different loops.
     std::uint64_t idle = idle_loops_.load(std::memory_order_seq_cst);
-    while (count > 0 && idle != 0) {
+    while (idle != 0) {
         const int index = std::countr_zero(idle);
         const std::uint64_t bit = std::uint64_t{1} << index;
         idle &= ~bit;
         if ((idle_loops_.fetch_and(~bit, std::memory_order_seq_cst) & bit) != 0) {
             curl_multi_wakeup(loops_[static_cast<std::size_t>(index)]->multi.get());
-            --count;
+            return;
         }
     }
 }
@@ -376,19 +396,35 @@ void Engine::queue_http(std::unique_ptr<Transfer> transfer) {
         http_queue_.push_back(std::move(transfer));
         http_backlog_.store(http_queue_.size(), std::memory_order_seq_cst);
     }
-    wake_idle_loops(1);
+    wake_for_backlog();
 }
 
 void Engine::take_http(IoLoop& loop) {
     if (http_backlog_.load(std::memory_order_acquire) == 0)
         return;
-    std::lock_guard lock(http_mutex_);
-    while (loop.active.size() + loop.pending.size() + loop.resolving.size() < loop.limit &&
-           !http_queue_.empty()) {
-        loop.pending.push_back(std::move(http_queue_.front()));
-        http_queue_.pop_front();
+    // Leave the queue to a lower loop with room. It was woken for this work or
+    // is about to look for it, and it hands over what it cannot take.
+    for (const auto& lower : loops_) {
+        if (lower.get() == &loop)
+            break;
+        if (lower->occupied.load(std::memory_order_seq_cst) < lower->limit)
+            return;
     }
-    http_backlog_.store(http_queue_.size(), std::memory_order_seq_cst);
+    std::size_t left = 0;
+    {
+        std::lock_guard lock(http_mutex_);
+        while (loop.active.size() + loop.pending.size() + loop.resolving.size() < loop.limit &&
+               !http_queue_.empty()) {
+            loop.pending.push_back(std::move(http_queue_.front()));
+            http_queue_.pop_front();
+        }
+        left = http_queue_.size();
+        http_backlog_.store(left, std::memory_order_seq_cst);
+    }
+    publish_occupied(loop);
+    // This loop is full, so another one takes over.
+    if (left > 0)
+        wake_for_backlog(&loop);
 }
 
 void Engine::recycle_handle(IoLoop& loop, Transfer& transfer) noexcept {
@@ -692,6 +728,8 @@ void Engine::io_loop(IoLoop& loop) {
                 continue;
             curl_multi_remove_handle(multi, easy);
             std::unique_ptr<Transfer> transfer = std::move(node.mapped());
+            // Publish the free slot before the completion can prompt a new batch.
+            publish_occupied(loop);
 
             if (transfer->http_status == 0) {
                 curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &transfer->http_status);
@@ -786,6 +824,13 @@ void Engine::io_loop(IoLoop& loop) {
             finish_transfer(std::move(transfer), failed.status, std::move(failed.detail));
         }
 
+        publish_occupied(loop);
+        // A producer may have chosen this loop from an older count. Now that
+        // it shows as full, another loop has to take the queue.
+        if (loop.occupied.load(std::memory_order_relaxed) >= loop.limit &&
+            http_backlog_.load(std::memory_order_seq_cst) != 0) {
+            wake_for_backlog(&loop);
+        }
         // Skip polling when queued work can start now.
         const bool room = loop.active.size() + loop.resolving.size() < loop.limit;
         int timeout_ms = 50;

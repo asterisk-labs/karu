@@ -95,15 +95,17 @@ count (round trips) with fetched bytes (bandwidth) for the real access pattern.
   Hugging Face transfers go straight to the HTTP queue. Anything that can block
   (profiles, helper processes, metadata services, callbacks) stays off the event loops.
 - `KARU_CONCURRENCY` is split between the loops (64 over 4 gives 16 each). A loop takes
-  transfers from the shared HTTP queue while it has room, so work flows to whichever
-  loop frees capacity first, across every batch of the client. The rest wait in the
-  queue: a batch can describe millions of reads while active network work stays bounded.
+  transfers from the shared HTTP queue while it has room, and leaves them to a lower
+  loop that has room, so loops fill in index order across every batch of the client.
+  The rest wait in the queue: a batch can describe millions of reads while active
+  network work stays bounded.
 - Retries, region corrections and pooled handles stay with the loop that started the
   transfer, so a retry can reuse that loop's connection. TLS sessions are shared by all
   loops.
-- Producers wake idle loops, preferring the lowest index to encourage connection
-  reuse. File and credential queues wake only their own workers. Freeing a completed
-  batch requires no worker notifications.
+- A producer wakes the lowest loop with a free slot, and a loop that fills up wakes the
+  next one while work is left. Serial batches smaller than one loop's share therefore
+  return to the same loop and its warm connections. File and credential queues wake
+  only their own workers. Freeing a completed batch requires no worker notifications.
 - Each batch has its own completion queue. `karu_batch_next` wakes when a completion
   arrives, when the batch is fully drained, or when it is cancelled.
 - Cancellation (`karu_batch_free`) removes queued transfers of that batch, asks every

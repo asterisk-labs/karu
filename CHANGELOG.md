@@ -24,6 +24,8 @@ Notable user-visible changes are recorded here.
   `KARU_ERR_CONFIG`.
 - A credential helper no longer inherits the output pipe of a helper started by
   another thread, which delayed that result until both had exited.
+- I/O threads fill in index order. Any thread could take a batch smaller than its
+  share, so serial batches often reconnected on a thread without open connections.
 
 ## [0.4.0] - 2026-09-27
 

@@ -788,6 +788,46 @@ int main(int argc, char** argv) {
         check_bytes(second_stats, 100, "resumed stats contents");
     }
 
+    // Serial batches smaller than one I/O loop return to the loop that holds
+    // their connections, so only the first batch opens any.
+    {
+        karu_config* serial_config = nullptr;
+        karu_client* serial_client = nullptr;
+        check(karu_config_create_empty(&serial_config) == KARU_OK, "create serial config");
+        check(karu_config_set_option(serial_config, "KARU_COALESCE_GAP", "0") == KARU_OK,
+              "keep serial reads separate");
+        check(karu_client_create(serial_config, &serial_client) == KARU_OK, "create serial client");
+        karu_config_free(serial_config);
+        karu_locator* serial_object = nullptr;
+        check(karu_resolve((base + "/object").c_str(), &serial_object) == KARU_OK,
+              "resolve serial object");
+        std::array<std::array<unsigned char, 64>, 4> serial_data{};
+        std::array<karu_req, 4> serial_reads{};
+        for (std::size_t index = 0; index < serial_reads.size(); ++index) {
+            karu_req& read = serial_reads[index];
+            read.locator = serial_object;
+            read.offset = index * 1000;
+            read.length = serial_data[index].size();
+            read.buffer = serial_data[index].data();
+        }
+        std::uint64_t opened = 0;
+        for (int round = 0; round < 40; ++round) {
+            karu_batch* serial_batch = nullptr;
+            check(karu_client_submit(serial_client, serial_reads.data(), serial_reads.size(),
+                                     &serial_batch) == KARU_OK,
+                  "submit serial batch");
+            check(drain_success(serial_batch, "serial batch completion") == 4,
+                  "serial batch completes");
+            karu_batch_stats stats = KARU_BATCH_STATS_INIT;
+            check(karu_batch_get_stats(serial_batch, &stats) == KARU_OK, "read serial stats");
+            opened += stats.new_connections;
+            karu_batch_free(serial_batch);
+        }
+        check(opened == 4, "serial batches reuse the connections of the first one");
+        karu_locator_free(serial_object);
+        karu_client_free(serial_client);
+    }
+
     // A refused connection stops after three attempts even when the client
     // allows eight attempts for other transient failures.
     {
