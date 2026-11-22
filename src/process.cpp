@@ -97,25 +97,23 @@ void terminate_process(pid_t child, int& status) noexcept {
     wait_for_child(child, status);
 }
 
-// Close-on-exec keeps a helper started by another thread from inheriting the
-// write end, which would hold this pipe open until that helper exits.
+// Open a pipe above stderr with both ends close-on-exec.
 int open_pipe(int descriptors[2]) noexcept {
-#ifdef __linux__
-    if (::pipe2(descriptors, O_CLOEXEC) != 0)
+#ifdef __APPLE__
+    if (::pipe(descriptors) != 0)
         return -1;
 #else
-    if (::pipe(descriptors) != 0)
+    if (::pipe2(descriptors, O_CLOEXEC) != 0)
         return -1;
 #endif
     for (int index = 0; index < 2; ++index) {
-        // dup2 of standard output onto itself would keep the flag.
-        const bool inherit = descriptors[index] == STDOUT_FILENO;
-        const int flags = ::fcntl(descriptors[index], F_GETFD, 0);
-        if (flags < 0 || ::fcntl(descriptors[index], F_SETFD,
-                                 inherit ? flags & ~FD_CLOEXEC : flags | FD_CLOEXEC) < 0) {
-            const int error = errno;
-            ::close(descriptors[0]);
-            ::close(descriptors[1]);
+        // An end on a standard descriptor would collide with the child's stdout.
+        const int moved = ::fcntl(descriptors[index], F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+        const int error = errno;
+        ::close(descriptors[index]);
+        descriptors[index] = moved;
+        if (moved < 0) {
+            ::close(descriptors[1 - index]);
             errno = error;
             return -1;
         }
@@ -141,9 +139,18 @@ std::error_code setup_spawn(posix_spawn_file_actions_t& actions, posix_spawnattr
     };
     add_action(posix_spawn_file_actions_adddup2(&actions, write_descriptor, STDOUT_FILENO));
     add_action(posix_spawn_file_actions_addclose(&actions, read_descriptor));
-    if (write_descriptor != STDOUT_FILENO)
-        add_action(posix_spawn_file_actions_addclose(&actions, write_descriptor));
-    add_action(posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP));
+    add_action(posix_spawn_file_actions_addclose(&actions, write_descriptor));
+    short flags = POSIX_SPAWN_SETPGROUP;
+#ifdef __APPLE__
+    // Without pipe2 another thread's pipe can be inheritable for a moment, so
+    // the child takes only the standard descriptors.
+    flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
+    for (const int descriptor : {STDIN_FILENO, STDERR_FILENO}) {
+        if (::fcntl(descriptor, F_GETFD, 0) >= 0)
+            add_action(posix_spawn_file_actions_addinherit_np(&actions, descriptor));
+    }
+#endif
+    add_action(posix_spawnattr_setflags(&attributes, flags));
     add_action(posix_spawnattr_setpgroup(&attributes, 0));
 
     if (status != 0) {

@@ -20,7 +20,9 @@ Notable user-visible changes are recorded here.
 - Reuse a bucket's reported S3 region across reads and size probes on one client.
   Without `AWS_REGION`, later batches could repeat a request to the wrong region.
 - Ignore malformed S3 response regions instead of returning `KARU_ERR_CONFIG`.
-- Keep credential helper pipes from being inherited by other helpers on Linux.
+- Keep credential helper pipes from being inherited by other helpers. On macOS a
+  helper now inherits only stdin and stderr.
+- Run credential helpers correctly when the process has stdout closed.
 - Assign HTTP transfers to I/O threads in index order so serial batches can reuse
   open connections.
 

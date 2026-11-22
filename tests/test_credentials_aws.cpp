@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <expected>
@@ -15,6 +16,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace karu::test {
 namespace {
@@ -289,6 +294,18 @@ void credential_process_cases() {
                        "ap-south-1");
     if (helped)
         OK(helped->expires_at > static_cast<std::int64_t>(std::time(nullptr)));
+
+#ifndef _WIN32
+    // With stdout closed the pipe takes descriptor 1, which the helper still needs.
+    std::fflush(stdout);
+    const int saved_stdout = ::dup(STDOUT_FILENO);
+    ::close(STDOUT_FILENO);
+    auto without_stdout = load(helper);
+    ::dup2(saved_stdout, STDOUT_FILENO);
+    ::close(saved_stdout);
+    expect_credentials(__LINE__, without_stdout, "AKIAHELPER", "helper-secret", "helper-token",
+                       "ap-south-1");
+#endif
 
     const std::string incomplete_config = tree.write(
         "incomplete-config",
