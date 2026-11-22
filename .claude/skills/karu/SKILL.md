@@ -19,7 +19,7 @@ caches object data. It may copy a complete object to a caller-named local file. 
 layer such as rumi decides which ranges matter and decodes what comes back.
 
 This skill describes the current source tree (C API version 1). The latest released
-version recorded in `VERSION` is **karu 0.4.0**. When working from another checkout,
+version recorded in `VERSION` is **karu 0.5.0**. When working from another checkout,
 trust its source, `CHANGELOG.md` and `CONFIGURATION.md` over this file.
 
 ## Mental model
@@ -140,7 +140,7 @@ rebase offsets to zero and reject reads that leave the window.
 ## Reference map
 
 Read only the reference relevant to the current task. Each one names its source files
-in the repository and is scoped to karu 0.4.0.
+in the repository and is scoped to karu 0.5.0.
 
 | Task | Read |
 | --- | --- |

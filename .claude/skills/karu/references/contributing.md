@@ -252,8 +252,8 @@ tests/emulators/down.sh
   archives (`karu-<version>-<platform>.tar.gz` or `.zip`), published with `SHA256SUMS`
   as a GitHub release with generated notes.
 - Before tagging: bump `VERSION`, move `Unreleased` into a dated section with a compare
-  link, update the version label in the `docs/*.html` headers, and update the version line
-  in this skill's `SKILL.md` (the `karu_agent_skill` test fails until it matches).
+  link, and update the version lines in this skill (the `karu_agent_skill` test fails
+  until they match).
 
 Security: report privately through GitHub security advisories
 (`https://github.com/asterisk-labs/karu/security/advisories/new`). Replace credentials,
