@@ -1,14 +1,19 @@
-<p align="center">
-  <img src="docs/brand/assets/svg/logo-horizontal-animated.svg" alt="karu" width="420">
-</p>
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/assets/svg/karu-banner-dark.svg">
+    <img src="docs/brand/assets/svg/karu-banner-light.svg" alt="karu" width="720">
+  </picture>
+  <p>
+    <a href="https://github.com/asterisk-labs/karu/actions/workflows/ci.yml"><img src="https://github.com/asterisk-labs/karu/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"/></a>
+    <a href="https://codecov.io/gh/asterisk-labs/karu"><img src="https://codecov.io/gh/asterisk-labs/karu/graph/badge.svg?branch=main" alt="Coverage"/></a>
+    <a href="https://github.com/asterisk-labs/karu/releases"><img src="https://img.shields.io/github/v/release/asterisk-labs/karu?color=4E04EB&style=flat-square" alt="Release"/></a>
+    <img src="https://img.shields.io/badge/C%2B%2B-23-4E04EB?style=flat-square" alt="C++23"/>
+    <a href="#license"><img src="https://img.shields.io/badge/license-MIT-2b8a3e?style=flat-square" alt="MIT license"/></a>
+  </p>
+  <p><i>karu is the Quechua word for far.</i></p>
+</div>
 
-*karu is the Quechua word for far.*
-
-[![CI](https://github.com/asterisk-labs/karu/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/asterisk-labs/karu/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/asterisk-labs/karu/graph/badge.svg?branch=main)](https://codecov.io/gh/asterisk-labs/karu)
-[![Release](https://img.shields.io/github/v/release/asterisk-labs/karu?color=4E04EB)](https://github.com/asterisk-labs/karu/releases)
-![C++23](https://img.shields.io/badge/C%2B%2B-23-4E04EB.svg)
-[![MIT license](https://img.shields.io/badge/license-MIT-2b8a3e.svg)](#license)
+---
 
 Batched byte-range reads from local files, HTTP, S3, GCS, Azure, Hugging Face and
 [Source Cooperative](https://source.coop).
