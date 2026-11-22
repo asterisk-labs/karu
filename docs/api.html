@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="description" content="The Karu C and C++ API, function by function.">
+<title>Karu · API</title>
+<link rel="icon" href="assets/svg/karu-mark-color.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=League+Spartan:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/reading.css?v=4">
+<link rel="stylesheet" href="assets/css/config.css?v=1">
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <a class="lockup" href="index.html" aria-label="Karu home">
+      <img class="marksvg" src="assets/svg/karu-mark.svg" alt="">
+      <span class="wm-sm">karu</span>
+    </a>
+
+    <div class="offsite" aria-label="Project links">
+      <a href="https://github.com/asterisk-labs/karu" title="GitHub" aria-label="Karu on GitHub" rel="noopener noreferrer">
+        <svg class="github" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"></path></svg>
+      </a>
+      <a class="rumi" href="https://asterisk.coop/rumi/" title="Rumi" aria-label="Rumi, the raster format that reads through Karu" rel="noopener noreferrer">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 1.8h5v2.7h-5zM3.7 5.2h8.6v2.7H3.7zM2.6 8.6h10.8v2.7H2.6zM1.6 12h12.8v2.7H1.6z"></path></svg>
+        <img class="mark-color" src="assets/svg/rumi-mark.svg" alt="" width="16" height="16">
+      </a>
+      <a class="asterisk" href="https://asterisk.coop" title="asterisk labs" aria-label="asterisk labs" rel="noopener noreferrer">
+        <img class="mark-mono" src="assets/svg/asterisk-mark-black.svg" alt="" width="16" height="18">
+        <img class="mark-color" src="assets/svg/asterisk-mark-color.svg" alt="" width="16" height="18">
+      </a>
+    </div>
+
+    <nav class="nav" aria-label="Sections">
+      <a href="how-karu-reads.html">How Karu reads</a>
+      <a href="configuration.html">Configuration</a>
+      <a href="api.html" class="here">API</a>
+      <a href="deck/index.html">Deck</a>
+    </nav>
+  </header>
+
+  <main class="doc">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">Docs</p>
+      <ol class="toc-pages">
+        <li><a href="how-karu-reads.html">How Karu reads</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="api.html" class="here" aria-current="page">API</a></li>
+      </ol>
+    </nav>
+
+    <article class="content">
+      <h1 id="api-reference">API reference</h1>
+      <ul class="facts">
+        <li>Every public function and type in the C and C++ headers, with the rules it follows.</li>
+      </ul>
+      <aside class="series" aria-label="Section">
+        <p class="series-title">Docs, in 3 pages</p>
+        <ol>
+          <li><a href="how-karu-reads.html">How Karu reads</a></li>
+          <li><a href="configuration.html">Configuration</a></li>
+          <li class="here" aria-current="page">API</li>
+        </ol>
+      </aside>
+
+      <p class="lede">Karu has a C interface in <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h"><code>karu.h</code></a> and a header-only C++23 layer in <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp"><code>karu.hpp</code></a>. Both reach the same engine. This page describes the public functions and types in the order a program uses them, and states the rules each one follows.</p>
+
+      <h2 class="part" id="start">A complete program</h2>
+      <p class="section-intro">A program builds a configuration, freezes it into a client, resolves an object, submits reads and drains their completions. The example reads two ranges of one object and reports any failure.</p>
+<pre><code class="language-c">#include &lt;karu/karu.h&gt;
+#include &lt;stdio.h&gt;
+
+int main(void) {
+    karu_config* config = NULL;
+    karu_client* client = NULL;
+    karu_locator* object = NULL;
+    karu_batch* batch = NULL;
+    static unsigned char head[4096], tile[65536];
+    int failed = 1;
+
+    if (karu_config_create(&amp;config) != KARU_OK ||
+        karu_client_create(config, &amp;client) != KARU_OK ||
+        karu_resolve("s3://bucket/scene.tif", &amp;object) != KARU_OK) {
+        fprintf(stderr, "setup failed: %s\n", karu_last_error());
+        goto cleanup;
+    }
+
+    karu_req reads[] = {
+        {.locator = object, .offset = 0, .length = sizeof head, .buffer = head, .tag = head},
+        {.locator = object, .offset = 1048576, .length = sizeof tile, .buffer = tile, .tag = tile},
+    };
+    if (karu_client_submit(client, reads, 2, &amp;batch) != KARU_OK) {
+        fprintf(stderr, "submit failed: %s\n", karu_last_error());
+        goto cleanup;
+    }
+
+    failed = 0;
+    karu_done done;
+    karu_status step;
+    while ((step = karu_batch_next(batch, &amp;done, -1)) == KARU_OK) {
+        if (done.status != KARU_OK) {
+            fprintf(stderr, "%s: %s\n", karu_status_string(done.status), karu_last_error());
+            failed = 1;
+        }
+    }
+    if (step != KARU_END) {
+        fprintf(stderr, "next failed: %s\n", karu_last_error());
+        failed = 1;
+    }
+
+cleanup:
+    karu_batch_free(batch);
+    karu_locator_free(object);
+    karu_client_free(client);
+    karu_config_free(config);
+    return failed;
+}</code></pre>
+      <p>The completions arrive in the order the reads finish, and the tag identifies each one. The loop ends with <code>KARU_END</code> once every completion has been returned. <strong>Destination buffers must stay valid until <code>karu_batch_free</code> returns.</strong></p>
+
+      <h2 class="part" id="handles">Handles and ownership</h2>
+      <p class="section-intro">Every Karu object is an opaque handle with one function that creates it and one that releases it. Each release function accepts <code>NULL</code>.</p>
+      <table class="spec"><thead><tr><th>Handle</th><th>Created by</th><th>Released by</th><th>Sharing</th></tr></thead><tbody>
+        <tr><td><code>karu_config*</code></td><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L65"><code>karu_config_create</code></a>, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L68"><code>karu_config_create_empty</code></a></td><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L69"><code>karu_config_free</code></a></td><td>mutable, needs external locking</td></tr>
+        <tr><td><code>karu_client*</code></td><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L118"><code>karu_client_create</code></a></td><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L119"><code>karu_client_free</code></a></td><td>shared across threads</td></tr>
+        <tr><td><code>karu_locator*</code></td><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L135"><code>karu_resolve</code></a></td><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L136"><code>karu_locator_free</code></a></td><td>immutable</td></tr>
+        <tr><td><code>karu_batch*</code></td><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L289"><code>karu_client_submit</code></a>, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L293"><code>karu_client_submit_with</code></a></td><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L303"><code>karu_batch_free</code></a></td><td>drained by any number of threads</td></tr>
+        <tr><td>a buffer Karu allocated</td><td>a request with <code>buffer = NULL</code></td><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L55"><code>karu_free</code></a></td><td>owned by the caller once returned</td></tr>
+      </tbody></table>
+      <p>A client copies its configuration, and a submitted batch copies its requests, locators and ETags and keeps the engine alive. The configuration, the client and the locators can therefore be freed while a batch is still draining. Only the destination buffers have to outlive the batch. <code>karu_batch_free</code> releases any buffer Karu allocated that was never drained, and a drained one belongs to the caller whatever its status.</p>
+      <p>Creating functions write <code>NULL</code> to <code>*out</code> only after their pointer arguments pass the null check, so handles should be initialized to <code>NULL</code> before the call.</p>
+
+      <h2 class="part" id="config">Configuration and clients</h2>
+      <p class="section-intro">A configuration is a mutable builder. A client freezes a validated copy of it and owns the engine that serves every read.</p>
+      <table class="spec"><thead><tr><th>Function</th><th>Behaviour</th></tr></thead><tbody>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L65"><code>karu_config_create</code></a></td><td>Creates a builder that starts from the environment and enables default credential discovery.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L68"><code>karu_config_create_empty</code></a></td><td>Creates a builder that starts from nothing, for hermetic clients and tests.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L72"><code>karu_config_set_option</code></a></td><td>Sets an option for the whole client, or removes it when the value is <code>NULL</code>. An unknown name fails with <code>KARU_ERR_CONFIG</code>.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L78"><code>karu_config_set_path_option</code></a></td><td>Sets or removes an option for one path prefix. <code>KARU_*</code> options are refused with <code>KARU_ERR_CONFIG</code>.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L111"><code>karu_config_set_credentials_provider</code></a></td><td>Installs one credential callback per provider kind. Passing <code>NULL</code> for the provider, the user data and the release function, a <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L108"><code>karu_credentials_provider_free</code></a>, removes it. User data or a release function without a provider fails with <code>KARU_ERR_CONFIG</code>.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L118"><code>karu_client_create</code></a></td><td>Checks the syntax and range of every option and freezes a copy, and the builder may be freed afterwards. A malformed value fails here with <code>KARU_ERR_CONFIG</code>. Endpoints, headers and other values that depend on the request are checked when a request is built, and fail that read with <code>KARU_ERR_CONFIG</code>.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L123"><code>karu_client_matches_config</code></a></td><td>Reports whether a builder would produce the client's frozen configuration, without any I/O. Callbacks compare by registration, so installing the same function again does not match.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L126"><code>karu_client_concurrency</code></a>, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L127"><code>karu_client_coalesce_gap</code></a>, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L128"><code>karu_client_max_attempts</code></a></td><td>Return frozen values, or 0 for a <code>NULL</code> client.</td></tr>
+      </tbody></table>
+      <p><strong>A client should be created once and shared.</strong> Its threads, connection pools, credential cache and learned S3 regions start on the first call that reads, whether a submit, a fetch, a probe or a download, and serve every later read. The <a href="configuration.html">configuration reference</a> lists the options, what each builder reads and which value a request uses when an option is set at several levels.</p>
+
+      <h2 class="part" id="locators">Locators</h2>
+      <p class="section-intro">A locator names one object and, optionally, a window inside it. <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L135"><code>karu_resolve</code></a> only parses the string. It touches neither the network nor credentials.</p>
+      <table class="spec"><thead><tr><th>Backend</th><th>URI</th><th>Path form</th></tr></thead><tbody>
+        <tr><td>Local file</td><td><code>/data/a.bin</code>, <code>data/a.bin</code>, <code>file:///data/a.bin</code></td><td></td></tr>
+        <tr><td>HTTP</td><td><code>https://host/x</code></td><td><code>/vsicurl/https://host/x</code></td></tr>
+        <tr><td>S3 and compatible stores</td><td><code>s3://bucket/key</code></td><td><code>/vsis3/bucket/key</code></td></tr>
+        <tr><td>Google Cloud Storage</td><td><code>gs://bucket/key</code></td><td><code>/vsigs/bucket/key</code></td></tr>
+        <tr><td>Azure Blob</td><td><code>az://container/blob</code></td><td><code>/vsiaz/container/blob</code></td></tr>
+        <tr><td>Azure Data Lake Gen2</td><td><code>abfs://container/path</code></td><td><code>/vsiadls/container/path</code></td></tr>
+        <tr><td>Hugging Face</td><td><code>hf://owner/name/path</code>, or with <code>datasets/</code> or <code>spaces/</code> after <code>hf://</code>, and an optional <code>@revision</code> after the name that defaults to <code>main</code></td><td><code>/vsihf/...</code></td></tr>
+        <tr><td>Source Cooperative</td><td><code>source://account/product/key</code></td><td><code>/vsisource/account/product/key</code></td></tr>
+      </tbody></table>
+      <p>A window limits a locator to part of an object, written as <code>/vsisubfile/OFFSET_LENGTH,&lt;path&gt;</code> or as <code>#bytes=FIRST-LAST</code> after a URI. Without a length or a last byte, the window runs to the end of the object. Read offsets are then relative to the window. Archives such as <code>/vsizip/</code> are refused with <code>KARU_ERR_UNSUPPORTED</code>.</p>
+      <table class="spec"><thead><tr><th>Function</th><th>Returns</th></tr></thead><tbody>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L135"><code>karu_resolve</code></a></td><td>A new locator, or <code>KARU_ERR_URI</code> or <code>KARU_ERR_UNSUPPORTED</code> with a message.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L137"><code>karu_locator_uri</code></a></td><td>The canonical identity, for example <code>/vsis3/bucket/key</code> for <code>s3://bucket/key</code>.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L139"><code>karu_locator_is_remote</code></a></td><td>Nonzero for everything except local files.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L140"><code>karu_locator_window_offset</code></a>, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L141"><code>karu_locator_window_length</code></a></td><td>The window, with a length of <code>KARU_TO_END</code> when it is unbounded.</td></tr>
+      </tbody></table>
+      <p><strong>Configuration rules, credential scopes and merging are all keyed on the canonical identity</strong>, so <code>s3://b/k</code> and <code>/vsis3/b/k</code> are the same object. The identity of an HTTP locator is the URL itself, without <code>/vsicurl/</code>, and a local path keeps its spelling, so <code>data/a.bin</code> and <code>/abs/data/a.bin</code> are different identities. A window is not part of the identity, and reads through different windows of one object can share a request.</p>
+
+      <h2 class="part" id="reads">Requests, batches and completions</h2>
+      <p class="section-intro">A batch is an array of <code>karu_req</code>. Karu returns one <code>karu_done</code> per request, in the order the reads finish.</p>
+<pre><code class="language-c">typedef struct {
+    const karu_locator* locator;
+    uint64_t offset;         // relative to the locator's window
+    uint64_t length;         // nonzero and finite
+    void* buffer;            // length bytes, or NULL to let Karu allocate
+    void* tag;               // returned unchanged
+    const char* if_match;    // optional ETag, copied at submit
+} karu_req;
+
+typedef struct {
+    void* tag;
+    karu_status status;
+    uint64_t got;            // valid prefix of buffer
+    void* buffer;            // the request's buffer, or the one Karu allocated
+} karu_done;</code></pre>
+      <table class="spec"><thead><tr><th>Function</th><th>Behaviour</th></tr></thead><tbody>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L289"><code>karu_client_submit</code></a></td><td>Copies the requests and returns a batch at once. A batch of zero requests reports <code>KARU_END</code> immediately.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L293"><code>karu_client_submit_with</code></a></td><td>The same, with planner settings for this batch only.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L299"><code>karu_batch_next</code></a></td><td>Returns <code>KARU_OK</code> with one completion, <code>KARU_END</code> when every completion has been returned, or <code>KARU_TIMEOUT</code> when nothing is ready. A timeout of -1 waits, 0 polls and a positive value waits that many milliseconds.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L303"><code>karu_batch_free</code></a></td><td>Cancels pending work, including requests already on the network, and waits until no worker still touches the buffers.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L332"><code>karu_batch_get_stats</code></a></td><td>Fills a <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L306"><code>karu_batch_stats</code></a> with transfer, byte, retry, connection and refresh counters. The fields are <code>transfers</code>, <code>transfers_finished</code>, <code>requested_bytes</code>, <code>received_bytes</code>, <code>retries</code>, <code>throttled</code>, <code>new_connections</code>, <code>resumed</code> and <code>credential_refreshes</code>. They can be read while the batch runs, though not while <code>karu_batch_free</code> runs, and they are not an atomic snapshot.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L335"><code>karu_client_fetch</code></a>, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L336"><code>karu_client_fetch_with</code></a></td><td>Submit, drain and free in one blocking call. Every request needs a buffer. The call returns the status of the first failure, and after a failure every destination is unspecified.</td></tr>
+      </tbody></table>
+      <p>A request without a locator, with a zero or unbounded length, or with a line break in <code>if_match</code> fails the whole submit with <code>KARU_ERR_INVALID</code>. Problems that depend on the object do not. A read that leaves its window, or an ETag on a local file, comes back as a failed completion while the rest of the batch continues. Overlapping and duplicate requests are valid, and each destination receives its own copy.</p>
+      <p><code>got</code> equals the requested length on success. It is normally 0 on failure, except that <code>KARU_ERR_RANGE</code> reports the valid prefix when the object ends inside the request. Bytes past <code>got</code> are unspecified. Several threads may call <code>karu_batch_next</code> on one batch, and each completion goes to exactly one of them. <strong><code>karu_batch_free</code> must not run while another thread is inside <code>karu_batch_next</code> on the same batch.</strong></p>
+      <h3>Planner settings for one batch</h3>
+<pre><code class="language-c">karu_submit_options options = KARU_SUBMIT_OPTIONS_INIT;   // every field KARU_INHERIT
+options.coalesce_gap = 0;                                // no merging in this batch
+karu_status status = karu_client_fetch_with(client, reads, count, &amp;options);</code></pre>
+      <table class="spec"><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody>
+        <tr><td><code>struct_size</code></td><td><code>sizeof(karu_submit_options)</code>, which must at least cover <code>coalesce_gap</code></td></tr>
+        <tr><td><code>coalesce_gap</code></td><td>largest hole merged, in bytes, where 0 disables merging</td></tr>
+        <tr><td><code>coalesce_limit</code></td><td>largest merged request, at least 1</td></tr>
+        <tr><td><code>coalesce_parts</code></td><td>most reads in one request, at least 1</td></tr>
+        <tr><td><code>coalesce_amplification</code></td><td>most bytes fetched per requested byte, at least 1</td></tr>
+      </tbody></table>
+      <p>A field left at <code>KARU_INHERIT</code> keeps the client's value. Concurrency, retries and timeouts belong to the client and cannot change per batch. <a href="how-karu-reads.html#plan">How Karu reads</a> explains how these limits shape a plan.</p>
+
+      <h2 class="part" id="objects">Sizes, versions and downloads</h2>
+      <p class="section-intro">Four blocking calls work on a whole object rather than on a batch of ranges.</p>
+      <table class="spec"><thead><tr><th>Function</th><th>Behaviour</th></tr></thead><tbody>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L144"><code>karu_client_size</code></a></td><td>The size visible through the locator. A bounded window answers without I/O, a local file asks the file system, and a remote object costs one <code>GET</code> of byte 0. The result is never cached.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L166"><code>karu_client_stat</code></a></td><td>The size and the strong ETag in a <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L149"><code>karu_object_info</code></a>. Unlike <code>size</code>, it probes a bounded remote window too, to obtain the ETag.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L176"><code>karu_client_read_ends</code></a></td><td>The first and last bytes of an object together, with the size and ETag. Each buffer receives the smaller of its length and the size, so on a short object the two overlap. Sizes or ETags that disagree fail with <code>KARU_ERR_PRECONDITION</code>.</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L238"><code>karu_client_download</code></a></td><td>Copies the object into a local file. A first read of up to 1 MiB learns the size and the ETag, and the rest follows in parallel ranges, 8 MiB each and eight at once by default. When the source returns a strong ETag, every range is pinned to it. The destination appears only after every range succeeds.</td></tr>
+      </tbody></table>
+      <p>The ETag in <code>karu_object_info</code> keeps its quotes and can be passed straight to <code>if_match</code>. It is empty for local files and for missing, weak, invalid or overlong tags. Structures with a <code>struct_size</code> field are initialized with their macros, <code>KARU_OBJECT_INFO_INIT</code>, <code>KARU_DOWNLOAD_OPTIONS_INIT</code>, <code>KARU_DOWNLOAD_RESULT_INIT</code>, <code>KARU_SUBMIT_OPTIONS_INIT</code> and <code>KARU_BATCH_STATS_INIT</code>, so a program compiled against an older header keeps working.</p>
+      <pre><code class="language-c">karu_download_options options = KARU_DOWNLOAD_OPTIONS_INIT;   // 8 MiB chunks, 8 in parallel
+options.overwrite = 1;                                       // replace an existing file
+karu_download_result result = KARU_DOWNLOAD_RESULT_INIT;
+karu_status status = karu_client_download(client, object, "scene.tif", &amp;options, &amp;result);</code></pre>
+      <p><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L191"><code>karu_download_options</code></a> sets <code>chunk_size</code>, <code>parallelism</code>, <code>overwrite</code> and a progress callback. <code>overwrite</code> must be 0 or 1, and without it an existing destination fails with <code>KARU_ERR_IO</code>. <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L212"><code>karu_download_result</code></a> reports the size, the bytes downloaded and received, retries, throttled responses, new connections, resumes, credential refreshes and the ETag used. Either pointer may be <code>NULL</code>. Servers used for downloads of more than one chunk must honour <code>Range</code> beyond <code>KARU_RANGE_FALLBACK_LIMIT</code>.</p>
+      <p>The download progress callback, a <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L187"><code>karu_download_progress</code></a>, runs on the calling thread after bytes reach the temporary file, and returning zero cancels the download with <code>KARU_ERR_CANCELLED</code>. On failure or cancellation the temporary file is removed.</p>
+
+      <h2 class="part" id="credentials">Credential callbacks</h2>
+      <p class="section-intro">A callback replaces Karu's own credential discovery for one provider kind, unless the matching <code>*_NO_SIGN_REQUEST</code> option is set. It receives the canonical path and fills a <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L92"><code>karu_credentials</code></a>.</p>
+<pre><code class="language-c">typedef karu_status (*karu_credentials_provider)(void* user_data, karu_credentials_kind kind,
+                                                 const char* canonical_path,
+                                                 karu_credentials* out);</code></pre>
+      <table class="spec"><thead><tr><th>Kind</th><th>Fields Karu uses</th></tr></thead><tbody>
+        <tr><td><code>KARU_CREDENTIALS_AWS</code></td><td><code>access_key_id</code>, <code>secret_access_key</code> and optionally <code>session_token</code></td></tr>
+        <tr><td><code>KARU_CREDENTIALS_SOURCE</code></td><td>the same fields as AWS</td></tr>
+        <tr><td><code>KARU_CREDENTIALS_GCS</code></td><td><code>bearer_token</code>, or <code>access_key_id</code> and <code>secret_access_key</code> as HMAC keys</td></tr>
+        <tr><td><code>KARU_CREDENTIALS_AZURE</code></td><td><code>sas_token</code>, <code>bearer_token</code>, or <code>account_name</code> with a base64 <code>secret_access_key</code>, where an empty field falls back to the <code>AZURE_STORAGE_*</code> options</td></tr>
+      </tbody></table>
+      <p>For submitted reads and downloads the callback runs on Karu's credential workers, possibly for several paths at once. For <code>size</code> and <code>stat</code> it runs on the calling thread, and <code>read_ends</code> may call it from a helper thread. <strong>It must be thread safe, must not call back into the same client, and must bound its own I/O</strong>, because Karu cannot interrupt it. The returned strings must outlive the callback, because Karu copies them right after it returns. The release function runs once no builder, client or batch still holds the callback.</p>
+      <p>The callback returns <code>KARU_OK</code> or a failure. A negative status passes through, and any other value becomes <code>KARU_ERR_CREDENTIALS</code>. <code>expires_at</code> is Unix time in seconds, or 0 for credentials that do not expire. Credentials that have already expired are rejected. <code>cache_prefix</code> is optional, and when it is set it must contain the requested path, or the lookup fails with <code>KARU_ERR_CREDENTIALS</code>. How Karu reuses and refreshes the answer is described in the <a href="configuration.html#custom-providers">configuration reference</a>.</p>
+
+      <h2 class="part" id="status">Statuses and error text</h2>
+      <p class="section-intro">Every fallible call returns a <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L30"><code>karu_status</code></a>. Success is 0, and failures are negative except <code>KARU_TIMEOUT</code>.</p>
+      <table class="spec"><thead><tr><th>Status</th><th>Value</th><th>Typical cause</th></tr></thead><tbody>
+        <tr><td><code>KARU_OK</code></td><td>0</td><td>success</td></tr>
+        <tr><td><code>KARU_END</code></td><td>1</td><td>every completion of a batch has been returned</td></tr>
+        <tr><td><code>KARU_TIMEOUT</code></td><td>2</td><td>nothing ready in <code>karu_batch_next</code>, or a read that ran out of <code>KARU_REQUEST_TIMEOUT</code></td></tr>
+        <tr><td><code>KARU_ERR_URI</code></td><td>-1</td><td>a malformed path or URI</td></tr>
+        <tr><td><code>KARU_ERR_UNSUPPORTED</code></td><td>-2</td><td>an archive handler such as <code>/vsizip/</code>, or an ETag on a local file</td></tr>
+        <tr><td><code>KARU_ERR_INVALID</code></td><td>-3</td><td>a null argument, an empty or unbounded request, bad submit or download options, a batch used after <code>fork</code></td></tr>
+        <tr><td><code>KARU_ERR_NOMEM</code></td><td>-4</td><td>an allocation failed</td></tr>
+        <tr><td><code>KARU_ERR_IO</code></td><td>-5</td><td>a local file could not be opened or read, or a download could not write its output</td></tr>
+        <tr><td><code>KARU_ERR_NETWORK</code></td><td>-6</td><td>a DNS, connection or TLS failure, or a truncated body</td></tr>
+        <tr><td><code>KARU_ERR_HTTP</code></td><td>-7</td><td>another HTTP status, a bad <code>Content-Range</code>, an ignored range above the fallback limit, a refused redirect</td></tr>
+        <tr><td><code>KARU_ERR_RANGE</code></td><td>-8</td><td>a read past the end of the object, or outside its window</td></tr>
+        <tr><td><code>KARU_ERR_AUTH</code></td><td>-9</td><td>HTTP 401 or 403</td></tr>
+        <tr><td><code>KARU_ERR_CANCELLED</code></td><td>-10</td><td>a download whose progress callback returned zero</td></tr>
+        <tr><td><code>KARU_ERR_CONFIG</code></td><td>-11</td><td>an unknown option, an invalid value or a bad endpoint</td></tr>
+        <tr><td><code>KARU_ERR_CREDENTIALS</code></td><td>-12</td><td>credentials missing or a lookup failed</td></tr>
+        <tr><td><code>KARU_ERR_NOT_FOUND</code></td><td>-13</td><td>HTTP 404</td></tr>
+        <tr><td><code>KARU_ERR_PRECONDITION</code></td><td>-14</td><td>the object no longer matches <code>if_match</code></td></tr>
+      </tbody></table>
+      <p><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L50"><code>karu_status_string</code></a> gives the short name of a status. <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L53"><code>karu_last_error</code></a> gives the message of the last failure on the calling thread, truncated to 511 bytes. In messages about HTTP requests, query strings and user information in the URL are replaced by <code>&lt;redacted&gt;</code>. <strong>Every function that returns a status clears the message on entry</strong>, so it has to be copied before the next call on the same thread. After <code>karu_batch_next</code> returns a failed completion, the message belongs to that completion. <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L54"><code>karu_clear_error</code></a> clears it explicitly.</p>
+
+      <h2 class="part" id="threads">Threads and fork</h2>
+      <p class="section-intro">One client runs one engine, made of the I/O threads, four credential workers and four file workers. They start on first use and stop when the client and all its batches are freed.</p>
+      <p>Every call on a client may come from many threads at once. <code>size</code> and <code>stat</code> run their whole probe on the calling thread, credential lookup included, and <code>read_ends</code> reads the head from a helper thread. Submitted reads and downloads use the workers. System DNS lookups run on a resolver thread that cannot be cancelled and may briefly outlive the engine.</p>
+      <p>A client used in a child process after <code>fork</code> notices the new process, leaves the inherited engine alone and builds a fresh one, so a client may be created before worker processes are forked. <strong>Batches do not cross a fork.</strong> In the child, <code>karu_batch_next</code> and <code>karu_batch_get_stats</code> return <code>KARU_ERR_INVALID</code>, and <code>karu_batch_free</code> leaves the inherited batch allocated until the process exits.</p>
+      <p>Language bindings should release their interpreter lock around every call that can wait, which means <code>karu_batch_next</code> with a nonzero timeout, the fetch, size, stat, read_ends and download calls, and <code>karu_batch_free</code>. Memory owned by the host language can serve as <code>buffer</code> as long as it stays pinned until <code>karu_batch_free</code> returns.</p>
+
+      <h2 class="part" id="cpp">C++</h2>
+      <p class="section-intro"><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp"><code>karu.hpp</code></a> wraps the C interface in move-only classes that release their handles automatically. Every fallible member returns <code>karu::Result&lt;T&gt;</code>, a <code>std::expected</code> whose error carries the status and a copy of the message.</p>
+<pre><code class="language-cpp">#include &lt;karu/karu.hpp&gt;
+#include &lt;iostream&gt;
+
+int main() {
+    auto config = karu::Config::from_environment();
+    if (!config) return 1;
+    auto client = karu::Client::create(*config);
+    auto object = karu::Object::parse("s3://bucket/scene.tif");
+    if (!client || !object) return 1;
+
+    auto head = client-&gt;read(*object, 0, 4096);   // Result&lt;std::vector&lt;std::byte&gt;&gt;
+    if (!head) {
+        std::cerr &lt;&lt; karu_status_string(head.error().status) &lt;&lt; ": " &lt;&lt; head.error().message &lt;&lt; '\n';
+        return 1;
+    }
+}</code></pre>
+      <table class="spec"><thead><tr><th>Class</th><th>Wraps</th><th>Main members</th></tr></thead><tbody>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L30"><code>karu::Config</code></a></td><td><code>karu_config</code></td><td><code>from_environment</code>, <code>empty</code>, <code>set</code>, <code>unset</code>, <code>set_path</code>, <code>unset_path</code>, <code>set_credentials_provider</code>, <code>clear_credentials_provider</code></td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L118"><code>karu::Object</code></a></td><td><code>karu_locator</code></td><td><code>parse</code>, <code>uri</code>, <code>is_remote</code>, <code>window_offset</code>, <code>window_length</code></td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L281"><code>karu::Client</code></a></td><td><code>karu_client</code></td><td><code>create</code>, <code>matches</code>, <code>size</code>, <code>stat</code>, <code>read_ends</code>, <code>download</code>, <code>read</code>, <code>read_into</code>, <code>fetch</code>, <code>submit</code>, <code>concurrency</code>, <code>coalesce_gap</code>, <code>max_attempts</code></td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L223"><code>karu::Batch</code></a></td><td><code>karu_batch</code></td><td><code>next</code>, <code>stats</code></td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L181"><code>karu::Read</code></a></td><td><code>karu_req</code></td><td><code>object</code>, <code>offset</code>, <code>destination</code>, <code>tag</code>, <code>if_match</code></td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L190"><code>karu::SubmitOptions</code></a></td><td><code>karu_submit_options</code></td><td>optional planner overrides, unset ones inherit</td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L213"><code>karu::BatchEvent</code></a></td><td><code>karu_done</code></td><td><code>state</code>, a <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L198"><code>BatchState</code></a>, and <code>tag</code>, <code>status</code>, <code>bytes_read</code>, <code>message</code></td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L19"><code>karu::Error</code></a></td><td><code>karu_status</code> and <code>karu_last_error</code></td><td><code>status</code>, <code>message</code></td></tr>
+        <tr><td><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L154"><code>karu::ObjectInfo</code></a>, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L161"><code>DownloadOptions</code></a>, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L169"><code>DownloadResult</code></a>, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L201"><code>BatchStats</code></a></td><td>the matching C structures</td><td>the same fields, without <code>struct_size</code></td></tr>
+      </tbody></table>
+      <p><code>Config</code>, <code>Object</code> and <code>Client</code> also expose <code>native_handle</code> for mixing with C calls. The C++ layer never lets Karu allocate. A <code>Read</code> takes its length from the size of its destination span, and an empty span fails <code>submit</code> or <code>fetch</code> with <code>KARU_ERR_INVALID</code> without setting <code>karu_last_error</code>. <code>read</code> and <code>read_into</code> with an empty destination succeed without any I/O. <code>Batch::next</code> fails only when the call itself fails. A read that failed arrives as a <code>ready</code> event with its own status and message. Destroying a <code>Batch</code> cancels its work and waits for the workers, so it must not happen while another thread is inside <code>next</code>.</p>
+
+      <h2 class="part" id="build">Versions and linking</h2>
+      <p class="section-intro">Karu builds as a static C++23 library. A C program links against it with a C++ linker, so its project enables both languages.</p>
+<pre><code class="language-cmake">project(reader C CXX)
+find_package(karu CONFIG REQUIRED)
+add_executable(reader reader.c)
+set_target_properties(reader PROPERTIES LINKER_LANGUAGE CXX)
+target_link_libraries(reader PRIVATE karu::karu)</code></pre>
+      <p>The CMake target brings libcurl 7.83 or newer, OpenSSL 3 and the platform thread library with it. <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L26"><code>karu_api_version</code></a> returns <code>KARU_API_VERSION</code>, currently 1, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L27"><code>karu_version_string</code></a> returns the release, and <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L28"><code>karu_http_backend</code></a> returns the libcurl version string. No C++ type or exception crosses the C interface, which keeps bindings for other languages simple.</p>
+
+    </article>
+
+    <nav class="toc onpage" aria-label="On this page">
+      <p class="toc-title">On this page</p>
+      <ol class="toc-sections">
+        <li><a href="#start">A complete program</a></li>
+        <li><a href="#handles">Handles and ownership</a></li>
+        <li><a href="#config">Configuration and clients</a></li>
+        <li><a href="#locators">Locators</a></li>
+        <li><a href="#reads">Requests, batches and completions</a></li>
+        <li><a href="#objects">Sizes, versions and downloads</a></li>
+        <li><a href="#credentials">Credential callbacks</a></li>
+        <li><a href="#status">Statuses and error text</a></li>
+        <li><a href="#threads">Threads and fork</a></li>
+        <li><a href="#cpp">C++</a></li>
+        <li><a href="#build">Versions and linking</a></li>
+      </ol>
+    </nav>
+  </main>
+
+  <footer class="colophon">
+    <span>Made with</span>
+    <span class="heart" role="img" aria-label="love"></span>
+    <span>by</span>
+    <a class="by" href="https://asterisk.coop" rel="noopener noreferrer" aria-label="Asterisk Labs">
+      <img src="assets/svg/asterisk-mark.svg" alt="Asterisk Labs">
+    </a>
+  </footer>
+</div>
+<script src="assets/js/toc.js" defer></script>
+<script src="assets/js/code.js?v=1" defer></script>
+</body>
+</html>
