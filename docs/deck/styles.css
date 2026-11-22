@@ -302,8 +302,9 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; }
 .s05[data-step="1"] .lm-p2 { opacity: .35; }
 .s05 .lm-k { color: var(--ink); font: 600 21px var(--sans); letter-spacing: -.02em; }
 .s05 .lm-k b { margin-left: 6px; color: var(--violet); font: 600 18px var(--mono); letter-spacing: 0; }
-.s05 .lm-rule { margin-top: 5px; color: var(--ink-soft); font-size: 14px; line-height: 1.35; }
-.s05 .lm-say code { display: block; margin-top: 6px; color: var(--faint); font-size: 11px; white-space: nowrap; }
+.s05 .lm-rule { margin-top: 7px; color: var(--ink-soft); font-size: 14px; line-height: 1.35; }
+/* The option is what a caller sets, so it reads right under the value. */
+.s05 .lm-env { display: inline-block; margin-top: 7px; padding: 3px 6px; background: var(--violet-soft); color: var(--violet); font: 500 11.5px var(--mono); white-space: nowrap; }
 .s05 .lm-fig { position: relative; height: 142px; }
 .s05 .lm-fig > span { position: absolute; }
 .s05 .lm-row { left: 0; color: var(--faint); font: 600 11px var(--sans); letter-spacing: .12em; text-transform: uppercase; }
@@ -353,8 +354,9 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; }
 .s06[data-step="1"] .lm-p2 { opacity: .35; }
 .s06 .lm-k { color: var(--ink); font: 600 21px var(--sans); letter-spacing: -.02em; }
 .s06 .lm-k b { margin-left: 6px; color: var(--violet); font: 600 18px var(--mono); letter-spacing: 0; }
-.s06 .lm-rule { margin-top: 5px; color: var(--ink-soft); font-size: 14px; line-height: 1.35; }
-.s06 .lm-say code { display: block; margin-top: 6px; color: var(--faint); font-size: 11px; white-space: nowrap; }
+.s06 .lm-rule { margin-top: 7px; color: var(--ink-soft); font-size: 14px; line-height: 1.35; }
+/* The option is what a caller sets, so it reads right under the value. */
+.s06 .lm-env { display: inline-block; margin-top: 7px; padding: 3px 6px; background: var(--violet-soft); color: var(--violet); font: 500 11.5px var(--mono); white-space: nowrap; }
 .s06 .lm-fig { position: relative; height: 142px; }
 .s06 .lm-fig > span { position: absolute; }
 .s06 .lm-row { left: 0; color: var(--faint); font: 600 11px var(--sans); letter-spacing: .12em; text-transform: uppercase; }
@@ -396,61 +398,84 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; }
   .s06 .lm-rq, .s06 .lm-in { animation-duration: 1ms !important; animation-delay: 0s !important; }
 }
 
-/* 07 Seven backends, one row each, and the request the selected path becomes. */
-.s07 .bk { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 16px; }
-.s07 .bk-table { display: flex; flex-direction: column; }
-/* Header and rows share one grid so the four columns line up without a table. */
-.s07 .bk-head,
-.s07 .bk-row { display: grid; grid-template-columns: 128px 236px 270px 1fr; column-gap: 14px; align-items: center; padding: 0 10px 0 9px; border-left: 3px solid transparent; }
-.s07 .bk-head { height: 22px; border-bottom: 1px solid var(--rule); color: var(--dim); font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
-.s07 .bk-row { width: 100%; height: 27px; margin: 0; border-top: 0; border-right: 0; border-bottom: 1px solid #ececef; background: none; color: inherit; font: inherit; padding-top: 2px; text-align: left; cursor: pointer; transition: background 160ms ease; }
-.s07 .bk-row:hover { background: var(--wash); }
-.s07 .bk-row:focus-visible { outline: 1px solid var(--violet); outline-offset: -1px; }
-.s07 .bk-row[aria-selected="true"] { border-left-color: var(--violet); background: #ece9fd; }
-/* League Spartan sits high beside the mono paths; drop it onto their baseline. */
-.s07 .bk-name,
-.s07 .bk-how { position: relative; top: 1.5px; }
-.s07 .bk-name { color: var(--ink); font: 600 15px var(--sans); letter-spacing: -.015em; white-space: nowrap; }
-.s07 .bk-row[aria-selected="true"] .bk-name { color: var(--violet); }
-.s07 .bk-row code { overflow: hidden; color: var(--dim); font: 11.5px var(--mono); white-space: nowrap; }
-/* The prefix is what picks the backend, so it reads first. */
-.s07 .bk-row code b { color: var(--ink); font-weight: 500; }
-.s07 .bk-row[aria-selected="true"] code b { color: var(--violet); }
-.s07 .bk-how { color: var(--soft); font: 13.5px var(--sans); white-space: nowrap; }
-.s07 .bk-row.is-window { margin-top: 8px; }
-.s07 .bk-row.is-window .bk-name { color: var(--dim); }
-.s07 .bk-row.is-window code { grid-column: 2 / 4; }
+/* 07 One logo per backend; pointing at one shows the request the same read becomes. */
+.s07 .bk { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
+.s07 .bk-logos { display: grid; grid-template-columns: repeat(7, 1fr) 1fr; gap: 8px; }
+.s07 .bk-tile { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 9px; height: 100px; margin: 0; padding: 14px 4px 0; border: 0; border-bottom: 3px solid transparent; background: none; color: var(--faint); font: inherit; cursor: pointer; transition: background 180ms ease, border-color 180ms ease; }
+.s07 .bk-tile.is-window { margin-left: 14px; }
+.s07 .bk-tile.is-window::before { content: ""; position: absolute; left: -15px; top: 18px; bottom: 18px; border-left: 1px dashed var(--rule); }
+.s07 .bk-tile:hover { background: var(--wash); }
+.s07 .bk-tile:focus-visible { outline: 1px solid var(--violet); outline-offset: -1px; }
+.s07 .bk-tile[aria-selected="true"] { border-bottom-color: var(--violet); background: var(--wash); }
+.s07 .bk-icon { flex: none; width: 40px; height: 40px; fill: currentColor; opacity: .55; transition: transform 220ms cubic-bezier(.3, 1.5, .5, 1), opacity 180ms ease, color 180ms ease; }
+.s07 .bk-icon.is-line { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.s07 .bk-icon.is-line .bk-win { fill: currentColor; stroke: none; opacity: .35; }
+.s07 .bk-tile:hover .bk-icon { opacity: .85; transform: translateY(-3px); }
+.s07 .bk-tile[aria-selected="true"] .bk-icon { opacity: 1; transform: translateY(-3px); }
+/* Each mark takes its own colour only when selected; the generic ones take Karu's. */
+.s07 .bk-tile[aria-selected="true"][data-bk="file"],
+.s07 .bk-tile[aria-selected="true"][data-bk="http"],
+.s07 .bk-tile[aria-selected="true"][data-bk="subfile"] { color: var(--violet); }
+.s07 .bk-tile[aria-selected="true"][data-bk="s3"] { color: #569a31; }
+.s07 .bk-tile[aria-selected="true"][data-bk="gcs"] { color: #4285f4; }
+.s07 .bk-tile[aria-selected="true"][data-bk="azure"] { color: #0078d4; }
+.s07 .bk-tile[aria-selected="true"][data-bk="hf"] { color: #f5b400; }
+.s07 .bk-tile[aria-selected="true"][data-bk="source"] { color: #121a1b; }
+.s07 .bk-tname { color: var(--dim); font: 600 14px var(--sans); letter-spacing: -.015em; line-height: 1.05; text-align: center; min-height: 2.1em; transition: color 180ms ease; }
+.s07 .bk-tile[aria-selected="true"] .bk-tname { color: var(--ink); }
+.s07 .bk-tile.is-window .bk-tname { font-weight: 500; }
+.s07 .bk-hint { margin: 6px 0 14px; color: var(--faint); font: 500 10.5px var(--mono); letter-spacing: .08em; text-align: center; text-transform: uppercase; }
 
-.s07 .bk-out { display: flex; align-items: stretch; }
-.s07 .bk-read { flex: none; display: flex; flex-direction: column; justify-content: center; gap: 3px; width: 150px; padding: 0 16px; border: 2px solid var(--violet); background: #ece9fd; }
+.s07 .bk-flow { display: flex; align-items: stretch; height: 164px; }
+.s07 .bk-read { flex: none; display: flex; flex-direction: column; justify-content: center; gap: 3px; width: 150px; padding: 0 16px; border: 2px solid var(--violet); background: var(--violet-soft); }
 .s07 .bk-read b { margin-bottom: 2px; font: 600 16px var(--sans); letter-spacing: -.02em; }
 .s07 .bk-read code { color: var(--ink-soft); font: 12.5px var(--mono); }
-.s07 .bk-arrow { flex: none; align-self: center; width: 44px; height: 12px; margin: 0 6px; }
+.s07 .bk-arrow { flex: none; align-self: center; width: 52px; height: 14px; margin: 0 6px; overflow: visible; }
 .s07 .bk-arrow-line { fill: none; stroke: var(--violet); stroke-width: 2; }
 .s07 .bk-arrow-head { fill: var(--violet); }
-.s07 .bk-req { flex: 1; min-width: 0; height: 100px; padding: 10px 16px; background: var(--wash); }
+.s07 .bk-packet { fill: var(--violet); opacity: 0; }
+.s07 .bk-arrow.is-sending .bk-packet { animation: s07-send 420ms cubic-bezier(.4, 0, .2, 1); }
+@keyframes s07-send { 0% { opacity: 0; transform: translateX(0); } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; transform: translateX(36px); } }
+.s07 .bk-req { flex: 1; min-width: 0; padding: 12px 18px; background: var(--wash); }
 .s07 .bk-card { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
 .s07 .bk-card[hidden] { display: none; }
+.s07 .bk-card.is-in { animation: s07-in 260ms ease; }
+@keyframes s07-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* Both spellings of the path, then how the backend is reached. */
+.s07 .bk-paths { display: grid; grid-template-columns: 40px 1fr auto; align-items: baseline; column-gap: 8px; row-gap: 2px; white-space: nowrap; }
+.s07 .bk-lab { color: var(--faint); font: 500 10px var(--mono); letter-spacing: .08em; }
+.s07 .bk-paths code { overflow: hidden; color: var(--dim); font: 11.5px var(--mono); }
+.s07 .bk-paths code b { color: var(--violet); font-weight: 500; }
+.s07 .bk-how { padding-left: 12px; color: var(--soft); font: 13px var(--sans); }
 .s07 .bk-card pre { margin: 0; color: var(--ink); font: 12.5px/1.6 var(--mono); white-space: pre; overflow: hidden; }
 .s07 .bk-kw { color: var(--violet); font-weight: 500; }
 .s07 .bk-h { color: var(--dim); }
 .s07 .bk-say { color: var(--dim); font: 13.5px var(--sans); white-space: nowrap; }
 .s07 .bk-say code { color: var(--ink-soft); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  .s07 .bk-icon, .s07 .bk-tile { transition: none; }
+  .s07 .bk-card.is-in, .s07 .bk-arrow.is-sending .bk-packet { animation: none; }
+}
 
-/* 08 What a streaming DataLoader needs. One row per thing a training loop does, what that
-   asks of storage, and the Karu behaviour that answers it. */
-.s08 .dln { gap: 14px; }
-.s08 .dln-grid { display: grid; grid-template-columns: 1fr 1.15fr 1.2fr; column-gap: 28px; }
-.s08 .dln-grid > div { padding: 8px 0; border-top: 1px solid var(--rule); }
-.s08 .dln-grid > .dln-col { padding: 0 0 6px; border-top: 0; color: var(--dim); font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
-.s08 .dln-col.is-karu { color: var(--violet); }
-.s08 .dln-who { color: var(--ink); font-size: 16.5px; font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
-.s08 .dln-who span,
-.s08 .dln-karu span { display: block; margin-top: 3px; color: var(--faint); font-size: 12.5px; font-weight: 400; letter-spacing: 0; }
-.s08 .dln-need { align-self: stretch; color: var(--ink-soft); font-size: 15px; line-height: 1.2; }
-.s08 .dln-karu { color: var(--violet); font-size: 15.5px; font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
-.s08 .dln-karu span { color: var(--dim); }
-.s08 .dln-karu span.is-mono { font: 400 11.5px var(--mono); }
+/* 08 What a streaming DataLoader needs. One card per thing a training loop does, why it is
+   hard, the Karu behaviour that answers it and the call or option behind it. */
+.s08 .dln { gap: 16px; }
+.s08 .dln-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.s08 .dln-card { position: relative; padding: 16px 18px 12px; border-top: 3px solid transparent; background: var(--wash); outline: none; cursor: default; transition: background 180ms ease, border-color 180ms ease, transform 220ms cubic-bezier(.3, 1.4, .5, 1), box-shadow 220ms ease; }
+.s08 .dln-card:hover,
+.s08 .dln-card:focus-visible { border-top-color: var(--violet); background: #fff; box-shadow: 0 6px 18px rgba(29, 32, 37, .08); transform: translateY(-3px); }
+.s08 .dln-icon { width: 28px; height: 28px; fill: none; stroke: var(--faint); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; transition: stroke 180ms ease; }
+.s08 .dln-icon circle { fill: #fff; }
+.s08 .dln-icon .dln-fill { fill: currentColor; stroke: none; color: var(--faint); opacity: .35; }
+.s08 .dln-card:hover .dln-icon,
+.s08 .dln-card:focus-visible .dln-icon { stroke: var(--violet); }
+.s08 .dln-who { margin: 10px 0 0; color: var(--ink); font: 600 18px/1.1 var(--sans); letter-spacing: -.015em; }
+.s08 .dln-ctx { margin: 4px 0 0; color: var(--dim); font: 13px/1.3 var(--sans); }
+.s08 .dln-karu { margin: 12px 0 0; color: var(--violet); font: 500 15px/1.2 var(--sans); }
+.s08 .dln-how { display: inline-block; margin-top: 8px; padding: 2px 6px; background: #fff; color: var(--dim); font: 11.5px var(--mono); white-space: nowrap; transition: background 180ms ease, color 180ms ease; }
+.s08 .dln-card:hover .dln-how,
+.s08 .dln-card:focus-visible .dln-how { background: var(--violet-soft); color: var(--violet); }
+@media (prefers-reduced-motion: reduce) { .s08 .dln-card { transition: none; } }
 
 /* 09 Why not object_store. The two libraries under their language logos, compared on what a
    DataLoader worker meets: fork, how results come back, and how many objects one call reads. */

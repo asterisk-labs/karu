@@ -10,8 +10,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=League+Spartan:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=0ec11de9a7">
-  <script defer src="app.js?v=0ec11de9a7"></script>
+  <link rel="stylesheet" href="styles.css?v=69964dfe18">
+  <script defer src="app.js?v=69964dfe18"></script>
 </head>
 <body>
   <div class="progress" id="progress"></div>
@@ -179,12 +179,12 @@
   </div>
 </section>
 
-    <section class="slide s05" aria-label="Nearby ranges share one request" data-steps="2" data-step="1">
+    <section class="slide s05" aria-label="Which ranges merge" data-steps="2" data-step="1">
   <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">05 / 12</span></header>
-  <h1>Nearby ranges <span class="title-mark">share one request</span></h1>
+  <h1>Which ranges <span class="title-mark">merge</span></h1>
   <div class="fig lm">
     <div class="lm-p lm-p1">
-      <div class="lm-say"><p class="lm-k">Gap <b>1 MiB</b></p><p class="lm-rule">The next read joins the request when the hole before it is at most 1 MiB.</p><code>KARU_COALESCE_GAP</code></div>
+      <div class="lm-say"><p class="lm-k">Gap <b>1 MiB</b></p><code class="lm-env">KARU_COALESCE_GAP</code><p class="lm-rule">The next read joins the request when the hole before it is at most 1 MiB.</p></div>
       <div class="lm-fig" role="img" aria-label="Reads A, B and C. The 512 KiB hole between A and B is under the 1 MiB gap, so GET 1 takes A, the hole and B. The 2 MiB hole before C is over it, so C starts GET 2.">
         <span class="lm-row" style="top:40px">reads</span>
         <span class="lm-row" style="top:102px">requests</span>
@@ -201,7 +201,7 @@
       </div>
     </div>
     <div class="lm-p lm-p2">
-      <div class="lm-say"><p class="lm-k">Ratio <b>16&times;</b></p><p class="lm-rule">The next read joins only if the request then fetches at most 16 times the bytes asked.</p><code>KARU_COALESCE_AMPLIFICATION</code></div>
+      <div class="lm-say"><p class="lm-k">Ratio <b>16&times;</b></p><code class="lm-env">KARU_COALESCE_AMPLIFICATION</code><p class="lm-rule">The next read joins only if the request then fetches at most 16 times the bytes asked.</p></div>
       <div class="lm-fig" role="img" aria-label="Three 32 KiB reads, A, B and C, with 768 KiB holes, each under the gap. GET 1 with A, the hole and B fetches 32 + 768 + 32 = 832 KiB for the 64 KiB asked, 13 times, under 16. Adding C would fetch 1,632 KiB for 96 KiB, 17 times, so C starts GET 2.">
         <span class="lm-row" style="top:40px">reads</span>
         <span class="lm-row" style="top:102px">requests</span>
@@ -224,12 +224,12 @@
   </div>
 </section>
 
-    <section class="slide s06" aria-label="A merged request has two ceilings" data-steps="2" data-step="1">
+    <section class="slide s06" aria-label="How big one request gets" data-steps="2" data-step="1">
   <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">06 / 12</span></header>
-  <h1>A merged request <span class="title-mark">has two ceilings</span></h1>
+  <h1>How big <span class="title-mark">one request</span> gets</h1>
   <div class="fig lm">
     <div class="lm-p lm-p1">
-      <div class="lm-say"><p class="lm-k">Span <b>64 MiB</b></p><p class="lm-rule">A request covers at most 64 MiB, from its first byte to its last.</p><code>KARU_COALESCE_LIMIT</code></div>
+      <div class="lm-say"><p class="lm-k">Span <b>64 MiB</b></p><code class="lm-env">KARU_COALESCE_LIMIT</code><p class="lm-rule">A request covers at most 64 MiB, from its first byte to its last.</p></div>
       <div class="lm-fig has-ruler" role="img" aria-label="Three 24 MiB reads, A, B and C, with 512 KiB holes. GET 1 takes A and B, 48.5 MiB. Adding C would make it 73 MiB, over 64 MiB, so C starts GET 2.">
         <span class="lm-row" style="top:40px">reads</span>
         <span class="lm-row" style="top:102px">requests</span>
@@ -247,7 +247,7 @@
       </div>
     </div>
     <div class="lm-p lm-p2">
-      <div class="lm-say"><p class="lm-k">Parts <b>1024</b></p><p class="lm-rule">A request carries at most 1024 reads, even when they touch.</p><code>KARU_COALESCE_PARTS</code></div>
+      <div class="lm-say"><p class="lm-k">Parts <b>1024</b></p><code class="lm-env">KARU_COALESCE_PARTS</code><p class="lm-rule">A request carries at most 1024 reads, even when they touch.</p></div>
       <div class="lm-fig" role="img" aria-label="A run of touching reads. GET 1 takes reads 1 to 1024, the most one request carries, and read 1025 starts GET 2.">
         <span class="lm-row" style="top:40px">reads</span>
         <span class="lm-row" style="top:102px">requests</span>
@@ -287,41 +287,41 @@
       <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">07 / 12</span></header>
       <h1><span class="title-mark">One contract</span>, seven backends</h1>
       <div class="bk">
-        <div class="bk-table" role="tablist" aria-label="Backend" data-interactive>
-          <div class="bk-head" aria-hidden="true"><span>backend</span><span>URI</span><span>GDAL path</span><span>reached by</span></div>
-          <button type="button" class="bk-row" role="tab" data-bk="file" aria-selected="false"><span class="bk-name">Local files</span><code><b>file://</b>/data/scene.tif</code><code>/data/scene.tif</code><span class="bk-how">positional read</span></button>
-          <button type="button" class="bk-row" role="tab" data-bk="http" aria-selected="false"><span class="bk-name">HTTP(S)</span><code><b>https://</b>example.com/scene.tif</code><code><b>/vsicurl/</b>https://example.com/scene.tif</code><span class="bk-how">range GET</span></button>
-          <button type="button" class="bk-row" role="tab" data-bk="s3" aria-selected="true"><span class="bk-name">S3</span><code><b>s3://</b>bucket/scene.tif</code><code><b>/vsis3/</b>bucket/scene.tif</code><span class="bk-how">signed range GET</span></button>
-          <button type="button" class="bk-row" role="tab" data-bk="gcs" aria-selected="false"><span class="bk-name">GCS</span><code><b>gs://</b>bucket/scene.tif</code><code><b>/vsigs/</b>bucket/scene.tif</code><span class="bk-how">signed range GET</span></button>
-          <button type="button" class="bk-row" role="tab" data-bk="azure" aria-selected="false"><span class="bk-name">Azure</span><code><b>az://</b>container/scene.tif</code><code><b>/vsiaz/</b>container/scene.tif</code><span class="bk-how">signed range GET</span></button>
-          <button type="button" class="bk-row" role="tab" data-bk="hf" aria-selected="false"><span class="bk-name">Hugging Face</span><code><b>hf://</b>datasets/org/repo/scene.tif</code><code><b>/vsihf/</b>datasets/org/repo/scene.tif</code><span class="bk-how">range GET, token if set</span></button>
-          <button type="button" class="bk-row" role="tab" data-bk="source" aria-selected="false"><span class="bk-name">Source Cooperative</span><code><b>source://</b>account/product/scene.tif</code><code><b>/vsisource/</b>account/product/scene.tif</code><span class="bk-how">anonymous range GET</span></button>
-          <button type="button" class="bk-row is-window" role="tab" data-bk="subfile" aria-selected="false"><span class="bk-name">Inside an object</span><code><b>/vsisubfile/</b>4194304_8388608,/vsis3/bucket/archive.zip</code><span class="bk-how">inner request, shifted</span></button>
+        <div class="bk-logos" role="tablist" aria-label="Backend" data-interactive>
+          <button type="button" class="bk-tile" role="tab" data-bk="file" aria-selected="false" aria-controls="bk-card-file"><svg viewBox="0 0 24 24" class="bk-icon is-line"><path d="M6 2.5h8.2l4.3 4.3v14.7H6z"/><path d="M14 2.5v4.5h4.5"/><path d="M9 12h6M9 15h6M9 18h4"/></svg><span class="bk-tname">Local files</span></button>
+          <button type="button" class="bk-tile" role="tab" data-bk="http" aria-selected="false" aria-controls="bk-card-http"><svg viewBox="0 0 24 24" class="bk-icon is-line"><circle cx="12" cy="12" r="9.3"/><ellipse cx="12" cy="12" rx="4" ry="9.3"/><path d="M2.7 12h18.6M4.4 7h15.2M4.4 17h15.2"/></svg><span class="bk-tname">HTTP(S)</span></button>
+          <button type="button" class="bk-tile" role="tab" data-bk="s3" aria-selected="false" aria-controls="bk-card-s3"><svg viewBox="0 0 24 24" class="bk-icon"><path d="M20.913 13.147l.12-.895c.947.576 1.258.922 1.354 1.071-.16.031-.562.046-1.474-.176zm-2.174 7.988a.547.547 0 0 0-.005.073c0 .084-.207.405-1.124.768a10.28 10.28 0 0 1-1.438.432c-1.405.325-3.128.504-4.853.504-4.612 0-7.412-1.184-7.412-1.704a.547.547 0 0 0-.005-.073L1.81 5.602c.135.078.28.154.432.227.042.02.086.038.128.057.134.062.272.122.417.18l.179.069c.154.058.314.114.478.168.043.013.084.029.13.043.207.065.423.127.646.187l.176.044c.175.044.353.087.534.127a23.414 23.414 0 0 0 .843.17l.121.023c.252.045.508.085.768.122.071.011.144.02.216.03.2.027.4.053.604.077l.24.027c.245.026.49.05.74.07l.081.009c.275.022.552.04.83.056l.233.012c.21.01.422.018.633.025a33.088 33.088 0 0 0 2.795-.026l.232-.011c.278-.016.555-.034.83-.056l.08-.008c.25-.02.497-.045.742-.072l.238-.026c.205-.024.408-.05.609-.077.07-.01.141-.019.211-.03.261-.037.519-.078.772-.122l.111-.02c.215-.04.427-.082.634-.125l.212-.047c.186-.041.368-.085.546-.13l.166-.042c.225-.06.444-.122.654-.189.04-.012.077-.026.115-.038a10.6 10.6 0 0 0 .493-.173c.058-.021.114-.044.17-.066.15-.06.293-.12.43-.185.038-.017.079-.034.116-.052.153-.073.3-.15.436-.228l-.976 7.245c-2.488-.78-5.805-2.292-7.311-3a1.09 1.09 0 0 0-1.088-1.085c-.6 0-1.088.489-1.088 1.088 0 .6.488 1.089 1.088 1.089.196 0 .378-.056.537-.148 1.72.812 5.144 2.367 7.715 3.15zm-7.42-20.047c5.677 0 9.676 1.759 9.75 2.736l-.014.113c-.01.033-.031.067-.048.101-.015.028-.026.057-.047.087-.024.033-.058.068-.09.102-.028.03-.051.06-.084.09-.038.035-.087.07-.133.105-.04.03-.074.06-.119.091-.053.036-.116.071-.177.107-.05.03-.095.06-.15.09-.068.036-.147.073-.222.11-.059.028-.114.057-.177.085-.084.038-.177.074-.268.111-.068.027-.13.054-.203.082-.097.036-.205.072-.31.107-.075.026-.148.053-.228.079-.111.035-.233.069-.35.103-.085.024-.165.05-.253.073-.124.034-.258.065-.389.098-.093.022-.181.046-.278.068-.139.032-.287.061-.433.091-.098.02-.191.041-.293.06-.155.03-.32.057-.482.084-.1.018-.198.036-.302.052-.166.026-.342.048-.515.072-.11.014-.213.03-.325.044-.181.023-.372.041-.56.06-.11.012-.218.025-.332.036-.188.016-.386.029-.58.043-.122.009-.24.02-.364.028-.207.012-.422.02-.635.028-.12.005-.234.012-.354.016a35.605 35.605 0 0 1-2.069 0c-.12-.004-.234-.011-.352-.016-.214-.008-.43-.016-.637-.028-.122-.008-.238-.02-.36-.027-.195-.015-.394-.028-.584-.044-.11-.01-.215-.024-.324-.035-.19-.02-.384-.038-.568-.06l-.315-.044c-.176-.024-.355-.046-.525-.073-.1-.015-.192-.033-.29-.05-.167-.028-.335-.055-.494-.086-.096-.018-.183-.038-.276-.056-.151-.032-.305-.062-.45-.095-.09-.02-.173-.043-.26-.064-.138-.034-.277-.067-.407-.102-.082-.022-.157-.046-.235-.069a11.75 11.75 0 0 1-.368-.108c-.075-.024-.141-.049-.213-.073-.11-.037-.223-.075-.325-.113-.067-.025-.125-.051-.188-.077-.096-.038-.195-.076-.282-.115-.06-.027-.11-.054-.166-.08-.08-.039-.162-.077-.233-.116-.052-.028-.094-.055-.142-.084-.063-.038-.13-.075-.185-.113-.043-.029-.075-.058-.113-.086-.048-.037-.098-.073-.139-.11-.032-.029-.054-.057-.08-.087-.033-.035-.069-.07-.093-.104-.02-.03-.031-.058-.046-.086-.018-.035-.039-.068-.049-.102l-.015-.113c.076-.977 4.074-2.736 9.748-2.736zm12.182 12.124c-.118-.628-.84-1.291-2.31-2.128l.963-7.16a.531.531 0 0 0 .005-.073C22.16 1.581 16.447 0 11.32 0 6.194 0 .482 1.581.482 3.851a.58.58 0 0 0 .005.072L2.819 21.25c.071 2.002 5.236 2.75 8.5 2.75 1.805 0 3.615-.188 5.098-.531.598-.138 1.133-.3 1.592-.48 1.18-.467 1.789-1.053 1.813-1.739l.945-7.018c.557.131 1.016.197 1.389.197.54 0 .902-.137 1.134-.413a.956.956 0 0 0 .21-.804Z"/></svg><span class="bk-tname">S3</span></button>
+          <button type="button" class="bk-tile" role="tab" data-bk="gcs" aria-selected="false" aria-controls="bk-card-gcs"><svg viewBox="0 0 24 24" class="bk-icon"><path d="M24 2.4v8.4h-2.4V2.4H24zM0 10.8h2.4V2.4H0v8.4zm3-8.4h18v8.4H3V2.4zm12.6 4.2a1.8 1.8 0 1 0 3.6 0 1.8 1.8 0 0 0-3.6 0zm-10.8.6H12V6H4.8v1.2zm16.8 14.4H24v-8.4h-2.4v8.4zM0 21.6h2.4v-8.4H0v8.4zm3-8.4h18v8.4H3v-8.4zm12.6 4.2a1.8 1.8 0 1 0 3.6 0 1.8 1.8 0 0 0-3.6 0zM4.8 18H12v-1.2H4.8V18z"/></svg><span class="bk-tname">GCS</span></button>
+          <button type="button" class="bk-tile" role="tab" data-bk="azure" aria-selected="false" aria-controls="bk-card-azure"><svg viewBox="0 0 24 24" class="bk-icon"><path d="M22.379 23.343a1.62 1.62 0 0 0 1.536-2.14v.002L17.35 1.76A1.62 1.62 0 0 0 15.816.657H8.184A1.62 1.62 0 0 0 6.65 1.76L.086 21.204a1.62 1.62 0 0 0 1.536 2.139h4.741a1.62 1.62 0 0 0 1.535-1.103l.977-2.892 4.947 3.675c.28.208.618.32.966.32m-3.084-12.531 3.624 10.739a.54.54 0 0 1-.51.713v-.001h-.03a.54.54 0 0 1-.322-.106l-9.287-6.9h4.853m6.313 7.006c.116-.326.13-.694.007-1.058L9.79 1.76a1.722 1.722 0 0 0-.007-.02h6.034a.54.54 0 0 1 .512.366l6.562 19.445a.54.54 0 0 1-.338.684"/></svg><span class="bk-tname">Azure</span></button>
+          <button type="button" class="bk-tile" role="tab" data-bk="hf" aria-selected="false" aria-controls="bk-card-hf"><svg viewBox="0 0 24 24" class="bk-icon"><path d="M1.4446 11.5059c0 1.1021.1673 2.1585.4847 3.1563-.0378-.0028-.0691-.0058-.1058-.0058-.4209 0-.8015.16-1.0704.4512-.3454.3737-.4984.8335-.4316 1.293a1.576 1.576 0 0 0 .2148.5978c-.2319.1864-.4018.4456-.4844.7578-.0646.2448-.131.7543.2149 1.2794a1.4552 1.4552 0 0 0-.0625.1055c-.208.3923-.2207.8372-.0371 1.25.2783.6258.9696 1.1175 2.3126 1.6467.8356.3292 1.5988.5411 1.6056.543 1.1046.2847 2.104.4277 2.969.4277 1.4173 0 2.4754-.3849 3.1525-1.1446 1.538.2651 2.791.1403 3.592.006.6773.7555 1.7332 1.1387 3.1467 1.1387.8649 0 1.8643-.143 2.969-.4278.0068-.0019.77-.2138 1.6056-.543 1.343-.5292 2.0343-1.0208 2.3126-1.6466.1836-.4129.171-.8577-.037-1.25a1.4685 1.4685 0 0 0-.0626-.1056c.346-.525.2795-1.0346.2149-1.2793-.0826-.3122-.2525-.5714-.4844-.7579.11-.1816.1831-.3788.2148-.5977.0669-.4595-.0862-.9193-.4316-1.293-.2688-.2913-.6495-.4513-1.0704-.4513-.0209 0-.0376.0008-.0588.0018.3162-.9966.4846-2.0518.4846-3.1523 0-5.807-4.7362-10.5144-10.5789-10.5144-5.8426 0-10.5788 4.7073-10.5788 10.5144Zm10.5788-9.4831c5.2727 0 9.5476 4.246 9.5476 9.483a9.4201 9.4201 0 0 1-.2696 2.2365c-.0039-.0047-.0079-.011-.0117-.0156-.274-.3255-.6679-.5059-1.1075-.5059-.352 0-.714.1155-1.0763.3438-.2403.1517-.5058.422-.7793.7598-.2534-.3492-.608-.5832-1.0137-.6465a1.5174 1.5174 0 0 0-.2344-.0176c-.9263 0-1.4828.7993-1.6935 1.5177-.1046.2426-.6065 1.3482-1.3614 2.0978-1.1681 1.1601-1.4458 2.3534-.8396 3.6382-.843.1029-1.5836.0927-2.365-.006.5906-1.212.3626-2.4388-.8426-3.6322-.755-.7496-1.2568-1.8552-1.3614-2.0978-.2107-.7184-.7673-1.5177-1.6935-1.5177-.078 0-.1568.0054-.2344.0176-.4057.0633-.7604.2973-1.0137.6465-.2735-.3379-.539-.6081-.7794-.7598-.3622-.2283-.7243-.3438-1.0762-.3438-.4266 0-.8094.171-1.0821.4786a9.4208 9.4208 0 0 1-.2598-2.1936c0-5.237 4.2749-9.483 9.5475-9.483zM8.6443 7.0036c-.4838.0043-.9503.2667-1.1934.7227-.3536.6633-.1006 1.4873.5645 1.84.351.1862.4883-.5261.836-.6485.3107-.1095.841.399 1.0078.086.3536-.6634.1025-1.4874-.5625-1.84a1.3659 1.3659 0 0 0-.6524-.1602Zm6.8403 0c-.2199-.002-.4426.05-.6504.1602-.665.3526-.9181 1.1766-.5645 1.84.1669.313.6971-.1955 1.0079-.086.3476.1224.4867.8347.838.6485.6649-.3527.916-1.1767.5624-1.84-.243-.456-.7096-.7184-1.1934-.7227Zm-9.7565 1.418a.8768.8768 0 0 0-.877.877c0 .4846.3925.877.877.877a.8768.8768 0 0 0 .877-.877.8768.8768 0 0 0-.877-.877zm12.6434 0c-.4845 0-.879.3925-.879.877 0 .4846.3945.877.879.877a.8768.8768 0 0 0 .877-.877.8768.8768 0 0 0-.877-.877zM8.7927 11.459c-.179-.003-.2793.1107-.2793.416 0 .8097.3874 2.125 1.4279 2.924.207-.7123 1.3453-1.2832 1.5079-1.2012.2315.1167.2191.4417.6074.7266.3884-.285.374-.6098.6056-.7266.1627-.082 1.3009.4889 1.5079 1.2012 1.0404-.799 1.4278-2.1144 1.4278-2.924 0-1.2212-1.583.6402-3.5413.6485-1.4686-.0061-2.7266-1.0558-3.2639-1.0645zM4.312 14.4768c.5792.365 1.6964 2.2751 2.1056 3.0177.1371.2488.371.3536.582.3536.4188 0 .7465-.4138.0391-.9395-1.0636-.791-.6914-2.0846-.1836-2.1642a.4302.4302 0 0 1 .0664-.004c.4616 0 .666.7892.666.7892s.5959 1.4898 1.6213 2.508c.942.9356 1.062 1.703.4961 2.6661-.0164-.004-.0159.0236-.1484.2149-.1853.2673-.4322.4688-.7188.6152-.5062.2269-1.1397.2696-1.7833.2696-1.037 0-2.1017-.1824-2.6975-.336-.0293-.0075-3.6505-.9567-3.1916-1.8224.0771-.1454.2033-.2031.3633-.2031.6463 0 1.823.9551 2.3283.9551.113 0 .196-.0865.2285-.2031.2249-.8045-3.2787-1.0522-2.9846-2.1642.0519-.1967.193-.2757.3907-.2754.854 0 2.7704 1.4923 3.172 1.4923.0307 0 .0525-.0085.0645-.0274.2012-.3227.1096-.5865-1.3087-1.4395-1.4182-.8533-2.4315-1.329-1.8653-1.9416.0651-.0707.1574-.1015.2695-.1015.8611.0002 2.8948 1.84 2.8948 1.84s.5487.5683.8809.5683c.0762 0 .1416-.0315.1855-.1054.2355-.3946-2.1858-2.2183-2.3224-2.971-.0926-.51.0641-.7676.3555-.7676-.0006.008.1701-.0285.4942.1759zm16.2257.5918c-.1366.7526-2.5579 2.5764-2.3224 2.9709.044.074.1092.1055.1855.1055.3321 0 .881-.5684.881-.5684s2.0336-1.8397 2.8947-1.84c.1121 0 .2044.0308.2695.1016.5662.6125-.447 1.0882-1.8653 1.9415-1.4183.853-1.51 1.1168-1.3087 1.4396.012.0188.0337.0273.0644.0273.4016 0 2.3181-1.4923 3.1721-1.4923.1977-.0002.3388.0787.3907.2754.294 1.112-3.2095 1.3597-2.9846 2.1642.0325.1166.1156.2032.2285.2032.5054 0 1.682-.9552 2.3283-.9552.16 0 .2862.0577.3633.2032.459.8656-3.1623 1.8149-3.1916 1.8224-.5958.1535-1.6605.336-2.6975.336-.6351 0-1.261-.0409-1.7638-.2599-.2949-.1472-.5488-.3516-.7383-.625-.0411-.0682-.1026-.1476-.1426-.205-.5726-.9679-.455-1.7371.4903-2.676 1.0254-1.0182 1.6212-2.508 1.6212-2.508s.2044-.7891.666-.7891a.4318.4318 0 0 1 .0665.0039c.5078.0796.88 1.3732-.1836 2.1642-.7074.5257-.3797.9395.039.9395.211 0 .445-.1047.5821-.3535.4092-.7426 1.5264-2.6527 2.1056-3.0178.5588-.3524.99-.1816.8497.5918z"/></svg><span class="bk-tname">Hugging Face</span></button>
+          <button type="button" class="bk-tile" role="tab" data-bk="source" aria-selected="false" aria-controls="bk-card-source"><svg viewBox="0 0 48 48" class="bk-icon"><path d="M23.9392 8.8125L23.7442 8.81288C20.9963 8.82361 18.8644 9.06249 17.3485 9.52951C15.7968 10.0075 14.6948 10.8114 14.0422 11.9413C13.3897 13.0711 13.0634 14.6644 13.0634 16.7213C13.0634 18.2857 13.3389 19.5748 13.89 20.5888C14.441 21.6027 15.3763 22.4791 16.6959 23.2178C17.8094 23.8412 19.3204 24.4593 21.2289 25.0724C21.5512 25.1759 21.8848 25.2793 22.2298 25.3825L22.3296 25.4123C24.2727 25.9917 25.7736 26.5349 26.8321 27.0418C27.8907 27.5488 28.652 28.1065 29.1161 28.7149C29.5801 29.3232 29.8121 30.062 29.8121 30.9311C29.8121 31.8871 29.6381 32.6186 29.2901 33.1255C28.942 33.6325 28.362 33.9874 27.5499 34.1902C26.7379 34.393 25.5923 34.4799 24.1132 34.4509C22.6341 34.4219 21.4885 34.2699 20.6764 33.9946C19.8644 33.7194 19.2771 33.2631 18.9146 32.6258C18.552 31.9885 18.3273 31.0759 18.2403 29.8881L12.8438 32.1716C12.9551 33.5342 13.2314 34.6561 13.6724 35.5373C14.3395 36.8699 15.4923 37.8114 17.1309 38.3619C18.7696 38.9123 21.097 39.1875 24.1132 39.1875L24.3097 39.1871C27.1434 39.1763 29.3328 38.9302 30.8779 38.4488C32.4585 37.9563 33.5824 37.1161 34.2494 35.9284C34.9165 34.7406 35.25 33.0604 35.25 30.8876C35.25 29.1494 34.9745 27.7226 34.4234 26.6073C33.8724 25.492 32.9516 24.5432 31.661 23.761C30.4765 23.0431 28.8339 22.3374 26.7332 21.6439C26.545 21.5818 26.3533 21.5198 26.1578 21.4579L25.9711 21.3992L25.6914 21.3106L25.4179 21.2231C23.8855 20.7298 22.6526 20.2873 21.7193 19.8955L21.6118 19.8501C20.5242 19.3865 19.7339 18.923 19.2408 18.4595C18.7478 17.996 18.5013 17.4745 18.5013 16.8951C18.5013 15.9971 18.6608 15.3163 18.9798 14.8527C19.2988 14.3892 19.8281 14.0561 20.5677 13.8533C21.3072 13.6505 22.3731 13.5491 23.7652 13.5491L23.9178 13.5496C25.1786 13.5576 26.1645 13.6661 26.8756 13.875C27.6152 14.0923 28.1517 14.4544 28.4853 14.9614C28.8188 15.4683 29.0291 16.1998 29.1161 17.1558L34.5246 14.8759C34.379 13.7451 34.0987 12.8103 33.6839 12.0716C33.0168 10.8839 31.922 10.0437 30.3994 9.55123C28.8768 9.05874 26.7234 8.8125 23.9392 8.8125Z"/><path d="M48 17.315V39.1899C48 44.0556 44.0556 48 39.1899 48H8.8102C3.94451 48 0 44.0556 0 39.1899V37.5625L5.87341 35.085M42.1266 11.6912V8.81013C42.1266 7.18823 40.8118 5.87342 39.1899 5.87342H8.8102C7.18831 5.87342 5.8735 7.18823 5.8735 8.81013L5.87341 26.9837L0 29.4613M0 29.4613V8.81013C0 3.94443 3.94451 0 8.8102 0H39.1899C44.0556 0 48 3.94443 48 8.81013V9.21369L42.1266 11.6912M5.87341 35.085V39.1899C5.87341 40.8118 7.18831 42.1266 8.8102 42.1266H39.1899C40.8118 42.1266 42.1266 40.8118 42.1266 39.1899L42.1265 19.7924L48 17.315"/></svg><span class="bk-tname">Source Cooperative</span></button>
+          <button type="button" class="bk-tile is-window" role="tab" data-bk="subfile" aria-selected="false" aria-controls="bk-card-subfile"><svg viewBox="0 0 24 24" class="bk-icon is-line"><rect x="3" y="3.5" width="18" height="17"/><rect class="bk-win" x="7.5" y="9" width="9" height="6"/></svg><span class="bk-tname">Inside an object</span></button>
         </div>
-        <div class="bk-out">
+        <p class="bk-hint">point at a backend</p>
+        <div class="bk-flow">
           <div class="bk-read"><b>one read</b><code>offset <span class="tok-num">1048576</span></code><code>length <span class="tok-num">65536</span></code></div>
-          <svg class="bk-arrow" viewBox="0 0 44 12" aria-hidden="true"><path class="bk-arrow-line" d="M0 6 H35"/><path class="bk-arrow-head" d="M34 1 L43 6 L34 11 Z"/></svg>
+          <svg class="bk-arrow" viewBox="0 0 52 14" aria-hidden="true"><path class="bk-arrow-line" d="M0 7 H42"/><path class="bk-arrow-head" d="M41 2 L51 7 L41 12 Z"/><circle class="bk-packet" cx="4" cy="7" r="3.5"/></svg>
           <div class="bk-req">
-            <div class="bk-card" data-bk="file" role="tabpanel" hidden><pre><code>fd = <span class="tok-fn">open</span>(<span class="tok-str">"/data/scene.tif"</span>, O_RDONLY | O_CLOEXEC)
+            <div class="bk-card" id="bk-card-file" data-bk="file" role="tabpanel" hidden><div class="bk-paths"><span class="bk-lab">URI</span><code><b>file://</b>/data/scene.tif</code><span class="bk-how">positional read</span><span class="bk-lab">GDAL</span><code>/data/scene.tif</code></div><pre><code>fd = <span class="tok-fn">open</span>(<span class="tok-str">"/data/scene.tif"</span>, O_RDONLY | O_CLOEXEC)
 <span class="tok-fn">pread</span>(fd, buf, <span class="tok-num">65536</span>, <span class="tok-num">1048576</span>)</code></pre><p class="bk-say"><code>file://</code> only drops the scheme. No URL, no HTTP.</p></div>
-            <div class="bk-card" data-bk="http" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://example.com/scene.tif
+            <div class="bk-card" id="bk-card-http" data-bk="http" role="tabpanel" hidden><div class="bk-paths"><span class="bk-lab">URI</span><code><b>https://</b>example.com/scene.tif</code><span class="bk-how">range GET</span><span class="bk-lab">GDAL</span><code><b>/vsicurl/</b>https://example.com/scene.tif</code></div><pre><code><span class="bk-kw">GET</span> https://example.com/scene.tif
 <span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span></code></pre><p class="bk-say"><code>/vsicurl/</code> is dropped and the URL is sent as written.</p></div>
-            <div class="bk-card" data-bk="s3" role="tabpanel"><pre><code><span class="bk-kw">GET</span> https://bucket.s3.us-east-1.amazonaws.com/scene.tif
+            <div class="bk-card" id="bk-card-s3" data-bk="s3" role="tabpanel" hidden><div class="bk-paths"><span class="bk-lab">URI</span><code><b>s3://</b>bucket/scene.tif</code><span class="bk-how">signed range GET</span><span class="bk-lab">GDAL</span><code><b>/vsis3/</b>bucket/scene.tif</code></div><pre><code><span class="bk-kw">GET</span> https://bucket.s3.us-east-1.amazonaws.com/scene.tif
 <span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span>
 <span class="bk-h">Authorization:</span> AWS4-HMAC-SHA256 Credential=…</code></pre><p class="bk-say">Both spellings are one object, <code>/vsis3/bucket/scene.tif</code>.</p></div>
-            <div class="bk-card" data-bk="gcs" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://storage.googleapis.com/bucket/scene.tif
+            <div class="bk-card" id="bk-card-gcs" data-bk="gcs" role="tabpanel" hidden><div class="bk-paths"><span class="bk-lab">URI</span><code><b>gs://</b>bucket/scene.tif</code><span class="bk-how">signed range GET</span><span class="bk-lab">GDAL</span><code><b>/vsigs/</b>bucket/scene.tif</code></div><pre><code><span class="bk-kw">GET</span> https://storage.googleapis.com/bucket/scene.tif
 <span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span>
 <span class="bk-h">Authorization:</span> Bearer …</code></pre><p class="bk-say">Both spellings are one object, <code>/vsigs/bucket/scene.tif</code>.</p></div>
-            <div class="bk-card" data-bk="azure" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://account.blob.core.windows.net/container/scene.tif
+            <div class="bk-card" id="bk-card-azure" data-bk="azure" role="tabpanel" hidden><div class="bk-paths"><span class="bk-lab">URI</span><code><b>az://</b>container/scene.tif</code><span class="bk-how">signed range GET</span><span class="bk-lab">GDAL</span><code><b>/vsiaz/</b>container/scene.tif</code></div><pre><code><span class="bk-kw">GET</span> https://account.blob.core.windows.net/container/scene.tif
 <span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span>
 <span class="bk-h">Authorization:</span> SharedKey account:…</code></pre><p class="bk-say"><code>abfs://</code> and <code>/vsiadls/</code> reach Data Lake at <code>account.dfs.core.windows.net</code>.</p></div>
-            <div class="bk-card" data-bk="hf" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://huggingface.co/datasets/org/repo/resolve/main/scene.tif
+            <div class="bk-card" id="bk-card-hf" data-bk="hf" role="tabpanel" hidden><div class="bk-paths"><span class="bk-lab">URI</span><code><b>hf://</b>datasets/org/repo/scene.tif</code><span class="bk-how">range GET, token if set</span><span class="bk-lab">GDAL</span><code><b>/vsihf/</b>datasets/org/repo/scene.tif</code></div><pre><code><span class="bk-kw">GET</span> https://huggingface.co/datasets/org/repo/resolve/main/scene.tif
 <span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span></code></pre><p class="bk-say">Large files redirect to a CDN. Karu follows, without the token.</p></div>
-            <div class="bk-card" data-bk="source" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://data.source.coop/account/product/scene.tif
+            <div class="bk-card" id="bk-card-source" data-bk="source" role="tabpanel" hidden><div class="bk-paths"><span class="bk-lab">URI</span><code><b>source://</b>account/product/scene.tif</code><span class="bk-how">anonymous range GET</span><span class="bk-lab">GDAL</span><code><b>/vsisource/</b>account/product/scene.tif</code></div><pre><code><span class="bk-kw">GET</span> https://data.source.coop/account/product/scene.tif
 <span class="bk-h">Range:</span> bytes=<span class="tok-num">1048576</span>-<span class="tok-num">1114111</span></code></pre><p class="bk-say">Path style and unsigned until Source credentials are set.</p></div>
-            <div class="bk-card" data-bk="subfile" role="tabpanel" hidden><pre><code><span class="bk-kw">GET</span> https://bucket.s3.us-east-1.amazonaws.com/archive.zip
+            <div class="bk-card" id="bk-card-subfile" data-bk="subfile" role="tabpanel" hidden><div class="bk-paths"><span class="bk-lab">URI</span><code><b>s3://</b>bucket/archive.zip<b>#bytes=</b>4194304-12582911</code><span class="bk-how">inner request, shifted</span><span class="bk-lab">GDAL</span><code><b>/vsisubfile/</b>4194304_8388608,/vsis3/bucket/archive.zip</code></div><pre><code><span class="bk-kw">GET</span> https://bucket.s3.us-east-1.amazonaws.com/archive.zip
 <span class="bk-h">Range:</span> bytes=<span class="tok-num">5242880</span>-<span class="tok-num">5308415</span>
-<span class="bk-h">Authorization:</span> AWS4-HMAC-SHA256 Credential=…</code></pre><p class="bk-say">Offsets add. As a URI, <code>s3://bucket/archive.zip#bytes=4194304-12582911</code>.</p></div>
+<span class="bk-h">Authorization:</span> AWS4-HMAC-SHA256 Credential=…</code></pre><p class="bk-say">A window over another path. Offsets add, so the read starts 4 MiB further in.</p></div>
           </div>
         </div>
       </div>
@@ -331,32 +331,49 @@
   <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">08 / 12</span></header>
   <h1>What a <span class="title-mark">streaming DataLoader</span> needs</h1>
   <div class="fig dln">
-    <div class="dln-grid">
-      <div class="dln-col">the DataLoader</div><div class="dln-col">so it needs</div><div class="dln-col is-karu">Karu</div>
-
-      <div class="dln-who">forks its workers<span>one process per worker</span></div>
-      <div class="dln-need">storage that works in every child</div>
-      <div class="dln-karu">builds a new engine per process<span>pid checked on every call</span></div>
-
-      <div class="dln-who">shuffles samples<span>a batch touches many files</span></div>
-      <div class="dln-need">small windows from many objects at once</div>
-      <div class="dln-karu">one submit for every object<span>nearby ranges merged per object</span></div>
-
-      <div class="dln-who">decodes on the CPU<span>while the GPU trains</span></div>
-      <div class="dln-need">each window as soon as it lands</div>
-      <div class="dln-karu">completions in arrival order<span class="is-mono">batch.next()</span></div>
-
-      <div class="dln-who">fills preallocated buffers<span>one per batch tensor</span></div>
-      <div class="dln-need">bytes written where the tensor lives</div>
-      <div class="dln-karu">writes into the span you pass<span>no extra copy for remote ranges</span></div>
-
-      <div class="dln-who">runs for days<span>millions of requests</span></div>
-      <div class="dln-need">errors and expiring tokens absorbed</div>
-      <div class="dln-karu">retries, resumes, refreshes credentials<span class="is-mono">KARU_MAX_ATTEMPTS 8</span></div>
-
-      <div class="dln-who">reads a live dataset<span>files can be rewritten</span></div>
-      <div class="dln-need">never two versions in one sample</div>
-      <div class="dln-karu">fails with 412 instead<span class="is-mono">Read::if_match</span></div>
+    <div class="dln-cards" data-interactive>
+      <div class="dln-card" tabindex="0">
+        <svg class="dln-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4" r="2"/><circle cx="5" cy="20" r="2"/><circle cx="12" cy="20" r="2"/><circle cx="19" cy="20" r="2"/><path d="M12 6v12M12 10c-7 0-7 4-7 8M12 10c7 0 7 4 7 8"/></svg>
+        <p class="dln-who">forks its workers</p>
+        <p class="dln-ctx">one process per worker, so no shared threads</p>
+        <p class="dln-karu">a new engine in each worker</p>
+        <code class="dln-how">pid checked on every call</code>
+      </div>
+      <div class="dln-card" tabindex="0">
+        <svg class="dln-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 7h4.5l11 10H21M2 17h4.5l11-10H21"/><path d="M18 4l3 3-3 3M18 14l3 3-3 3"/></svg>
+        <p class="dln-who">shuffles across files</p>
+        <p class="dln-ctx">a batch takes windows from many objects</p>
+        <p class="dln-karu">one submit spans every object</p>
+        <code class="dln-how">nearby ranges merged per object</code>
+      </div>
+      <div class="dln-card" tabindex="0">
+        <svg class="dln-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>
+        <p class="dln-who">decodes on the CPU</p>
+        <p class="dln-ctx">while the GPU trains on the last batch</p>
+        <p class="dln-karu">each window as soon as it lands</p>
+        <code class="dln-how">batch.next()</code>
+      </div>
+      <div class="dln-card" tabindex="0">
+        <svg class="dln-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14"/><path d="M9 5v14M15 5v14M3 12h18"/><path class="dln-fill" d="M3 5h6v7H3z"/></svg>
+        <p class="dln-who">fills preallocated buffers</p>
+        <p class="dln-ctx">one per batch tensor, reused every step</p>
+        <p class="dln-karu">bytes land in your buffer</p>
+        <code class="dln-how">no extra copy for remote ranges</code>
+      </div>
+      <div class="dln-card" tabindex="0">
+        <svg class="dln-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+        <p class="dln-who">runs for days</p>
+        <p class="dln-ctx">millions of requests, tokens that expire</p>
+        <p class="dln-karu">retries, resumes, refreshes tokens</p>
+        <code class="dln-how">KARU_MAX_ATTEMPTS 8</code>
+      </div>
+      <div class="dln-card" tabindex="0">
+        <svg class="dln-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2.5h8l4 4V12M5 2.5V21.5h7"/><path d="M13 2.5v4h4"/><path d="M15 16.5a4 4 0 1 1 1.2 3"/><path d="M14.6 13.6l.4 2.9 2.8-.6"/></svg>
+        <p class="dln-who">reads a live dataset</p>
+        <p class="dln-ctx">files can be rewritten mid-epoch</p>
+        <p class="dln-karu">a replaced file fails with 412</p>
+        <code class="dln-how">Read::if_match</code>
+      </div>
     </div>
     <p class="path-note">Streaming means training reads its samples straight from object storage, with no local copy of the dataset.</p>
   </div>
@@ -366,7 +383,7 @@
   <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">09 / 12</span></header>
   <h1>Why not <span class="title-mark">object_store</span>?</h1>
   <div class="fig v8">
-    <svg class="v8-fig" viewBox="0 0 864 330" role="img" aria-label="Karu, a C++23 library, against object_store, the Rust library of Apache Arrow. After fork, a Karu worker builds a new engine with its own threads, while a worker inherits the tokio runtime of object_store without its threads. Karu hands back each of four reads as it lands, while get_ranges returns all of them when the last one ends. A Karu batch takes reads from three files at once, while get_ranges takes one object per call, so the caller makes three calls and gathers them.">
+    <svg class="v8-fig" viewBox="0 0 864 330" role="img" aria-label="Karu, a C++23 library, against object_store, the Rust library of Apache Arrow. After fork, a Karu worker builds a new engine with its own threads, while a tokio runtime started before fork has no threads in the worker. Karu hands back each of four reads as it lands, while get_ranges returns all of them when the last one ends. A Karu batch takes reads from three files at once, while get_ranges takes one object per call, so the caller makes three calls and gathers them.">
       <!-- the two libraries, each under its language -->
       <image href="fig/cpp-logo.svg" x="150" y="2" width="30" height="34"/>
       <text class="v8-name is-karu" x="192" y="22">Karu</text>
@@ -387,7 +404,7 @@
       <path class="v8-arrow" d="M642 88H684"/><path class="v8-head" d="M684 84.5L690 88L684 91.5Z"/>
       <text class="v8-fork" x="663" y="81">fork</text>
       <rect class="v8-box" x="692" y="64" width="118" height="48"/><text class="v8-boxl" x="702" y="80">worker</text><rect class="v8-t is-gone" x="702" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="714" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="726" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="738" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="750" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="762" y="92" width="8" height="8"/><rect class="v8-t is-gone" x="774" y="92" width="8" height="8"/>
-      <text class="v8-say is-bad" x="520" y="130">inherits the tokio runtime without its threads</text>
+      <text class="v8-say is-bad" x="520" y="130">a tokio runtime started before fork() has no threads</text>
 
       <text class="v8-k" x="0" y="164">results</text>
       <text class="v8-ks" x="0" y="180">four reads in flight</text>
@@ -404,7 +421,7 @@
       <rect class="v8-obj" x="584" y="228" width="180" height="14"/><text class="v8-objl" x="578" y="239">a.rumi</text><rect class="v8-r is-grey" x="624" y="228" width="22" height="14"/><rect class="v8-r is-grey" x="688" y="228" width="18" height="14"/><rect class="v8-obj" x="584" y="250" width="180" height="14"/><text class="v8-objl" x="578" y="261">b.rumi</text><rect class="v8-r is-grey" x="654" y="250" width="26" height="14"/><rect class="v8-r is-grey" x="716" y="250" width="20" height="14"/><rect class="v8-obj" x="584" y="272" width="180" height="14"/><text class="v8-objl" x="578" y="283">c.rumi</text><rect class="v8-r is-grey" x="610" y="272" width="20" height="14"/><rect class="v8-r is-grey" x="676" y="272" width="30" height="14"/><path class="v8-link" d="M764 235H780"/><rect class="v8-call" x="782" y="228" width="82" height="14"/><text class="v8-calll" x="823" y="239">get_ranges</text><path class="v8-link" d="M764 257H780"/><rect class="v8-call" x="782" y="250" width="82" height="14"/><text class="v8-calll" x="823" y="261">get_ranges</text><path class="v8-link" d="M764 279H780"/><rect class="v8-call" x="782" y="272" width="82" height="14"/><text class="v8-calll" x="823" y="283">get_ranges</text>
       <text class="v8-say" x="520" y="316">one get_ranges per object, you gather them</text>
     </svg>
-    <p class="path-note">Both merge nearby ranges and fetch in parallel, but get_ranges cannot send If-Match, so a file replaced mid-read can mix two versions.</p>
+    <p class="path-note">Both merge nearby ranges, but get_ranges takes no If-Match: pinning a version means one get_opts per range.</p>
   </div>
 </section>
 
@@ -412,13 +429,13 @@
       <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">10 / 12</span></header>
       <h1>Four I/O threads keep <span class="title-mark">64 transfers in flight</span></h1>
       <figure class="en-wrap">
-        <svg class="en-fig" viewBox="0 0 864 344" role="img" aria-label="Three caller threads submit reads; the planner turns them into transfers in one queue that every I/O thread takes from. Four I/O threads run in parallel, each a libcurl multi loop with 16 transfers in flight at once on one thread, since a transfer spends most of its time waiting for the server. A timeline for each thread shows a batch of 256 transfers, 4 back to back in each of the 64 slots: each a wait, then bytes arriving, and the next one starting as soon as a slot frees. Completions go back to the callers through next. Connections stay warm and TLS sessions are shared. Every batch shares the credential cache and its 4 workers, DNS answers kept 60 seconds, and CA certificates. Batch stats, with example values, show the second batch on the same client opening no new connections.">
+        <svg class="en-fig" viewBox="0 0 864 344" role="img" aria-label="Your program submits reads from as many threads as it likes, three here; the planner turns them into transfers in one queue that every I/O thread takes from. Four I/O threads run in parallel, each a libcurl multi loop with 16 transfers in flight at once on one thread, since a transfer spends most of its time waiting for the server. A timeline for each thread shows a batch of 256 transfers, 4 back to back in each of the 64 slots: each a wait, then bytes arriving, and the next one starting as soon as a slot frees. Completions go back to the callers through next. Connections stay warm and TLS sessions are shared. Every batch shares the credential cache and its 4 workers, DNS answers kept 60 seconds, and CA certificates. Batch stats, with example values, show the second batch on the same client opening no new connections.">
           <defs>
             <marker id="s10-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#777"/></marker>
             <marker id="s10-arrow-on" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#492ae8"/></marker>
           </defs>
 
-          <text class="en-layer" x="0" y="12">caller threads</text>
+          <text class="en-layer" x="0" y="12">your threads</text>
           <text class="en-layer" x="140" y="12">engine</text>
           <text class="en-aside" x="194" y="12">one per client, rebuilt after <tspan class="en-mono">fork()</tspan></text>
           <text class="en-layer" x="652" y="12">storage</text>
@@ -427,9 +444,10 @@
           <rect class="en-box" x="0" y="60" width="92" height="34"/>
           <rect class="en-box" x="0" y="112" width="92" height="34"/>
           <rect class="en-box" x="0" y="164" width="92" height="34"/>
-          <text class="en-who" x="14" y="82">thread 1</text>
-          <text class="en-who" x="14" y="134">thread 2</text>
-          <text class="en-who" x="14" y="186">thread 3</text>
+          <text class="en-who" x="14" y="82">caller 1</text>
+          <text class="en-who" x="14" y="134">caller 2</text>
+          <text class="en-who" x="14" y="186">caller 3</text>
+          <text class="en-aside" x="0" y="218">any number</text>
           <text class="en-call-tag on" x="115" y="62">submit</text>
           <text class="en-call-tag" x="115" y="218">next</text>
           <path class="en-call on" d="M92 71 H154" marker-end="url(#s10-arrow-on)"/>
@@ -527,7 +545,7 @@
 
     <section class="slide s11" aria-label="Whole-object downloads" data-steps="4" data-step="1">
   <header><span class="brand"><img class="brand-icon" src="../assets/svg/karu-mark-color.svg" alt=""><span class="brand-name">karu</span></span><span class="count">11 / 12</span></header>
-  <h1>Whole objects download in parallel with <span class="title-mark">fixed memory</span></h1>
+  <h1>Karu can also <span class="title-mark">download whole objects</span></h1>
   <div class="fig dl">
     <div class="dl-top">
       <div class="dl-tabs" role="tablist" aria-label="Steps">
@@ -536,7 +554,7 @@
         <button type="button" role="tab" data-to="3">publish</button>
         <button type="button" role="tab" data-to="4">on failure</button>
       </div>
-      <span class="dl-new">unreleased</span>
+      <span class="dl-new">new in 0.5.0</span>
       <pre class="dl-code"><code>client.<span class="tok-fn">download</span>(object, <span class="tok-str">"scene.rumi"</span>)</code></pre>
     </div>
     <svg class="dl-fig" viewBox="0 0 864 256" role="img" data-interactive data-phase="sized" aria-label="Downloading an example 200 MiB object to scene.rumi. A first read of 1 MiB returns the size and the ETag, and Karu creates a temporary file beside the destination at the full size. The rest goes in 8 MiB ranges, at most 8 in flight, so memory holds 64 MiB at most; each range carries the ETag as If-Match and is written at its offset when it lands, and a progress callback sees every step. Only when every range has landed is the temporary file published as scene.rumi in one step. If the object changes, the next range fails with status 412, and if the callback returns zero the download is cancelled; either way the temporary file is deleted and nothing appears at scene.rumi.">
@@ -770,18 +788,34 @@
     })();
   </script>
   <script>
-    // The backends slide. Clicking a row shows the request its path becomes, like the
-    // language picker of the Rumi deck. S3 is shown first, so print has a signed request.
+    // The backends slide. Pointing at a logo (hover, focus or tap) shows the request the
+    // same read becomes there. S3 is selected first, so print has a signed request.
     (function () {
       var slide = document.querySelector('.slide.s07');
       if (!slide) return;
-      var rows = Array.prototype.slice.call(slide.querySelectorAll('.bk-row'));
+      var tiles = Array.prototype.slice.call(slide.querySelectorAll('.bk-tile'));
       var cards = Array.prototype.slice.call(slide.querySelectorAll('.bk-card'));
+      var arrow = slide.querySelector('.bk-arrow');
+      var current = null;
       function pick(name) {
-        rows.forEach(function (r) { r.setAttribute('aria-selected', String(r.dataset.bk === name)); });
-        cards.forEach(function (c) { c.hidden = c.dataset.bk !== name; });
+        if (name === current) return;
+        current = name;
+        tiles.forEach(function (t) { t.setAttribute('aria-selected', String(t.dataset.bk === name)); });
+        cards.forEach(function (c) {
+          c.hidden = c.dataset.bk !== name;
+          c.classList.remove('is-in');
+          if (!c.hidden) { void c.offsetWidth; c.classList.add('is-in'); }
+        });
+        // Restart the packet so every pick sends the read again.
+        arrow.classList.remove('is-sending');
+        void arrow.getBoundingClientRect();
+        arrow.classList.add('is-sending');
       }
-      rows.forEach(function (r) { r.addEventListener('click', function () { pick(r.dataset.bk); }); });
+      tiles.forEach(function (t) {
+        ['mouseenter', 'focus', 'click'].forEach(function (type) {
+          t.addEventListener(type, function () { pick(t.dataset.bk); });
+        });
+      });
       pick('s3');
     })();
   </script>
@@ -796,9 +830,10 @@
       var svg = slide.querySelector('.dl-fig');
       var NS = 'http://www.w3.org/2000/svg';
       var X0 = 172, S = 2.8, SIZE = 200, PROBE = 1, CHUNK = 8, SLOTS = 8, FAIL = 9;
-      // Illustrative transfer times in ms, uneven so ranges land out of order.
-      var DUR = [1150, 980, 1320, 1060, 1240, 900, 1400, 1010, 1180, 950, 1290, 1080, 1360,
-        920, 1210, 1040, 1330, 970, 1120, 1260, 990, 1380, 1070, 1190, 900];
+      // Illustrative transfer times in ms, spread so ranges land out of order at a steady pace
+      // instead of in waves.
+      var DUR = [1760, 1080, 650, 1470, 1020, 460, 1610, 760, 750, 1360, 1440, 1560, 1680,
+        1280, 1700, 480, 1850, 920, 620, 1210, 1870, 1440, 1030, 1660, 1380];
       var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       var progress = svg.querySelector('.dl-progress');
       var fail = svg.querySelector('.dl-fail');
@@ -917,14 +952,16 @@
             events.forEach(apply);
             return render();
           }
+          // The replay starts just before the first landing, so the step answers the click at once.
+          var start = events[0].t - 120;
           events.forEach(function (ev) {
             var sl = slots[ev.slot];
-            later(300 + ev.t, function () {
+            later(ev.t - start, function () {
               state.done[ev.chunk] = true;
               sl.g.classList.add('is-write');
               render();
             });
-            later(300 + ev.t + 220, function () {
+            later(ev.t - start + 220, function () {
               sl.g.classList.remove('is-write');
               state.held[ev.slot] = ev.next;
               render();
