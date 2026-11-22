@@ -1,0 +1,351 @@
+/* How Karu reads, the interactive figures: tabs that switch a panel, the range
+   explorer and the merge playground. Static markup reads on its own; reads.js only
+   switches panels and redraws the two explorers. */
+
+/* reading.css has no status colors, so the ones from tokens.css are repeated here. */
+:root {
+  --mint: #26745f;
+  --mint-soft: rgba(38, 116, 95, 0.12);
+  --gold: #815d00;
+  --gold-soft: rgba(129, 93, 0, 0.12);
+  --ember: #a14730;
+  --ember-soft: rgba(161, 71, 48, 0.12);
+}
+
+.rk {
+  margin: 1.8em 0 2em;
+  border: 1px solid var(--edge);
+  background: var(--bg);
+}
+
+.rk-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.rk-title {
+  margin: 0;
+  color: var(--violet);
+  font: 500 11px/1.3 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rk-hint {
+  margin: 0;
+  color: var(--faint);
+  font: 13px/1.3 var(--sans);
+}
+
+/* Tabs along the top, or a list down the side in the two pickers */
+
+.rk-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--rule);
+}
+
+.rk-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 12px 18px 11px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.rk-tab + .rk-tab { border-left: 1px solid var(--rule); }
+.rk-tab:hover { background: var(--panel-soft); color: var(--ink); }
+.rk-tab:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+
+.rk-tab b {
+  display: block;
+  font: 500 11px/1.3 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rk-tab span {
+  display: block;
+  margin-top: 3px;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.rk-tab[aria-selected="true"] {
+  border-bottom-color: var(--violet);
+  color: var(--ink);
+}
+
+.rk-tab[aria-selected="true"] b { color: var(--violet); }
+
+.rk-panel { min-width: 0; padding: 18px; }
+
+/* Grid children shrink below their code so long lines scroll inside the panel */
+.rk-pick > div { min-width: 0; }
+.rk .code-block { margin: 0; }
+.rk-panel[hidden] { display: none; }
+
+.content .rk-panel p {
+  margin: 12px 0 0;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.content .rk pre {
+  margin: 0;
+  padding: 14px 16px;
+  border: 0;
+  background: var(--panel-soft);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-x: auto;
+}
+
+.rk pre .rk-key { color: var(--dim); }
+.rk pre .rk-num { color: #c2410c; }
+.rk pre .rk-ok { color: var(--mint); }
+.rk pre .rk-bad { color: var(--ember); }
+
+/* The two pickers: scenarios on the left, what Karu does on the right */
+
+.rk-pick {
+  display: grid;
+  grid-template-columns: minmax(180px, 230px) 1fr;
+}
+
+.rk-pick .rk-tabs {
+  flex-direction: column;
+  border-right: 1px solid var(--rule);
+  border-bottom: 0;
+}
+
+.rk-pick .rk-tab {
+  flex: none;
+  padding: 10px 16px;
+  border-bottom: 0;
+  border-left: 2px solid transparent;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.rk-pick .rk-tab + .rk-tab {
+  border-top: 1px solid var(--rule);
+  border-left: 2px solid transparent;
+}
+
+.rk-pick .rk-tab[aria-selected="true"] {
+  border-left-color: var(--violet);
+  background: var(--violet-soft);
+}
+
+.rk-gates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.rk-gate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--edge);
+  color: var(--dim);
+  font: 12px/1.3 var(--mono);
+}
+
+.rk-gate::before {
+  content: "–";
+  font-weight: 600;
+}
+
+.rk-gate.is-pass { border-color: rgba(38, 116, 95, 0.4); background: var(--mint-soft); color: var(--mint); }
+.rk-gate.is-pass::before { content: "✓"; }
+.rk-gate.is-fail { border-color: rgba(161, 71, 48, 0.45); background: var(--ember-soft); color: var(--ember); }
+.rk-gate.is-fail::before { content: "✕"; }
+.rk-gate.is-skip { opacity: 0.55; }
+
+/* A sentence, not a flex row, so inline code inside it wraps with the words */
+.rk-out {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.rk-out b {
+  margin-right: 8px;
+  color: var(--violet);
+  font: 500 11px/1.3 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rk-status {
+  margin-right: 4px;
+  padding: 1px 7px;
+  background: var(--panel-soft);
+  font: 500 13px/1.5 var(--mono);
+}
+
+.rk-status.is-ok { background: var(--mint-soft); color: var(--mint); }
+.rk-status.is-error { background: var(--ember-soft); color: var(--ember); }
+.rk-status.is-retry { background: var(--gold-soft); color: var(--gold); }
+
+/* The two explorers: controls, a drawing and a readout */
+
+.rk-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px 22px;
+  padding: 16px 18px 6px;
+}
+
+.rk-control label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--dim);
+  font: 500 11px/1.3 var(--mono);
+  letter-spacing: 0.04em;
+}
+
+.rk-control output {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.rk-control small {
+  display: block;
+  margin-top: 2px;
+  color: var(--faint);
+  font: 10.5px/1.3 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.rk-control .rk-toggle {
+  justify-content: flex-start;
+  height: 100%;
+  font: 15px/1.3 var(--sans);
+  letter-spacing: 0;
+}
+
+.rk-control input[type="range"] {
+  width: 100%;
+  margin: 8px 0 0;
+  accent-color: var(--violet);
+}
+
+.rk-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.rk-toggle input { accent-color: var(--violet); }
+
+.rk-draw {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 6px 18px 4px;
+  overflow: visible;
+  font-family: var(--sans);
+}
+
+.rk-draw .track { fill: var(--panel-soft); stroke: var(--edge); }
+.rk-draw .window { fill: var(--violet-soft); stroke: var(--violet); stroke-dasharray: 4 3; }
+.rk-draw .pick { fill: var(--violet); }
+.rk-draw .pick.is-bad { fill: var(--ember); }
+.rk-draw .read { fill: var(--violet); }
+.rk-draw .fetch { fill: var(--violet-soft); stroke: var(--violet); stroke-width: 1; }
+.rk-draw .tick { stroke: var(--dim); stroke-width: 1; }
+.rk-draw text { fill: var(--dim); font-size: 11px; }
+.rk-draw .lab { fill: var(--ink-soft); font: 500 11px var(--mono); }
+.rk-draw .on { fill: #fff; font: 600 11px var(--mono); }
+
+/* The four merge rules, drawn like the deck's slides 05 and 06 */
+.rk-rule { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.content .rk-rule-k { margin: 0; color: var(--dim); font: 500 18px/1.2 var(--sans); }
+.rk-rule-k b { color: var(--ink); font-weight: 600; }
+.content .rk-rule-env { padding: 3px 8px; background: var(--violet-soft); color: var(--violet); font: 500 14px/1.3 var(--mono); }
+.content .rk-panel .rk-rule-text { margin: 8px 0 4px; color: var(--ink-soft); }
+.rk-rule-draw { padding: 10px 0 0; }
+.rk-draw .hole { stroke: var(--faint); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.rk-draw .size { fill: var(--dim); font: 11px var(--mono); }
+.rk-draw .drop { fill: var(--faint); font: italic 11px var(--sans); }
+.rk-draw .halo { paint-order: stroke; stroke: var(--bg); stroke-width: 5px; }
+.rk-draw .ruler { stroke: var(--violet); stroke-width: 1; stroke-dasharray: 4 3; }
+.rk-draw .vd-join { fill: var(--mint); font-size: 12px; }
+.rk-draw .vd-split { fill: var(--ember); font-size: 12px; }
+.rk-draw .vd-head { font-weight: 600; }
+
+.rk-read {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0;
+  margin: 6px 18px 18px;
+  border: 1px solid var(--rule);
+}
+
+.rk-read > div {
+  padding: 10px 14px;
+  border-right: 1px solid var(--rule);
+}
+
+.rk-read > div:nth-last-child(2) { border-right: 0; }
+
+.rk-read span {
+  display: block;
+  color: var(--faint);
+  font: 500 10.5px/1.3 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.content .rk-read code {
+  display: block;
+  margin-top: 4px;
+  padding: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* The verdict is the longest line, so it gets the full width */
+.rk-read > div:last-child {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--rule);
+}
+
+.content .rk-read .is-bad code { color: var(--ember); }
+
+@media (max-width: 720px) {
+  .rk-tabs { overflow-x: auto; }
+  .rk-tab { flex: 0 0 auto; min-width: 150px; }
+  .rk-pick { grid-template-columns: 1fr; }
+  .rk-pick .rk-tabs { flex-direction: row; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .rk-pick .rk-tab + .rk-tab { border-top: 0; border-left: 1px solid var(--rule); }
+  .rk-pick .rk-tab { border-left: 0; border-bottom: 2px solid transparent; }
+  .rk-pick .rk-tab[aria-selected="true"] { border-bottom-color: var(--violet); }
+  .rk-head { flex-direction: column; gap: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rk-tab { transition: none; }
+}

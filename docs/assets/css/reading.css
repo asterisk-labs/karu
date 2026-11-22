@@ -72,7 +72,7 @@ pre {
 }
 
 ::selection {
-  background: var(--mint);
+  background: rgba(73, 42, 232, 0.2);
   color: var(--ink);
 }
 

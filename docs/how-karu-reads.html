@@ -10,8 +10,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=League+Spartan:wght@300;400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/reading.css?v=3">
+<link rel="stylesheet" href="assets/css/reading.css?v=4">
 <link rel="stylesheet" href="assets/css/guide.css?v=1">
+<link rel="stylesheet" href="assets/css/reads.css?v=6">
 </head>
 <body>
 <div class="page">
@@ -38,6 +39,7 @@
     <nav class="nav" aria-label="Sections">
       <a href="how-karu-reads.html" class="here">How Karu reads</a>
       <a href="configuration.html">Configuration</a>
+      <a href="api.html">API</a>
       <a href="deck/index.html">Deck</a>
     </nav>
   </header>
@@ -48,77 +50,82 @@
       <ol class="toc-pages">
         <li><a href="how-karu-reads.html" class="here" aria-current="page">How Karu reads</a></li>
         <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="api.html">API</a></li>
       </ol>
     </nav>
 
     <article class="content">
       <h1>How Karu reads</h1>
       <ul class="facts">
-        <li>What happens between a byte range and a filled buffer, for local files and remote objects.</li>
+        <li>What happens between asking for a byte range and getting a filled buffer back.</li>
       </ul>
       <aside class="series" aria-label="Section">
-        <p class="series-title">Docs, in 2 pages</p>
+        <p class="series-title">Docs, in 3 pages</p>
         <ol>
           <li class="here" aria-current="page">How Karu reads</li>
           <li><a href="configuration.html">Configuration</a></li>
+          <li><a href="api.html">API</a></li>
         </ol>
       </aside>
 
-      <p>Karu receives exact byte ranges and returns the bytes that belong in each destination buffer. This guide follows that work in order, from the caller description to the final checked completion. The contract stays the same for a local file, an HTTP server, or cloud object storage.</p>
+      <p class="lede">Karu is a byte-range reader. Each read names an object, an offset, a length and a destination buffer. Karu retrieves the bytes from a local file, an HTTP server or a cloud object store and reports a completion for every read. This page follows a single read from its description to its completion and explains the design decisions at each stage.</p>
 
       <h2 class="part" id="start">One read, seen from end to end</h2>
-      <p class="section-intro">Imagine a format reader needs 4 KiB from the middle of a large object. It already knows where those bytes begin and where the answer should go. Karu turns that description into one checked completion.</p>
-      <figure class="diagram wide story-figure">
-        <svg viewBox="0 0 760 188" role="img" aria-labelledby="overview-title overview-desc">
-          <title id="overview-title">The complete path of one Karu read</title>
-          <desc id="overview-desc">A read moves through addressing, planning, transport, validation, and delivery.</desc>
-          <defs><marker id="arrow-overview" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10Z"/></marker></defs>
-          <text class="flow-stage" x="8" y="19">INTENT</text><text class="flow-stage" x="220" y="19">PLAN</text><text class="flow-stage" x="432" y="19">TRANSFER</text><text class="flow-stage" x="644" y="19">RESULT</text>
-          <g class="flow-card"><rect x="8" y="32" width="154" height="76"/><text x="85" y="57">Object</text><text class="sub" x="85" y="76">offset 1 MiB</text><text class="sub" x="85" y="92">length 4 KiB</text></g>
-          <path class="flow-arrow" style="marker-end:url(#arrow-overview)" d="M162 70H212"/>
-          <g class="flow-card accent"><rect x="220" y="32" width="154" height="76"/><text x="297" y="57">Planner</text><text class="sub" x="297" y="76">validate</text><text class="sub" x="297" y="92">group and merge</text></g>
-          <path class="flow-arrow" style="marker-end:url(#arrow-overview)" d="M374 70H424"/>
-          <g class="flow-card"><rect x="432" y="32" width="154" height="76"/><text x="509" y="57">Transport</text><text class="sub" x="509" y="76">pread or HTTP</text><text class="sub" x="509" y="92">retry when safe</text></g>
-          <path class="flow-arrow" style="marker-end:url(#arrow-overview)" d="M586 70H636"/>
-          <g class="flow-card accent"><rect x="644" y="32" width="108" height="76"/><text x="698" y="57">Buffer</text><text class="sub" x="698" y="76">tag</text><text class="sub" x="698" y="92">status and count</text></g>
-          <path class="flow-baseline" d="M8 134H752"/><circle class="flow-dot" cx="85" cy="134" r="4"/><circle class="flow-dot" cx="297" cy="134" r="4"/><circle class="flow-dot" cx="509" cy="134" r="4"/><circle class="flow-dot" cx="698" cy="134" r="4"/>
-          <text class="flow-note left" x="8" y="165">The caller describes the bytes once. Karu preserves that meaning through every stage.</text>
-        </svg>
-        <figcaption>The object and byte range express intent. Planning reduces request cost. Transport moves data. Validation decides whether the result can be trusted.</figcaption>
-      </figure>
-      <div class="process-strip" aria-label="One numerical read across the system">
-        <div><b>Caller</b><span>Offset 1,048,576<br>Length 4,096</span></div>
-        <div><b>HTTP</b><span>Bytes 1,048,576<br>through 1,052,671</span></div>
-        <div><b>Validation</b><span>Status 206<br>Range and length match</span></div>
-        <div><b>Completion</b><span>Status OK<br>Got 4,096 bytes</span></div>
-      </div>
-      <div class="concept-grid"><div><b>Karu knows</b><p>Where the bytes live, which range is wanted, and which buffer receives them.</p></div><div><b>Karu does not know</b><p>Whether the bytes represent an image, a record, a frame, or something else.</p></div></div>
-      <div class="technical-note">
-        <span>Inside the model</span>
-        <p><code>Request</code> preserves the caller intent. The planner turns it into a <code>Transfer</code>, which represents one local read or one HTTP request. Every original request becomes a <code>Part</code> inside that transfer. When work finishes, each part becomes its own <code>Completion</code>.</p>
-        <p>This separation allows three caller reads to share one network transfer without becoming one caller result. Transport can change while ownership, tags, destinations, and errors remain attached to the original parts.</p>
-      </div>
-      <h3>The boundary of the library</h3>
-      <p>Karu resolves addresses, reports visible size, and reads byte ranges. It supports local files, plain HTTP, Amazon S3 and compatible storage, Google Cloud Storage, Azure Blob and Data Lake Storage, Hugging Face, and Source Cooperative.</p>
-      <p>It is source-side read only. It does not upload, delete, or list objects. It does not parse file formats and does not cache object data. It may materialize every visible byte into a caller-named local file. A layer above Karu decides which bytes have meaning. This narrow contract keeps reads safe to reorder, merge, and retry.</p>
-      <p>Rumi, for example, maps training windows to compressed frames and submits their byte ranges to Karu. As reads complete, Rumi decodes the frames into arrays or tensors. Karu handles the transport; Rumi handles the format.</p>
+      <p class="section-intro">The example reads 4 KiB starting 1 MiB into an object on S3. Its four steps show the request the caller fills in, the transfer the planner makes of it, the HTTP exchange Karu sends and checks, and the completion it returns. Local files follow the same steps, with a <code>pread</code> in place of the HTTP exchange.</p>
+      <div class="rk" data-rk="steps">
+        <div class="rk-head"><p class="rk-title">Follow one read</p><p class="rk-hint">Click a step, or use the arrow keys.</p></div>
+        <div class="rk-tabs" role="tablist" aria-label="Steps of one read">
+          <button type="button" class="rk-tab" role="tab" id="step-1" aria-controls="step-1-panel" aria-selected="true"><b>1 · Intent</b><span>the description</span></button>
+          <button type="button" class="rk-tab" role="tab" id="step-2" aria-controls="step-2-panel" aria-selected="false"><b>2 · Plan</b><span>reads to transfers</span></button>
+          <button type="button" class="rk-tab" role="tab" id="step-3" aria-controls="step-3-panel" aria-selected="false"><b>3 · Transfer</b><span>request and response</span></button>
+          <button type="button" class="rk-tab" role="tab" id="step-4" aria-controls="step-4-panel" aria-selected="false"><b>4 · Result</b><span>the completion</span></button>
+        </div>
+        <div class="rk-panel" role="tabpanel" id="step-1-panel" aria-labelledby="step-1">
+<pre><code>karu_req read = {
+    .locator = scene,      <span class="rk-key">// karu_resolve("s3://bucket/scene.tif")</span>
+    .offset  = <span class="rk-num">1048576</span>,
+    .length  = <span class="rk-num">4096</span>,
+    .buffer  = buf,
+    .tag     = (void*)<span class="rk-num">7</span>,
+};</code></pre>
+          <p>The caller describes the read once, in a <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L258"><code>karu_req</code></a>. The tag belongs to the caller. Karu returns it unchanged, so each completion can be matched to its read regardless of arrival order.</p>
+        </div>
+        <div class="rk-panel" role="tabpanel" id="step-2-panel" aria-labelledby="step-2" hidden>
+<pre><code><span class="rk-key">// transfer 1: s3://bucket/scene.tif</span>
+range  <span class="rk-num">1048576</span>-<span class="rk-num">1052671</span>   <span class="rk-key">// 4,096 bytes</span>
+parts  <span class="rk-num">1</span>                 <span class="rk-key">// tag 7, into buf</span></code></pre>
+          <p>The planner checks the read, turns a window offset into an object offset and groups reads by object. This read has no neighbours, so it becomes one transfer with one part. Reads that sit close together in the same object would share a transfer; <a href="#plan">merging</a> explains when.</p>
+        </div>
+        <div class="rk-panel" role="tabpanel" id="step-3-panel" aria-labelledby="step-3" hidden>
+<pre><code>GET /scene.tif HTTP/1.1
+Host: bucket.s3.us-east-1.amazonaws.com
+Range: bytes=<span class="rk-num">1048576</span>-<span class="rk-num">1052671</span>
+Authorization: AWS4-HMAC-SHA256 Credential=…
 
+HTTP/1.1 <span class="rk-ok">206 Partial Content</span>
+Content-Range: bytes <span class="rk-num">1048576</span>-<span class="rk-num">1052671</span>/<span class="rk-num">2147483648</span>
+Content-Length: <span class="rk-num">4096</span></code></pre>
+          <div class="rk-gates"><span class="rk-gate is-pass">status 206</span><span class="rk-gate is-pass">range starts and ends where asked</span><span class="rk-gate is-pass">4,096 bytes arrived</span></div>
+          <p>HTTP names the last byte, not the length, so the range ends at 1,052,671. The request is signed just before it is sent, once the range and the region are known. A response without an error is not yet a success. Karu accepts it only when the status, the returned range and the byte count all match the request.</p>
+        </div>
+        <div class="rk-panel" role="tabpanel" id="step-4-panel" aria-labelledby="step-4" hidden>
+<pre><code>karu_done done;
+karu_batch_next(batch, &amp;done, -1);
+<span class="rk-key">// done.tag    == (void*)7</span>
+<span class="rk-key">// done.status == KARU_OK</span>
+<span class="rk-key">// done.got    == 4096</span>
+<span class="rk-key">// done.buffer == buf</span></code></pre>
+          <p>The completion, a <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L274"><code>karu_done</code></a>, carries the caller's tag, a status and a byte count. Only the first <code>got</code> bytes of the buffer are valid.</p>
+        </div>
+      </div>
+      <p>Karu knows where the bytes are stored, which range is requested and which buffer receives it. It does not know what the bytes represent, whether an image tile, a Parquet row group or a compressed frame. The rest of the design follows from this separation. <strong>Because Karu never interprets the bytes, it can reorder reads, merge neighbouring reads into one request and retry them.</strong></p>
+      <p>Internally, <strong>the read is kept separate from the network request that serves it</strong>. The planner turns reads into <em>transfers</em>, one local read or one HTTP request each. Every read becomes a <em>part</em> of some transfer, and every part finishes as its own completion. Three reads can share one request and still produce three completions, each with its own buffer and tag. If that shared request fails, all three report the failure.</p>
+      <h3>What Karu does and what it leaves to the caller</h3>
+      <p><strong>Karu only reads.</strong> It resolves addresses, reports sizes and reads ranges from local files, plain HTTP, Amazon S3 and compatible stores, Google Cloud Storage, Azure Blob and Data Lake Storage, Hugging Face and Source Cooperative. It can also download large objects in parallel. It never writes, deletes or lists remote objects, it does not parse formats, and it does not cache object data.</p>
 
       <h2 class="part" id="address">A read is a location, not a cursor</h2>
-      <p class="section-intro">A Karu read names an object, an offset, a length, and a destination. The offset travels with the request. There is no shared file position to seek or protect with a lock.</p>
-      <h3>Begin with the nouns</h3>
-      <div class="definition-grid">
-        <div><b>Byte</b><p>The smallest addressable unit Karu moves. A byte contains eight bits and is represented by one numeric position inside an object.</p></div>
-        <div><b>Object</b><p>A finite sequence of bytes with a name. It may be a local file, a web resource, or an object stored by a cloud provider.</p></div>
-        <div><b>Offset</b><p>The number of bytes from the beginning of the visible object to the first requested byte. Counting starts at zero.</p></div>
-        <div><b>Length</b><p>How many consecutive bytes the caller wants. Karu requires a finite, nonzero length for every read.</p></div>
-        <div><b>Destination</b><p>The memory buffer that receives the result. Its lifetime remains the caller responsibility while the batch is active.</p></div>
-        <div><b>Range</b><p>An offset and length considered together. It identifies one contiguous interval without moving or changing the object.</p></div>
-      </div>
-
-      <h3>What a cursor is</h3>
-      <p>A traditional file handle often stores a cursor. The cursor is a mutable position inside the file. Reading advances it, and seeking moves it somewhere else. If two threads share that handle, one thread can move the cursor while another is using it, so access must be serialized or each thread needs its own handle.</p>
-      <p>A positional read does not use that shared position. The offset is an argument of the operation. Reading byte 100 does not alter a value that a later read can observe. This is the meaning of stateless in Karu. Objects describe addresses, while every read carries its own position.</p>
+      <p class="section-intro">Karu reads the way <a href="https://man7.org/linux/man-pages/man2/pread.2.html"><code>pread</code></a> does, the classic positional read of POSIX. Each read carries its own object, offset, length and destination, and nothing is stored between reads, so there is no file position to seek or to protect with a lock.</p>
+      <p>An ordinary file handle keeps a cursor. Reading moves it forward and seeking moves it elsewhere, so two threads sharing one handle step on each other. <a href="https://man7.org/linux/man-pages/man2/pread.2.html"><code>pread</code></a> takes the offset as an argument instead and never moves the cursor, and Karu applies that model to every backend, remote objects included. That is what <em>stateless</em> means here. <strong>No read changes anything another read can see</strong>, so the engine can run reads in any order, or all at once.</p>
       <figure class="diagram wide story-figure compact">
         <svg viewBox="0 0 760 232" role="img" aria-labelledby="cursor-title cursor-desc">
           <title id="cursor-title">Cursor reads compared with positional reads</title>
@@ -139,44 +146,32 @@
           <text class="range-byte" x="172" y="175">read A</text><text class="range-byte" x="484" y="175">read B</text>
           <text class="flow-note" x="172" y="211">offset 118</text><text class="flow-note" x="484" y="211">offset 412</text>
         </svg>
-        <figcaption>A cursor creates shared mutable state. Positional reads remain independent, so the engine can reorder or overlap them safely.</figcaption>
+        <figcaption>With a cursor, every read depends on the one before it. With positions, reads A and B can run in either order or at the same time.</figcaption>
       </figure>
-
-      <h3>Why a remote object is not an open file</h3>
-      <p>A local file descriptor is a kernel object inside one machine. Opening it produces a reusable handle, and a positional read can copy bytes directly from the filesystem cache or storage device. A remote object has no equivalent open handle. Every read is a network exchange with a service that may require a URL, authentication, and a new response.</p>
-      <p>This difference changes the dominant cost. A small local read may finish in microseconds. A remote read may wait tens or hundreds of milliseconds even when it returns only a few kilobytes. The delay comes mainly from communication, not from copying the bytes. Karu therefore optimizes request count, concurrency, and connection reuse.</p>
-      <figure class="diagram wide story-figure compact">
-        <svg viewBox="0 0 760 164" role="img" aria-labelledby="range-title range-desc">
-          <title id="range-title">A positional read inside an object</title><desc id="range-desc">The full object contains a selected byte range beginning at an offset and spanning a fixed length.</desc>
-          <text class="flow-stage" x="8" y="19">ONE OBJECT</text><rect class="object-track" x="8" y="48" width="744" height="42"/><rect class="object-before" x="8" y="48" width="258" height="42"/><rect class="object-range" x="266" y="48" width="176" height="42"/>
-          <line class="range-tick" x1="266" y1="39" x2="266" y2="103"/><line class="range-tick" x1="442" y1="39" x2="442" y2="103"/><text class="range-label" x="266" y="31">offset</text><text class="range-label end" x="442" y="31">offset plus length</text><text class="range-byte" x="354" y="73">requested bytes</text><path class="range-bracket" d="M266 116V124H442V116"/><text class="flow-note" x="354" y="146">length</text>
-        </svg>
-        <figcaption>The range is exact. For remote reads Karu can therefore check that the server returned the same interval.</figcaption>
-      </figure>
-      <h3>Windows keep coordinates honest</h3>
-      <p>A locator may expose only a window of a larger object. An offset of zero then means the first byte inside that window, not the first byte of the underlying object. Karu converts the request to an absolute offset before transport and rejects any read that leaves the window.</p>
-      <div class="technical-note">
-        <span>Two range conventions</span>
-        <p>The public read is easiest to reason about as the half open interval <code>[offset, offset + length)</code>. HTTP uses an inclusive last byte, so the request builder converts it to <code>bytes=first-last</code> where <code>last = first + length - 1</code>.</p>
-        <p>Validation happens before the subtraction. Empty reads and an unbounded length are rejected. The planner also checks addition for unsigned 64 bit overflow and verifies that the interval remains inside a bounded locator window.</p>
+      <p>A local file and a remote object differ more than the API suggests. A file descriptor is a kernel handle, and <code>pread</code> copies from the page cache in microseconds. A remote object has no open handle, and every read is a network exchange that may need a DNS lookup, a TLS connection, a signature and a fresh response. A 4 KiB read can easily wait 50 or 100 ms, nearly all of it in round trips. That is why Karu works so hard on request count, concurrency and connection reuse.</p>
+      <div class="rk" data-rk="range">
+        <div class="rk-head"><p class="rk-title">Ranges and windows</p><p class="rk-hint">Drag the sliders. The object is 64 KiB.</p></div>
+        <div class="rk-controls">
+          <div class="rk-control"><label for="rk-offset">offset <output data-show="offset">16,384</output></label><input id="rk-offset" name="offset" type="range" min="0" max="65535" step="128" value="16384"></div>
+          <div class="rk-control"><label for="rk-length">length <output data-show="length">4,096</output></label><input id="rk-length" name="length" type="range" min="1" max="24576" step="1" value="4096"></div>
+          <div class="rk-control"><label class="rk-toggle"><input name="window" type="checkbox"> read through a 32 KiB window</label></div>
+        </div>
+        <svg class="rk-draw" viewBox="0 0 720 90" role="img" aria-label="The object, the window when it is on, and the selected range"></svg>
+        <div class="rk-read" aria-live="polite">
+          <div><span>Requested interval</span><code data-out="interval">[16,384, 20,480)</code></div>
+          <div><span>In the object</span><code data-out="absolute">the same, no window</code></div>
+          <div><span>Header Karu sends</span><code data-out="header">Range: bytes=16384-20479</code></div>
+          <div><span>What happens</span><code data-out="verdict">206 with Content-Range: bytes 16384-20479/65536</code></div>
+        </div>
       </div>
-      <h3>The same request shape works everywhere</h3>
-      <p>A local path becomes a positional file read. A remote URI becomes a closed HTTP range request. The caller still provides the same four pieces of information and receives the same completion shape.</p>
-      <h3>Resolution creates one canonical identity</h3>
-      <p>A locator parses the caller address into a backend, canonical path, provider container, object key, and optional window. The canonical path is a normalized internal identity. It lets different accepted spellings reach the same configuration rules, planner group, and credential scope.</p>
-      <p>Resolution does not contact the network and does not load credentials. It only establishes what the resource means. Endpoint selection and authentication happen later, when an actual transfer is prepared.</p>
-      <h3>What an HTTP Range request is</h3>
-      <p>HTTP normally asks a server for an entire resource. A Range request adds a header that names only the needed byte interval. If Karu wants 4,096 bytes beginning at offset 1,048,576, it asks for bytes 1,048,576 through 1,052,671. The final value is inclusive, which is why it is one less than offset plus length.</p>
-      <div class="protocol-pair" aria-label="Example HTTP range exchange">
-        <div><span>Request</span><code>GET /object HTTP/1.1</code><code>Host  storage.example</code><code>Range  bytes=1048576-1052671</code></div>
-        <div><span>Response</span><code>HTTP/1.1 206 Partial Content</code><code>Content-Range  bytes 1048576-1052671/2147483648</code><code>Content-Length  4096</code></div>
-      </div>
-      <p>Status 206 means the server returned partial content. The <code>Content-Range</code> response header states which bytes arrived and the total object size when known. Karu later checks both values against the transfer it planned. Status 200 means the server returned a normal complete response and may have ignored the range. Status 416 means the requested interval could not be satisfied.</p>
-      <div class="takeaway note"><b>You now have the first layer</b><p>Every operation is independent. That makes concurrency and batching possible without shared cursors.</p></div>
+      <p>Karu thinks of a read as the half-open interval <code>[offset, offset + length)</code>. HTTP names the last byte instead, so Karu sends <code>bytes=first-last</code> with <code>last = first + length - 1</code>. <strong>A read past the end of the object still returns the bytes that exist</strong>. The completion reports that prefix in <code>got</code>, with <code>KARU_ERR_RANGE</code> for the rest.</p>
+      <p>A locator can also be a window into a larger object, such as one file inside an uncompressed archive (<code>/vsisubfile/</code>, or <code>#bytes=</code> on a URI). Offset 0 is then the first byte of the window. Karu adds the window start before building the request, and a read that leaves the window fails right away, without a request.</p>
+      <h3>How an HTTP Range request works</h3>
+      <p>A normal GET asks for the whole resource. A <a href="https://www.rfc-editor.org/rfc/rfc9110#name-range-requests">Range request</a> adds one header that names the requested bytes. A server that supports it answers <a href="https://www.rfc-editor.org/rfc/rfc9110#name-206-partial-content">206 Partial Content</a> with a <code>Content-Range</code> header repeating the interval and, usually, the total size. A 200 means the server ignored the range and is sending the whole object. A <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/416">416</a> means the range starts past the end.</p>
+      <p>Resolving a locator with <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L135"><code>karu_resolve</code></a> touches neither the network nor credentials. It only works out the backend, the canonical path, the bucket or container, the key and the window. Configuration rules, merging and credential reuse are all keyed on the canonical path, so <code>s3://bucket/key</code> and <code>/vsis3/bucket/key</code> behave the same.</p>
 
-
-      <h2 class="part" id="batch">Give Karu the reads you already know</h2>
-      <p class="section-intro">Remote reads spend much of their life waiting for a round trip. Submitting them one at a time hides the pattern and pays that wait repeatedly. A batch gives the engine enough information to overlap work and find nearby ranges.</p>
+      <h2 class="part" id="batch">Reads are submitted in batches</h2>
+      <p class="section-intro">Most of the time taken by a remote read is spent waiting for the server. Reads submitted one at a time pay that latency once each. <strong>Reads submitted together overlap their waits</strong>, and Karu can identify reads that lie close together in the same object.</p>
       <figure class="diagram wide story-figure">
         <svg viewBox="0 0 760 246" role="img" aria-labelledby="batch-title batch-desc">
           <title id="batch-title">Sequential reads compared with a concurrent batch</title><desc id="batch-desc">Four sequential reads wait one after another while four batched reads overlap and finish in different order.</desc>
@@ -187,11 +182,20 @@
           <g class="wait-block accent"><rect x="108" y="153" width="255" height="28"/><text x="235" y="172">read A</text></g><g class="wait-block"><rect x="108" y="184" width="350" height="28"/><text x="283" y="203">read B</text></g><g class="wait-block accent"><rect x="108" y="215" width="212" height="28"/><text x="214" y="234">read C</text></g><g class="wait-block"><rect x="108" y="122" width="410" height="28"/><text x="313" y="141">read D</text></g>
           <text class="flow-note right" x="752" y="235">completions arrive when each read finishes</text>
         </svg>
-        <figcaption>A batch does not promise submission order. Each completion carries the caller tag, status, byte count, and destination so it can be matched safely.</figcaption>
+        <figcaption>The four waits overlap, and the reads finish in whatever order the servers answer. The tag identifies the read behind each completion.</figcaption>
       </figure>
-      <div class="concept-grid three"><div><b>Submit</b><p>Copies request descriptions and returns a batch that can be drained as work finishes.</p></div><div><b>Next</b><p>Returns one completion at a time. Several threads may consume the same batch.</p></div><div><b>Fetch</b><p>Waits for the whole batch when streaming completions are not useful.</p></div></div>
-      <h3>A buffer has one clear lifetime</h3>
-      <p>The destination belongs to one original read even when several reads share a transfer. A caller supplied buffer must remain valid until the batch is released. If the request has no destination, Karu allocates one and returns it through the completion. The caller then releases it with <code>karu_free</code>.</p>
+<pre><code class="language-c">karu_batch* batch = NULL;
+karu_client_submit(client, reads, count, &amp;batch);
+
+karu_done done;
+while (karu_batch_next(batch, &amp;done, -1) == KARU_OK)
+    use(done.tag, done.status, done.buffer, done.got);
+
+karu_batch_free(batch);</code></pre>
+      <p><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L289"><code>karu_client_submit</code></a> copies the request descriptions and returns immediately. <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L299"><code>karu_batch_next</code></a> returns one completion at a time, in the order the reads finish rather than the order of submission, and several threads can drain the same batch. When all results are needed together, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L335"><code>karu_client_fetch</code></a> waits for the whole batch.</p>
+      <p>Two kinds of mistakes are caught at different times. A malformed request, such as a zero length, no locator or a line break in an ETag, makes the whole submit fail with <code>KARU_ERR_INVALID</code>, and no batch is created. A range that leaves its window fails only that read, as an immediate completion, while the rest of the batch carries on.</p>
+      <h3>Buffers</h3>
+      <p>Each destination belongs to one read, even when that read shares a request with others. <strong>A buffer supplied by the caller must remain valid until the batch is freed.</strong> When the destination is <code>NULL</code>, Karu allocates the buffer and returns it in the completion, and the caller releases it with <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L55"><code>karu_free</code></a>.</p>
       <figure class="diagram wide story-figure compact">
         <svg viewBox="0 0 760 176" role="img" aria-labelledby="buffer-title buffer-desc">
           <title id="buffer-title">The lifetime of a destination buffer</title><desc id="buffer-desc">The caller creates or requests a buffer, Karu writes while the batch is active, the completion makes the valid prefix readable, and ownership ends when the buffer and batch are released.</desc>
@@ -205,82 +209,73 @@
           <g class="flow-card accent"><rect x="614" y="34" width="138" height="68"/><text x="683" y="59">Release</text><text class="sub" x="683" y="77">free the batch</text><text class="sub" x="683" y="91">release owned memory</text></g>
           <text class="flow-note left" x="8" y="143">Only the first got bytes may be read. Memory beyond that prefix is unspecified.</text>
         </svg>
-        <figcaption>Ownership never follows a merged transfer. Every completion returns the destination associated with its original request.</figcaption>
+        <figcaption>Even when reads share a request, each completion returns the buffer of its own read.</figcaption>
       </figure>
-      <h3>The wait result and the read result are different</h3>
-      <div class="concept-grid">
-        <div><b>Next returns OK</b><p>One completion is ready. Its own status says whether that individual read succeeded.</p></div>
-        <div><b>Next returns timeout</b><p>The wait ended without a completion. Work continues and the output remains unchanged.</p></div>
-        <div><b>Next returns end</b><p>Every original read has completed and the batch is fully drained.</p></div>
-        <div><b>Completion status</b><p>OK means the requested bytes arrived. An error belongs only to that original read.</p></div>
-      </div>
-      <div class="technical-note">
-        <span>Batch state</span>
-        <p>A batch owns a synchronized completion queue and counts unfinished parts and live transfers. Planner errors enter the same queue as network results, so an invalid range can fail immediately while valid reads from the same submission continue.</p>
-        <p>Releasing the batch marks pending work as cancelled and waits until active workers no longer reference its buffers. It must not run concurrently with <code>next</code> on that batch.</p>
-      </div>
-      <div class="takeaway note"><b>You now have useful concurrency</b><p>The batch exposes parallel work without changing the meaning of any individual range.</p></div>
-
+      <h3>Two statuses, two meanings</h3>
+      <table class="spec"><thead><tr><th><code>karu_batch_next</code> returns</th><th>Meaning</th></tr></thead><tbody>
+        <tr><td><code>KARU_OK</code></td><td>One completion is ready. Its own <code>status</code> says whether that read worked.</td></tr>
+        <tr><td><code>KARU_TIMEOUT</code></td><td>The wait ran out. Nothing is lost; call it again.</td></tr>
+        <tr><td><code>KARU_END</code></td><td>Every read in the batch has completed.</td></tr>
+      </tbody></table>
+      <p>Freeing a batch with <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L303"><code>karu_batch_free</code></a> cancels its pending work, including requests already on the network, and waits until no worker still touches its buffers. <strong>Do not call it while another thread is inside <code>karu_batch_next</code> on the same batch.</strong></p>
 
       <h2 class="part" id="plan">Fewer requests can move the same useful bytes</h2>
-      <p class="section-intro">Before any input or output begins, the planner validates every read, converts window offsets to object offsets, groups reads by resource, sorts them, and joins neighbours when the trade is sensible.</p>
-      <figure class="diagram wide story-figure">
-        <svg viewBox="0 0 760 252" role="img" aria-labelledby="merge-title merge-desc">
-          <title id="merge-title">Three requested ranges become one bounded transfer</title><desc id="merge-desc">Three nearby useful ranges with small gaps are merged into one transfer and later copied back into three destination buffers.</desc>
-          <defs><marker id="arrow-merge" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10Z"/></marker></defs>
-          <text class="flow-stage" x="8" y="19">REQUESTED RANGES</text><rect class="object-track" x="8" y="38" width="744" height="34"/><rect class="object-range" x="84" y="38" width="96" height="34"/><rect class="object-range" x="212" y="38" width="70" height="34"/><rect class="object-range" x="322" y="38" width="122" height="34"/>
-          <text class="range-byte" x="132" y="59">A</text><text class="range-byte" x="247" y="59">B</text><text class="range-byte" x="383" y="59">C</text><text class="gap-label" x="196" y="60">gap</text><text class="gap-label" x="302" y="60">gap</text>
-          <path class="flow-arrow" style="marker-end:url(#arrow-merge)" d="M266 93V123"/><text class="flow-note left" x="286" y="111">merge only while every guard passes</text>
-          <text class="flow-stage" x="8" y="143">ONE TRANSFER</text><rect class="object-track" x="8" y="158" width="744" height="38"/><rect class="merged-range" x="84" y="158" width="360" height="38"/><rect class="object-range" x="84" y="158" width="96" height="38"/><rect class="object-range" x="212" y="158" width="70" height="38"/><rect class="object-range" x="322" y="158" width="122" height="38"/>
-          <text class="range-byte" x="132" y="182">A</text><text class="range-byte" x="247" y="182">B</text><text class="range-byte" x="383" y="182">C</text><path class="range-bracket" d="M84 212V220H444V212"/><text class="flow-note" x="264" y="241">one request, three original destinations</text>
-        </svg>
-        <figcaption>The grey gaps are extra bytes. They can be cheaper than extra network round trips, but the planner always limits how much extra work a merge may create.</figcaption>
-      </figure>
-      <h3>Four guards keep a merge bounded</h3>
-      <div class="guard-grid"><div><span>Gap</span><p>The distance between neighbouring ranges must remain small enough.</p></div><div><span>Span</span><p>The combined transfer must stay below the configured size limit.</p></div><div><span>Parts</span><p>One transfer may serve only a bounded number of original reads.</p></div><div><span>Ratio</span><p>Fetched bytes may not grow too far beyond requested bytes.</p></div></div>
-      <p>The defaults allow a 1 MiB gap, a 64 MiB span, 1,024 parts, and at most sixteen fetched bytes for every requested byte. A batch can override these values. Setting the gap to zero disables merging for that batch.</p>
-      <div class="technical-note">
-        <span>The planner invariant</span>
-        <p>Valid reads are stably sorted by backend, canonical resource, object identity condition, and absolute offset. Only adjacent reads with the same first three values may merge. Different identity conditions remain different HTTP requests even when their byte ranges overlap.</p>
-        <p>The merge is a linear sweep over each resource group. Every candidate updates the proposed last byte, combined span, useful byte count, and part count. If any guard fails, that transfer closes and the candidate begins the next one.</p>
+      <p class="section-intro">Before anything is read, the planner checks each request, turns window offsets into object offsets, sorts reads by object and offset, and walks through them once, joining neighbours while the trade still makes sense.</p>
+      <div class="rk" data-rk="rules">
+        <div class="rk-head"><p class="rk-title">Four rules for merging</p><p class="rk-hint">Default values, holes not to scale.</p></div>
+        <div class="rk-tabs" role="tablist" aria-label="Planner rules">
+          <button type="button" class="rk-tab" role="tab" id="merge-gap" aria-controls="merge-gap-panel" aria-selected="true"><b>1 · Gap</b><span>hole size</span></button>
+          <button type="button" class="rk-tab" role="tab" id="merge-ratio" aria-controls="merge-ratio-panel" aria-selected="false"><b>2 · Ratio</b><span>wasted bytes</span></button>
+          <button type="button" class="rk-tab" role="tab" id="merge-span" aria-controls="merge-span-panel" aria-selected="false"><b>3 · Span</b><span>request size</span></button>
+          <button type="button" class="rk-tab" role="tab" id="merge-parts" aria-controls="merge-parts-panel" aria-selected="false"><b>4 · Parts</b><span>reads per request</span></button>
+        </div>
+        <div class="rk-panel" role="tabpanel" id="merge-gap-panel" aria-labelledby="merge-gap">
+          <div class="rk-rule"><p class="rk-rule-k">Gap <b>1 MiB</b></p><code class="rk-rule-env">KARU_COALESCE_GAP</code></div>
+          <p class="rk-rule-text">The next read joins the request when the hole before it is at most 1 MiB.</p>
+          <svg class="rk-draw rk-rule-draw" viewBox="0 0 640 176" role="img" aria-label="Reads A, B and C. The 512 KiB hole between A and B is under the 1 MiB gap, so GET 1 takes A, the hole and B. The 2 MiB hole before C is over it, so C starts GET 2."><text class="lab" x="0" y="44" text-anchor="start">READS</text><text class="lab" x="0" y="110" text-anchor="start">REQUESTS</text><rect class="read" x="84" y="26" width="100" height="28"/><text class="on" x="134.0" y="44" text-anchor="middle">A</text><rect class="read" x="234" y="26" width="100" height="28"/><text class="on" x="284.0" y="44" text-anchor="middle">B</text><rect class="read" x="504" y="26" width="100" height="28"/><text class="on" x="554.0" y="44" text-anchor="middle">C</text><line class="hole" x1="184" y1="40.0" x2="234" y2="40.0"/><text class="size" x="209.0" y="18" text-anchor="middle">512 KiB</text><line class="hole" x1="334" y1="40.0" x2="504" y2="40.0"/><text class="size" x="419.0" y="18" text-anchor="middle">2 MiB</text><rect class="fetch" x="84" y="92" width="250" height="28"/><rect class="read" x="84" y="97" width="100" height="18"/><text class="on" x="134.0" y="110" text-anchor="middle">A</text><text class="drop" x="209.0" y="110" text-anchor="middle">dropped</text><rect class="read" x="234" y="97" width="100" height="18"/><text class="on" x="284.0" y="110" text-anchor="middle">B</text><text class="lab" x="84" y="134" text-anchor="start">GET 1</text><rect class="fetch" x="504" y="92" width="100" height="28"/><rect class="read" x="504" y="97" width="100" height="18"/><text class="on" x="554.0" y="110" text-anchor="middle">C</text><text class="lab" x="504" y="134" text-anchor="start">GET 2</text><text class="vd-join" x="209" y="150" text-anchor="middle"><tspan class="vd-head">hole 512 KiB</tspan><tspan x="209" dy="16">≤ 1 MiB, joins</tspan></text><text class="vd-split" x="419" y="150" text-anchor="middle"><tspan class="vd-head">hole 2 MiB</tspan><tspan x="419" dy="16">&gt; 1 MiB, new request</tspan></text></svg>
+        </div>
+        <div class="rk-panel" role="tabpanel" id="merge-ratio-panel" aria-labelledby="merge-ratio" hidden>
+          <div class="rk-rule"><p class="rk-rule-k">Ratio <b>16×</b></p><code class="rk-rule-env">KARU_COALESCE_AMPLIFICATION</code></div>
+          <p class="rk-rule-text">The next read joins only if the request then fetches at most 16 bytes for every byte asked.</p>
+          <svg class="rk-draw rk-rule-draw" viewBox="0 0 640 176" role="img" aria-label="Three 32 KiB reads, A, B and C, with 768 KiB holes, each under the gap. GET 1 with A, the hole and B fetches 832 KiB for the 64 KiB asked, 13 times, under 16. Adding C would fetch 1,632 KiB for 96 KiB, 17 times, so C starts GET 2."><text class="lab" x="0" y="44" text-anchor="start">READS</text><text class="lab" x="0" y="110" text-anchor="start">REQUESTS</text><rect class="read" x="84" y="26" width="22" height="28"/><text class="on" x="95.0" y="44" text-anchor="middle">A</text><rect class="read" x="226" y="26" width="22" height="28"/><text class="on" x="237.0" y="44" text-anchor="middle">B</text><rect class="read" x="368" y="26" width="22" height="28"/><text class="on" x="379.0" y="44" text-anchor="middle">C</text><line class="hole" x1="106" y1="40.0" x2="226" y2="40.0"/><text class="size" x="166.0" y="18" text-anchor="middle">768 KiB</text><line class="hole" x1="248" y1="40.0" x2="368" y2="40.0"/><text class="size" x="308.0" y="18" text-anchor="middle">768 KiB</text><rect class="fetch" x="84" y="92" width="164" height="28"/><rect class="read" x="84" y="97" width="22" height="18"/><text class="drop" x="166.0" y="110" text-anchor="middle">dropped</text><rect class="read" x="226" y="97" width="22" height="18"/><text class="lab" x="84" y="134" text-anchor="start">GET 1</text><rect class="fetch" x="368" y="92" width="22" height="28"/><rect class="read" x="368" y="97" width="22" height="18"/><text class="lab" x="368" y="134" text-anchor="start">GET 2</text><text class="vd-join" x="166" y="150" text-anchor="middle"><tspan class="vd-head">832 KiB for 64 KiB asked</tspan><tspan x="166" dy="16">13×, ≤ 16×, joins</tspan></text><text class="vd-split" x="420" y="150" text-anchor="middle"><tspan class="vd-head">1,632 KiB for 96 KiB asked</tspan><tspan x="420" dy="16">17×, &gt; 16×, new request</tspan></text></svg>
+        </div>
+        <div class="rk-panel" role="tabpanel" id="merge-span-panel" aria-labelledby="merge-span" hidden>
+          <div class="rk-rule"><p class="rk-rule-k">Span <b>64 MiB</b></p><code class="rk-rule-env">KARU_COALESCE_LIMIT</code></div>
+          <p class="rk-rule-text">A request covers at most 64 MiB, from its first byte to its last.</p>
+          <svg class="rk-draw rk-rule-draw" viewBox="0 0 640 176" role="img" aria-label="Three 24 MiB reads, A, B and C, with 512 KiB holes. GET 1 takes A and B, 48.5 MiB. Adding C would make it 73 MiB, over 64 MiB, so C starts GET 2."><text class="lab" x="0" y="44" text-anchor="start">READS</text><text class="lab" x="0" y="110" text-anchor="start">REQUESTS</text><rect class="read" x="84" y="26" width="170" height="28"/><text class="on" x="169.0" y="44" text-anchor="middle">A</text><rect class="read" x="266" y="26" width="170" height="28"/><text class="on" x="351.0" y="44" text-anchor="middle">B</text><rect class="read" x="448" y="26" width="170" height="28"/><text class="on" x="533.0" y="44" text-anchor="middle">C</text><line class="hole" x1="254" y1="40.0" x2="266" y2="40.0"/><line class="hole" x1="436" y1="40.0" x2="448" y2="40.0"/><line class="ruler" x1="84" y1="64" x2="537" y2="64"/><line class="ruler" x1="537" y1="59" x2="537" y2="69"/><text class="size halo" x="310" y="80" text-anchor="middle">64 MiB from the first byte</text><rect class="fetch" x="84" y="92" width="352" height="28"/><rect class="read" x="84" y="97" width="170" height="18"/><text class="on" x="169.0" y="110" text-anchor="middle">A</text><rect class="read" x="266" y="97" width="170" height="18"/><text class="on" x="351.0" y="110" text-anchor="middle">B</text><text class="lab" x="84" y="134" text-anchor="start">GET 1</text><rect class="fetch" x="448" y="92" width="170" height="28"/><rect class="read" x="448" y="97" width="170" height="18"/><text class="on" x="533.0" y="110" text-anchor="middle">C</text><text class="lab" x="448" y="134" text-anchor="start">GET 2</text><text class="vd-join" x="260" y="150" text-anchor="middle"><tspan class="vd-head">A + B = 48.5 MiB</tspan><tspan x="260" dy="16">≤ 64 MiB, joins</tspan></text><text class="vd-split" x="470" y="150" text-anchor="middle"><tspan class="vd-head">+ C = 73 MiB</tspan><tspan x="470" dy="16">&gt; 64 MiB, new request</tspan></text></svg>
+        </div>
+        <div class="rk-panel" role="tabpanel" id="merge-parts-panel" aria-labelledby="merge-parts" hidden>
+          <div class="rk-rule"><p class="rk-rule-k">Parts <b>1,024</b></p><code class="rk-rule-env">KARU_COALESCE_PARTS</code></div>
+          <p class="rk-rule-text">A request carries at most 1,024 reads, even when they touch.</p>
+          <svg class="rk-draw rk-rule-draw" viewBox="0 0 640 176" role="img" aria-label="A run of touching reads. GET 1 takes reads 1 to 1024, the most one request carries, and read 1025 starts GET 2."><text class="lab" x="0" y="44" text-anchor="start">READS</text><text class="lab" x="0" y="110" text-anchor="start">REQUESTS</text><rect class="read" x="84" y="26" width="18" height="28"/><rect class="read" x="104" y="26" width="18" height="28"/><rect class="read" x="124" y="26" width="18" height="28"/><rect class="read" x="144" y="26" width="18" height="28"/><rect class="read" x="164" y="26" width="18" height="28"/><rect class="read" x="184" y="26" width="18" height="28"/><rect class="read" x="204" y="26" width="18" height="28"/><rect class="read" x="224" y="26" width="18" height="28"/><rect class="read" x="304" y="26" width="18" height="28"/><rect class="read" x="324" y="26" width="18" height="28"/><rect class="read" x="344" y="26" width="18" height="28"/><rect class="read" x="364" y="26" width="18" height="28"/><rect class="read" x="384" y="26" width="18" height="28"/><rect class="read" x="404" y="26" width="18" height="28"/><rect class="read" x="424" y="26" width="18" height="28"/><rect class="read" x="444" y="26" width="18" height="28"/><rect class="read" x="464" y="26" width="18" height="28"/><rect class="read" x="484" y="26" width="18" height="28"/><rect class="read" x="504" y="26" width="18" height="28"/><text class="size" x="274" y="45" text-anchor="middle">…</text><text class="size" x="84" y="18" text-anchor="start">read 1</text><text class="size" x="482" y="18" text-anchor="end">read 1024</text><rect class="fetch" x="84" y="92" width="378" height="28"/><rect class="read" x="84" y="97" width="378" height="18"/><text class="on" x="273.0" y="110" text-anchor="middle">reads 1 to 1024</text><text class="lab" x="84" y="134" text-anchor="start">GET 1</text><rect class="fetch" x="464" y="92" width="58" height="28"/><rect class="read" x="464" y="97" width="58" height="18"/><text class="on" x="493.0" y="110" text-anchor="middle">1025</text><text class="lab" x="464" y="134" text-anchor="start">GET 2</text><text class="vd-split" x="482" y="150" text-anchor="end"><tspan class="vd-head">1,024 reads</tspan><tspan x="482" dy="16">full, new request</tspan></text></svg>
+        </div>
       </div>
-      <h3>Arrival reverses the merge</h3>
-      <p>A merged remote response lands in temporary storage. Each part records its position inside that span, its destination, and its tag. Karu copies only the requested segments into the original buffers and reports each read separately. Local reads are never coalesced and go directly to their destinations.</p>
-      <p>Overlapping reads are valid. Their useful lengths are counted separately for the amplification guard because both destinations still need to be filled. The merged span is stored once, then overlapping bytes are copied into every destination that requested them.</p>
-      <div class="takeaway note"><b>You now understand the planner</b><p>It trades a controlled amount of extra data for fewer round trips without changing any caller visible range.</p></div>
-
+      <p>The gap and the ratio decide which ranges merge, and the span and the parts decide how big one request gets. The planner checks all four for each next read. <strong>One failed rule closes the current request</strong>, and that read starts the next one. The values shown are the defaults, and the <a href="configuration.html#runtime">configuration reference</a> lists the options.</p>
+      <p>A batch can change all four with <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L293"><code>karu_client_submit_with</code></a>, or <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp#L190"><code>SubmitOptions</code></a> in C++. A gap of 0 turns merging off. Merging pays when round trips are expensive and the link is fast; on a slow link a smaller gap can be quicker, so the bytes fetched matter as much as the request count.</p>
+      <p>Local files are different. A <code>pread</code> gains nothing from reading through a hole, so <strong>local reads only merge when they overlap or touch</strong>. Reads with different <code>if_match</code> values never share a request, even when their ranges overlap, because they are different conditions on the object.</p>
+      <h3>Splitting the answer back up</h3>
+      <p><strong>A merged remote response is never stored as a whole.</strong> As each chunk streams in, Karu copies it straight into every buffer it overlaps and discards the bytes that fall in the holes. A merged local read is done into a scratch buffer first and then copied out. In both cases each read completes on its own, and overlapping reads are allowed. Both buffers get the shared bytes, and both lengths count as useful when the ratio is checked.</p>
 
       <h2 class="part" id="move">Local and remote reads share a contract</h2>
-      <p class="section-intro">Once planning is complete, the engine routes each transfer. Local files go to file workers. Remote objects pass through credential resolution and then into the HTTP event loop.</p>
+      <p class="section-intro">With the plan ready, local transfers go to four file workers. Remote ones stop first at one of four credential workers, which loads or refreshes credentials without holding up the network, and then join the HTTP queue that the I/O threads drain. Plain HTTP and Hugging Face skip the credential step.</p>
       <figure class="diagram wide story-figure">
         <svg viewBox="0 0 760 300" role="img" aria-labelledby="route-title route-desc">
-          <title id="route-title">Local and remote routes through the Karu engine</title><desc id="route-desc">The plan splits into file workers for local reads and credential workers plus one input output thread for remote reads. Both routes produce completions.</desc>
+          <title id="route-title">Local and remote routes through the Karu engine</title><desc id="route-desc">The plan splits into file workers for local reads and credential workers and the I/O threads for remote reads. Both routes produce completions.</desc>
           <defs><marker id="arrow-route" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10Z"/></marker></defs>
           <g class="flow-card accent"><rect x="283" y="12" width="194" height="52"/><text x="380" y="35">Transfer plan</text><text class="sub" x="380" y="51">local and remote work</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M340 64V91H142V112"/><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M420 64V91H614V112"/>
           <text class="flow-stage" x="52" y="102">LOCAL PATH</text><g class="flow-card"><rect x="52" y="112" width="180" height="54"/><text x="142" y="136">File workers</text><text class="sub" x="142" y="152">positional pread</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M142 166V219"/>
           <text class="flow-stage" x="508" y="102">REMOTE PATH</text><g class="flow-card"><rect x="508" y="112" width="212" height="54"/><text x="614" y="136">Credential workers</text><text class="sub" x="614" y="152">resolve without blocking network progress</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M614 166V184"/><g class="flow-card"><rect x="508" y="184" width="212" height="54"/><text x="614" y="207">I/O event loops</text><text class="sub" x="614" y="223">libcurl multi and handle pool</text></g><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M614 238V257H477"/><path class="flow-arrow" style="marker-end:url(#arrow-route)" d="M142 166V257H283"/>
           <g class="flow-card accent"><rect x="283" y="240" width="194" height="48"/><text x="380" y="262">Completions</text><text class="sub" x="380" y="278">one result per original read</text></g>
         </svg>
-        <figcaption>File reads and cloud credential lookup use worker queues. Event loops advance the remote transfers.</figcaption>
+        <figcaption>Disk reads and credential lookups, which can block, run on workers. The I/O threads drive the network and sign each request just before sending it.</figcaption>
       </figure>
-      <h3>A large batch becomes bounded work</h3>
-      <p>Submitting many reads does not create one thread or one connection for every read. The planner may produce more transfers than the engine can run at once. Extra transfers remain pending, the event loops advance only the configured active limit, and every completion opens capacity for another transfer.</p>
-      <p><code>KARU_IO_THREADS</code> defaults to four loops, each with its own thread and connections. They share the client's concurrency limit. More loops can help when TLS, signing or copying saturates one core. With multiple worker processes, compare one and four loops on the full workload, including decoding.</p>
-      <div class="process-strip" aria-label="How Karu applies backpressure">
-        <div><b>Batch</b><span>May contain thousands of independent reads</span></div>
-        <div><b>Plan</b><span>Reduces those reads to bounded transfers</span></div>
-        <div><b>Active set</b><span>Never exceeds the concurrency limit</span></div>
-        <div><b>Completion</b><span>Releases one slot for pending work</span></div>
-      </div>
-      <p>This is backpressure. The amount of work described by the caller can be large while the amount of network work active at one moment remains bounded. The batch completion queue lets the caller consume results at its own pace.</p>
-      <div class="takeaway note"><b>You now understand scheduling</b><p>A batch may describe abundant work while queues and the concurrency limit keep active resource use bounded.</p></div>
-
+      <p>A large batch does not create a large number of threads or sockets. Transfers beyond <a href="configuration.html#runtime"><code>KARU_CONCURRENCY</code></a>, 64 by default, wait in the queue, and each finished transfer lets the next one start. A batch may describe a million reads, but <strong>only 64 are on the network at any moment</strong>, and the caller drains completions at its own pace.</p>
+      <p><code>KARU_IO_THREADS</code> sets how many I/O threads split that limit, four by default with 16 transfers each, every one with its own libcurl multi handle and connections. Karu fills them in order, and a thread only takes queued work when no lower thread has room. A small batch therefore runs on the first thread again and again, on the connections it already opened. More threads help when TLS, signing or copying keeps one core busy. With several worker processes, compare 1 and 4 on the real workload, including decoding.</p>
 
       <h2 class="part" id="network">A remote read becomes an HTTP exchange</h2>
-      <p class="section-intro">The scheduler decides when a remote transfer may start. The network path then establishes or reuses a secure connection, sends one prepared request, and streams the response back into Karu.</p>
-      <h3>What happens before an HTTPS request</h3>
-      <p>A remote URL begins with a host name that people can recognize. DNS, the Domain Name System, resolves that name to a network address. For direct batch reads on Linux and macOS, Karu caches DNS answers for a minute and rotates addresses across connections. TCP then creates a reliable ordered byte stream between the client and the server. HTTPS adds TLS on top of that stream before HTTP messages are exchanged.</p>
-      <p>TLS stands for Transport Layer Security. It encrypts traffic so an observer cannot read it, checks that messages were not altered in transit, and validates the server certificate against a trusted certificate authority. The first connection pays for DNS work, a TCP handshake, and a TLS handshake. Reusing the connection avoids repeating most of that setup.</p>
+      <p class="section-intro">For each remote transfer an I/O thread finds or opens a connection, sends one prepared request, and streams the response into Karu.</p>
+      <h3>Before the first byte</h3>
+      <p>The host name goes through DNS to get an address. TCP opens a connection, and <a href="https://www.rfc-editor.org/rfc/rfc8446">TLS</a> encrypts it and checks the server's certificate. Only then can the HTTP request go out. <strong>A cold connection pays several round trips before any data moves</strong>, which for a small range can take longer than the transfer itself.</p>
       <figure class="diagram wide story-figure compact">
         <svg viewBox="0 0 760 224" role="img" aria-labelledby="network-title network-desc">
           <title id="network-title">The setup required before an HTTPS range request</title>
@@ -299,137 +294,176 @@
           <text class="flow-note" x="384" y="164">a live connection can serve later requests</text>
           <text class="flow-note" x="384" y="195">new connections repeat setup and add round trips before useful data moves</text>
         </svg>
-        <figcaption>Connection reuse is a performance feature, not a minor optimization. Small range reads can spend more time establishing the secure path than transferring their bodies.</figcaption>
+        <figcaption>A small range can spend longer setting up the connection than receiving its body, which is why Karu keeps connections open.</figcaption>
       </figure>
-
-      <h3>HTTP is a request followed by a response</h3>
-      <p>The request contains a method, a resource path, and headers. Karu uses the GET method because it retrieves data. Headers carry the host, byte range, optional object identity, authentication, and provider specific signing information. A blank line ends the headers. Range reads have no request body.</p>
-      <p>The response begins with a numeric status, followed by response headers and then the body bytes. Headers arrive before the body, so Karu can decide how the body should be handled while data is still streaming. The engine never treats a successful connection as sufficient. It also verifies the status, response range, and received length.</p>
-      <h3>Remote requests are built late</h3>
-      <p>The locator first resolves to a canonical resource. Karu applies the most specific configuration for that path, obtains credentials when needed, then builds the final URL, headers, byte range, and signature. Building late keeps temporary credentials and region corrections current for each attempt.</p>
-      <div class="technical-note">
-        <span>Three execution queues</span>
-        <p>The engine sends file transfers to four file workers. Cloud transfers first enter a queue served by four credential workers. Plain HTTP transfers can enter the HTTP queue directly. Resolved cloud work joins that same HTTP queue afterward.</p>
-        <p>Each event loop thread owns its libcurl multi handle, pending work, retry schedule, active transfer map, and reusable easy handle pool. No other thread mutates those structures. Queue handoff is the boundary between blocking work and event driven network progress.</p>
-        <p>Each backend produces the same <code>PreparedRequest</code> shape with a URL, headers, closed byte range, HTTP options, and an optional routing region. The transport layer can therefore schedule S3, GCS, Azure, Source, Hugging Face, and plain HTTP without understanding each authentication scheme.</p>
-      </div>
-      <h3>Connections are meant to survive</h3>
-      <p>Reusing a connection avoids DNS lookup and the TCP and TLS handshakes, which can take longer than a small range read.</p>
-      <p>Each event loop keeps its connections and reusable handles. TLS sessions are shared across loops. Finished handles are reset before reuse so the next transfer starts with its own request options.</p>
-      <div class="technical-note">
-        <span>Easy, multi, and share</span>
-        <p>An easy handle represents one transfer; a multi handle advances many transfers on one thread. A share handle shares TLS sessions. New connections bypass libcurl's DNS cache and shuffle the resolved addresses to vary endpoint selection.</p>
-        <p>The multi handle works as an event loop. It asks the operating system which sockets are ready, advances only those transfers, processes completed messages, starts queued work up to the concurrency limit, and sleeps until more progress is possible. This keeps hundreds of waiting requests inexpensive.</p>
-      </div>
-      <h3>HTTP 1.1 and HTTP 2 organize concurrency differently</h3>
-      <p>HTTP 1.1 usually serves one active response per connection, so concurrency often uses several connections. HTTP 2 can multiplex many independent streams over one connection. Multiplexing reduces connection setup, but every stream still shares that connection and its congestion window. The server must also negotiate HTTP 2 during the TLS handshake.</p>
-      <p>Karu chooses HTTP 1.1 by default and lets configuration request automatic negotiation or HTTP 2. The event loop and multi handle work with either version. Concurrency still describes active transfers, while libcurl decides which connections and streams carry them.</p>
-      <h3>Why Karu sometimes drains unwanted bytes</h3>
-      <p>Stopping halfway through an HTTP body can make the connection unusable because the next response boundary is no longer known. For a small unwanted remainder, Karu reads and discards the bytes so the connection can return to the pool. For a large remainder, it aborts because saving bandwidth is worth paying for a new connection later.</p>
-      <p>libcurl delivers body fragments through a write callback. The callback returns how many bytes it accepted. Returning zero aborts the transfer, which is useful for a dangerous fallback or oversized error body but normally closes that connection. Karu therefore aborts only when continuing would cost more than reconnecting.</p>
-      <div class="takeaway note"><b>You now understand transport</b><p>Connections carry prepared transfers. Reuse avoids repeated setup while the event loop advances many waits without creating one thread per request.</p></div>
-
+      <p>On Linux and macOS, batch reads resolve names on a separate thread, off the I/O threads, keep each answer for a minute, and rotate new connections across the addresses a host returns. Elsewhere, and for requests through a proxy, libcurl's own resolver and cache do the job.</p>
+      <h3>The request</h3>
+      <p>Karu always sends GET, with no body. The headers carry the host, the range, an <code>If-Match</code> when the read sets one, and the provider's authentication. Every backend (S3, GCS, Azure, Source, Hugging Face, plain HTTP) produces the same prepared request, made of a URL, headers, a closed range and a few options. The transport sends it without knowing how it was signed.</p>
+      <p>Each attempt is built just before it is sent, from the configuration for the object's canonical path and the credentials the transfer already holds. Credentials are loaded once per transfer and fetched again only if the service says they expired. An S3 region correction also takes effect on the next attempt.</p>
+      <h3>Keeping connections alive</h3>
+      <p>Each I/O thread keeps its own connections and a pool of reusable <a href="https://curl.se/libcurl/c/libcurl-easy.html">easy handles</a>. A <a href="https://curl.se/libcurl/c/libcurl-share.html">share handle</a> lets all threads reuse TLS sessions and DNS answers, so a reconnect skips most of the handshake. The <a href="https://curl.se/libcurl/c/libcurl-multi.html">multi handle</a> is the event loop. It waits for sockets that are ready, advances only those transfers, collects the finished ones and starts queued work up to the limit. Hundreds of waiting requests cost almost nothing.</p>
+      <p>Karu uses HTTP/1.1 by default, one response per connection at a time. <a href="configuration.html#http-and-hugging-face"><code>KARU_HTTP_VERSION</code></a> can ask for <a href="https://www.rfc-editor.org/rfc/rfc9113">HTTP/2</a>, which carries many requests over one connection. That saves setup, but then every request shares that one connection's bandwidth.</p>
+      <h3>Draining instead of hanging up</h3>
+      <p>Stopping in the middle of a response body leaves the connection unusable, because the next response would begin at an unknown point. When up to 256 KiB of unwanted data remains, Karu reads and discards it so the connection can go back to the pool. When more remains, it aborts through the <a href="https://curl.se/libcurl/c/CURLOPT_WRITEFUNCTION.html">write callback</a> and opens a new connection later.</p>
 
       <h2 class="part" id="trust">A successful response must prove what it contains</h2>
-      <p class="section-intro">A network request completing without an error does not prove that the right bytes arrived. Karu checks the protocol result against the exact range the caller requested.</p>
-      <figure class="diagram wide story-figure compact">
-        <svg viewBox="0 0 760 206" role="img" aria-labelledby="check-title check-desc">
-          <title id="check-title">Validation gates for a remote range response</title><desc id="check-desc">A response must pass status, range, and byte count checks before its buffer is accepted.</desc>
-          <defs><marker id="arrow-check" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10Z"/></marker></defs>
-          <g class="flow-card"><rect x="8" y="56" width="138" height="58"/><text x="77" y="81">Response</text><text class="sub" x="77" y="98">headers and body</text></g><path class="flow-arrow" style="marker-end:url(#arrow-check)" d="M146 85H184"/>
-          <g class="gate-card"><rect x="192" y="48" width="126" height="74"/><text x="255" y="73">Status</text><text class="sub" x="255" y="91">partial content</text><text class="sub" x="255" y="106">or bounded fallback</text></g><path class="flow-arrow" style="marker-end:url(#arrow-check)" d="M318 85H356"/>
-          <g class="gate-card"><rect x="364" y="48" width="126" height="74"/><text x="427" y="73">Range</text><text class="sub" x="427" y="91">first and last byte</text><text class="sub" x="427" y="106">match the request</text></g><path class="flow-arrow" style="marker-end:url(#arrow-check)" d="M490 85H528"/>
-          <g class="gate-card"><rect x="536" y="48" width="126" height="74"/><text x="599" y="73">Length</text><text class="sub" x="599" y="91">received count</text><text class="sub" x="599" y="106">matches the claim</text></g><path class="flow-arrow" style="marker-end:url(#arrow-check)" d="M662 85H704"/>
-          <circle class="success-ring" cx="732" cy="85" r="20"/><path class="success-check" d="M722 85l7 7 14-16"/><text class="flow-note" x="380" y="162">Only then can the original read complete successfully</text><text class="flow-note" x="380" y="183">A short final object may still return a valid prefix and a range status</text>
-        </svg>
-        <figcaption>The checks protect callers from truncated responses, wrong offsets, and servers that answer a range request with unexpected content.</figcaption>
-      </figure>
-      <h3>When a server ignores the range</h3>
-      <p>Some servers answer with the complete object. Karu may discard a small prefix and still deliver the requested interval. It refuses when the discarded prefix would exceed the configured fallback limit, which is 8 MiB by default. This avoids turning a tiny read into an accidental download of a large object.</p>
-      <h3>When a server rewrites the object</h3>
-      <p>GCS can decompress stored gzip objects and ignore <code>Range</code>. Karu sends <code>Accept-Encoding: gzip</code> to retrieve the stored bytes. It rejects responses that report decompression or another transformation, since their byte offsets may have changed.</p>
-      <div class="technical-note">
-        <span>What a valid partial response proves</span>
-        <p>A partial response must include a parseable <code>Content-Range</code>. Its first byte must equal the transfer offset. Its last byte may equal the requested last byte, or it may be the known final byte of a shorter object. It may never extend beyond the requested interval.</p>
-        <p>The received body length is checked independently. A correct header followed by a truncated body still fails. A range beginning beyond the object normally produces status 416. The size probe recognizes the special empty object form and reports a size of zero.</p>
+      <p class="section-intro"><strong>A request that finishes without an error has not proved anything yet.</strong> Karu compares what came back with the range it asked for.</p>
+      <div class="rk rk-pick-wrap" data-rk="check">
+        <div class="rk-head"><p class="rk-title">What the server sent back</p><p class="rk-hint">A read of 4,096 bytes at 1,048,576. Pick an answer.</p></div>
+        <div class="rk-pick">
+          <div class="rk-tabs" role="tablist" aria-label="Server answers" aria-orientation="vertical">
+            <button type="button" class="rk-tab" role="tab" id="ans-1" aria-controls="ans-1-panel" aria-selected="true">206, the right range</button>
+            <button type="button" class="rk-tab" role="tab" id="ans-2" aria-controls="ans-2-panel" aria-selected="false">206, another range</button>
+            <button type="button" class="rk-tab" role="tab" id="ans-3" aria-controls="ans-3-panel" aria-selected="false">200, the whole object</button>
+            <button type="button" class="rk-tab" role="tab" id="ans-4" aria-controls="ans-4-panel" aria-selected="false">200, for a read at 64 MiB</button>
+            <button type="button" class="rk-tab" role="tab" id="ans-5" aria-controls="ans-5-panel" aria-selected="false">206, body cut short</button>
+            <button type="button" class="rk-tab" role="tab" id="ans-6" aria-controls="ans-6-panel" aria-selected="false">Past the end</button>
+            <button type="button" class="rk-tab" role="tab" id="ans-7" aria-controls="ans-7-panel" aria-selected="false">Decompressed on the way</button>
+            <button type="button" class="rk-tab" role="tab" id="ans-8" aria-controls="ans-8-panel" aria-selected="false">Replaced since stat</button>
+          </div>
+          <div>
+            <div class="rk-panel" role="tabpanel" id="ans-1-panel" aria-labelledby="ans-1">
+<pre><code>HTTP/1.1 206 Partial Content
+Content-Range: bytes 1048576-1052671/4194304
+<span class="rk-key">body: 4,096 bytes</span></code></pre>
+              <div class="rk-gates"><span class="rk-gate is-pass">status</span><span class="rk-gate is-pass">range</span><span class="rk-gate is-pass">length</span></div>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-ok">KARU_OK</span> got 4,096</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="ans-2-panel" aria-labelledby="ans-2" hidden>
+<pre><code>HTTP/1.1 206 Partial Content
+Content-Range: bytes <span class="rk-bad">1044480-1048575</span>/4194304</code></pre>
+              <div class="rk-gates"><span class="rk-gate is-pass">status</span><span class="rk-gate is-fail">range</span><span class="rk-gate is-skip">length</span></div>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-error">KARU_ERR_HTTP</span> the Content-Range does not satisfy the requested range, so not a byte is delivered</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="ans-3-panel" aria-labelledby="ans-3" hidden>
+<pre><code>HTTP/1.1 <span class="rk-bad">200 OK</span>
+Content-Length: 4194304</code></pre>
+              <div class="rk-gates"><span class="rk-gate is-pass">status, as a fallback</span><span class="rk-gate is-pass">skip 1 MiB ≤ 8 MiB</span><span class="rk-gate is-pass">length</span></div>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-ok">KARU_OK</span> discards the first 1,048,576 bytes, keeps the next 4,096</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="ans-4-panel" aria-labelledby="ans-4" hidden>
+<pre><code>HTTP/1.1 <span class="rk-bad">200 OK</span>
+Content-Length: 2147483648</code></pre>
+              <div class="rk-gates"><span class="rk-gate is-fail">skip 64 MiB &gt; 8 MiB</span><span class="rk-gate is-skip">range</span><span class="rk-gate is-skip">length</span></div>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-error">KARU_ERR_HTTP</span> refuses to download 64 MiB to keep 4 KiB; the limit is <a href="configuration.html#runtime"><code>KARU_RANGE_FALLBACK_LIMIT</code></a></p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="ans-5-panel" aria-labelledby="ans-5" hidden>
+<pre><code>HTTP/1.1 206 Partial Content
+Content-Range: bytes 1048576-1052671/4194304
+ETag: "5d41402a"
+<span class="rk-bad">connection closed after 1,500 bytes</span></code></pre>
+              <div class="rk-gates"><span class="rk-gate is-pass">status</span><span class="rk-gate is-pass">range</span><span class="rk-gate is-fail">length</span></div>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-retry">retry</span> asks for the remaining 2,596 bytes with <code>If-Match: "5d41402a"</code>; without a strong ETag it starts the range over</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="ans-6-panel" aria-labelledby="ans-6" hidden>
+<pre><code>HTTP/1.1 206 Partial Content
+Content-Range: bytes 1048576-<span class="rk-bad">1050623/1050624</span>
+<span class="rk-key">body: 2,048 bytes, the object ends here</span></code></pre>
+              <div class="rk-gates"><span class="rk-gate is-pass">status</span><span class="rk-gate is-pass">range ends at the last byte</span><span class="rk-gate is-pass">length</span></div>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-error">KARU_ERR_RANGE</span> got 2,048. The bytes that exist are valid and the rest is reported as out of range</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="ans-7-panel" aria-labelledby="ans-7" hidden>
+<pre><code>HTTP/1.1 200 OK
+<span class="rk-bad">x-goog-stored-content-encoding: gzip</span>
+<span class="rk-key">(no Content-Encoding: GCS decompressed the body)</span></code></pre>
+              <div class="rk-gates"><span class="rk-gate is-fail">stored bytes</span><span class="rk-gate is-skip">range</span><span class="rk-gate is-skip">length</span></div>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-error">KARU_ERR_HTTP</span> the offsets of a decompressed body no longer match the object</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="ans-8-panel" aria-labelledby="ans-8" hidden>
+<pre><code>GET /scene.tif   If-Match: "5d41402a"
+HTTP/1.1 <span class="rk-bad">412 Precondition Failed</span></code></pre>
+              <div class="rk-gates"><span class="rk-gate is-fail">version</span><span class="rk-gate is-skip">range</span><span class="rk-gate is-skip">length</span></div>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-error">KARU_ERR_PRECONDITION</span> the object changed after its ETag was read; nothing from the new version is delivered</p>
+            </div>
+          </div>
+        </div>
       </div>
-      <h3>Short reads have one precise meaning</h3>
-      <p>If a request reaches the real end of an object, the bytes that exist form a valid prefix. Karu reports that prefix and marks the portion beyond the object with a range error. Other truncation is treated as failure.</p>
-      <h3>How Karu learns an object size</h3>
-      <p>A bounded locator window already knows its visible size. A local file uses filesystem metadata. A remote object uses a one byte GET for byte zero and reads the total size from <code>Content-Range</code>. This deliberately exercises the same authorization and range path as a real read. An empty object answers with the unsatisfied range form and a total of zero.</p>
-      <p>Remote size results are not cached. The caller decides whether a known size can be reused because only the caller knows how long that answer should remain valid.</p>
-      <h3>Reading both ends of an object</h3>
-      <p>Formats that keep a header at the start and a footer at the end read both with <code>karu_client_read_ends</code>. Karu requests the head and a suffix range for the tail together, so the size, both ends, and the ETag arrive in one round trip. Azure ignores suffix ranges, so there the tail follows the head and carries its ETag as <code>If-Match</code>. Both responses must agree on the size and the ETag.</p>
-      <h3>Downloading a complete object</h3>
-      <p><code>karu_client_download</code> first reads up to 1 MiB to learn the size and ETag, then downloads the rest with parallel requests and fixed memory use. It writes to a temporary file and makes the destination visible only after the download succeeds. A callback can report progress or cancel.</p>
-      <p>By default, an existing destination is not replaced. This check is best effort on filesystems without an exclusive publication operation. Servers must honor <code>Range</code> beyond <code>KARU_RANGE_FALLBACK_LIMIT</code>.</p>
-      <h3>Several correct reads can still see different versions</h3>
-      <p>Range validation proves that one response contains the requested interval. It does not prove that several responses came from the same version of an object. If another process replaces the object between reads, every response may be individually valid while the caller combines bytes from different versions.</p>
-      <p>An ETag is a server supplied identifier for one representation of a remote object. When the caller already knows the expected ETag, it may attach that value to every related read. Karu copies the condition at submission and sends it through the HTTP <code>If-Match</code> header.</p>
-      <div class="process-strip" aria-label="How an ETag keeps reads on one object version">
-        <div><b>Known identity</b><span>The caller supplies one expected ETag</span></div>
-        <div><b>Each request</b><span>Karu sends the same If Match condition</span></div>
-        <div><b>Object unchanged</b><span>The service returns the requested range</span></div>
-        <div><b>Object replaced</b><span>Status 412 becomes a precondition error</span></div>
-      </div>
-      <p><code>karu_client_stat</code> returns size and a strong ETag in one probe. Pass that tag as <code>if_match</code> on later reads. Karu also checks the response ETag in case the server ignores the condition; without a strong response tag, enforcement depends on the server.</p>
-      <p>The probe is optional. Rumi can read frame ranges directly from an external header. That header must belong to the requested dataset version; <code>stat</code> cannot verify the pairing.</p>
-      <p>The condition is optional and applies only to remote objects. Without it, Karu guarantees correct range delivery for each response but does not create a transactional snapshot across separate requests.</p>
-      <div class="takeaway note"><b>The important rule</b><p>Karu does not equate transport success with data correctness. The response must match the requested byte interval.</p></div>
-
+      <p>A 206 must carry a <code>Content-Range</code> that starts at the requested first byte and ends at the requested last byte, or at the last byte of a shorter object. It may never reach past what was asked. The body length is checked on its own, so a correct header over a cut-off body still fails.</p>
+      <p>A 200 is accepted only when skipping to the offset is cheap, at most <code>KARU_RANGE_FALLBACK_LIMIT</code>, 8 MiB, of discarded data. Beyond that <strong>Karu refuses rather than turn a small read into a large download.</strong></p>
+      <p>GCS can <a href="https://cloud.google.com/storage/docs/transcoding">decompress gzip objects</a> on the fly and ignore <code>Range</code> while doing it. For <code>gs://</code> paths Karu sends <code>Accept-Encoding: gzip</code> to get the stored bytes, and it rejects any response that says it was transformed.</p>
+      <h3>Sizes, both ends, whole objects</h3>
+      <p><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L144"><code>karu_client_size</code></a> and <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L166"><code>karu_client_stat</code></a> learn a remote object's size with a one-byte GET of byte 0, reading the total from <code>Content-Range</code>, so the probe is signed like a real read and must get a valid range back. A window already knows its size, so <code>size</code> sends nothing for it. <code>stat</code> also returns the strong ETag. An empty object answers 416 with a total of zero. Karu does not cache sizes, because only the application knows how long a size remains valid.</p>
+      <p><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L176"><code>karu_client_read_ends</code></a> fetches the start and the end of an object at the same time, for formats with a header and a footer. It sends one request for the head and one suffix range for the tail. Azure ignores suffix ranges, so there the tail waits for the head and is pinned with its ETag. When both answers carry an ETag they must match, and they must agree on the size. Like <code>size</code> and <code>stat</code>, this call runs outside the batch engine and does not count against the concurrency limit.</p>
+      <p><a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L238"><code>karu_client_download</code></a> writes a whole object to a file. One read of up to 1 MiB learns the size and the ETag, then 8 MiB chunks follow, eight at a time, each pinned with that ETag. Everything goes into a temporary file next to the destination, which appears only when every chunk has landed. An existing file is replaced only when the caller requests it.</p>
+      <h3>Several reads, one version</h3>
+      <p>Each response can be correct while the set is inconsistent. <strong>If the object is replaced between two reads, the result mixes bytes from two versions</strong>. An <a href="https://www.rfc-editor.org/rfc/rfc9110#name-etag">ETag</a> names one version of an object. <code>karu_client_stat</code> returns it. When it is passed as <code>if_match</code> on related reads, Karu sends <a href="https://www.rfc-editor.org/rfc/rfc9110#name-if-match"><code>If-Match</code></a> with each request. If the object changed, the server answers 412 and the read fails with <code>KARU_ERR_PRECONDITION</code>. Karu also compares the ETag the server sends back, in case it ignored the condition.</p>
+      <p><code>stat</code> is unnecessary when the version is already known. A reader with an external index, for example, can read ranges straight from it, as long as the index belongs to the same version of the data. Without <code>if_match</code> every response is still checked, but separate requests do not form one snapshot. ETags apply to remote objects only.</p>
 
       <h2 class="part" id="recover">Different failures need different next steps</h2>
-      <p class="section-intro">Karu separates ordinary retries from corrections that change the next request. This keeps recovery bounded and prevents permanent failures from looping.</p>
-      <h3>Why a read can be retried safely</h3>
-      <p>A read is idempotent. Repeating it does not modify the object, so one successful attempt has the same intended effect as another. This property permits retries for selected connection failures and temporary service responses. It does not make every failure retryable. Invalid paths, denied access, failed preconditions, and malformed responses return directly to the caller.</p>
-      <p>Interrupted reads resume with a strong ETag; otherwise they restart the range. Wildcards and tag lists also require a restart because they may accept different versions. If Karu's saved tag stops matching, it discards the partial data. A caller's version mismatch fails the read.</p>
-      <h3>Authentication and signing are related but different</h3>
-      <p>Authentication tells a service which identity is making the request. A bearer token does this by placing a secret token in a header. Request signing instead combines selected request fields with a secret key to produce a signature. The service recalculates that signature and rejects the request if a signed field changed.</p>
-      <p>AWS Signature Version 4 binds the method, path, query, selected headers, payload description, time, service, and region. That is why Karu must know the final byte range and region before signing. Following a redirect with the old signature would be incorrect and could expose authorization to an unintended host, so signed cloud requests are rebuilt rather than blindly redirected.</p>
-      <div class="concept-grid three"><div><b>Credential</b><p>A secret or temporary value that proves an identity or permits access.</p></div><div><b>Signature</b><p>A cryptographic value bound to one exact request and generated from credential material.</p></div><div><b>Region</b><p>A service location that forms part of an S3 signing scope and request endpoint.</p></div></div>
-      <figure class="diagram wide story-figure">
-        <svg viewBox="0 0 760 316" role="img" aria-labelledby="retry-title retry-desc">
-          <title id="retry-title">How Karu classifies and recovers from a failed request</title><desc id="retry-desc">A failed attempt is classified as a transient retry, a region correction, a credential refresh, or a final error.</desc>
-          <defs><marker id="arrow-retry" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10Z"/></marker></defs>
-          <g class="flow-card accent"><rect x="280" y="8" width="200" height="50"/><text x="380" y="31">Attempt finishes</text><text class="sub" x="380" y="46">response or transport error</text></g><path class="flow-arrow" style="marker-end:url(#arrow-retry)" d="M380 58V88"/>
-          <g class="decision-card"><path d="M380 82l90 48-90 48-90-48Z"/><text x="380" y="127">Classify</text><text class="sub" x="380" y="143">what can change</text></g>
-          <path class="flow-arrow" style="marker-end:url(#arrow-retry)" d="M290 130H154V202"/><path class="flow-arrow" style="marker-end:url(#arrow-retry)" d="M334 164L292 206"/><path class="flow-arrow" style="marker-end:url(#arrow-retry)" d="M426 164L468 206"/><path class="flow-arrow" style="marker-end:url(#arrow-retry)" d="M470 130H606V202"/>
-          <g class="outcome-card"><rect x="44" y="202" width="182" height="68"/><text x="135" y="225">Transient</text><text class="sub" x="135" y="244">wait with jitter</text><text class="sub" x="135" y="258">retry within deadline</text></g><g class="outcome-card"><rect x="240" y="202" width="140" height="68"/><text x="310" y="225">Wrong region</text><text class="sub" x="310" y="244">rebuild and sign</text><text class="sub" x="310" y="258">once per transfer</text></g><g class="outcome-card"><rect x="394" y="202" width="140" height="68"/><text x="464" y="225">Expired access</text><text class="sub" x="464" y="244">refresh credential</text><text class="sub" x="464" y="258">once per transfer</text></g><g class="outcome-card final"><rect x="548" y="202" width="168" height="68"/><text x="632" y="225">Final failure</text><text class="sub" x="632" y="244">status and safe message</text><text class="sub" x="632" y="258">returned to caller</text></g>
-          <path class="retry-loop" style="marker-end:url(#arrow-retry)" d="M135 270V296H350V178"/><path class="retry-loop" style="marker-end:url(#arrow-retry)" d="M310 270V285H365V178"/><path class="retry-loop" style="marker-end:url(#arrow-retry)" d="M464 270V296H410V178"/>
-        </svg>
-        <figcaption>Network faults and busy services consume the retry budget. A discovered region or refreshed credential changes the request and gets one correction.</figcaption>
-      </figure>
-      <h3>Retries share one deadline</h3>
-      <p>The default allows eight attempts, or three for DNS and connection failures. Credential lookup, requests and retry waits share one deadline. Waits increase with each failure and include random jitter; a server's <code>Retry-After</code> can extend them.</p>
-      <div class="technical-note">
-        <span>Three recovery counters</span>
-        <p>The ordinary attempt counter covers retryable network results and HTTP status such as 408, 425, 429, and server errors. A wrong S3 region has its own one time correction because the region changes the signing key. Expired credentials have another one time correction because the next attempt uses a refreshed identity.</p>
-        <p>Each path returns the transfer to a different stage. Ordinary retries enter the timed retry list. Region correction returns directly to request preparation. Credential correction invalidates the scoped cache entry and returns to a credential worker. All three remain inside one monotonic deadline.</p>
+      <p class="section-intro">Some failures disappear on a second attempt, some require a different request and some are permanent. Karu classifies each failure before deciding how to proceed.</p>
+      <div class="rk" data-rk="recover">
+        <div class="rk-head"><p class="rk-title">When an attempt fails</p><p class="rk-hint">Pick a failure.</p></div>
+        <div class="rk-pick">
+          <div class="rk-tabs" role="tablist" aria-label="Failures" aria-orientation="vertical">
+            <button type="button" class="rk-tab" role="tab" id="fail-1" aria-controls="fail-1-panel" aria-selected="true">Timeout or reset</button>
+            <button type="button" class="rk-tab" role="tab" id="fail-2" aria-controls="fail-2-panel" aria-selected="false">503 with Retry-After</button>
+            <button type="button" class="rk-tab" role="tab" id="fail-3" aria-controls="fail-3-panel" aria-selected="false">Connection refused</button>
+            <button type="button" class="rk-tab" role="tab" id="fail-4" aria-controls="fail-4-panel" aria-selected="false">S3, wrong region</button>
+            <button type="button" class="rk-tab" role="tab" id="fail-5" aria-controls="fail-5-panel" aria-selected="false">Expired credentials</button>
+            <button type="button" class="rk-tab" role="tab" id="fail-6" aria-controls="fail-6-panel" aria-selected="false">403 Access Denied</button>
+            <button type="button" class="rk-tab" role="tab" id="fail-7" aria-controls="fail-7-panel" aria-selected="false">404 Not Found</button>
+            <button type="button" class="rk-tab" role="tab" id="fail-8" aria-controls="fail-8-panel" aria-selected="false">A redirect</button>
+          </div>
+          <div>
+            <div class="rk-panel" role="tabpanel" id="fail-1-panel" aria-labelledby="fail-1">
+<pre><code><span class="rk-bad">Connection timed out after 30000 milliseconds</span>
+<span class="rk-key">or: Recv failure: Connection reset by peer</span></code></pre>
+              <p>Karu waits and tries again. The first retry waits 200 ms plus up to as much again in random jitter, and the base doubles on each retry up to 6.4 s. A read gets up to 8 attempts, all inside one request timeout.</p>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-retry">retry</span> then <span class="rk-status is-error">KARU_ERR_NETWORK</span> when attempts run out, or <span class="rk-status is-error">KARU_TIMEOUT</span> when time does</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="fail-2-panel" aria-labelledby="fail-2" hidden>
+<pre><code>HTTP/1.1 <span class="rk-bad">503 Service Unavailable</span>
+Retry-After: 5</code></pre>
+              <p>A <a href="https://www.rfc-editor.org/rfc/rfc9110#name-retry-after"><code>Retry-After</code></a> header replaces the usual backoff, and Karu waits 5 s plus up to 1 s of jitter. Longer requests are capped at 60 s. The same holds for 408, 425, 429 and any other 5xx.</p>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-retry">retry</span> after the wait the server asked for</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="fail-3-panel" aria-labelledby="fail-3" hidden>
+<pre><code><span class="rk-bad">Failed to connect to storage.example port 443: Connection refused</span>
+<span class="rk-key">or: Could not resolve host</span></code></pre>
+              <p>A host that cannot be found or reached rarely recovers within seconds, so these stop after 3 attempts even though other failures get 8.</p>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-retry">retry</span> twice, then <span class="rk-status is-error">KARU_ERR_NETWORK</span></p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="fail-4-panel" aria-labelledby="fail-4" hidden>
+<pre><code>HTTP/1.1 <span class="rk-bad">301 Moved Permanently</span>
+x-amz-bucket-region: us-west-2</code></pre>
+              <p>The region is part of the S3 signature, so following the redirect would not work. Karu signs the request again for <code>us-west-2</code> and sends it at once. This correction happens once per transfer, does not use up an attempt, and Karu remembers the region for that bucket, so later reads go to the right place first.</p>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-retry">re-sign</span> for the bucket's region</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="fail-5-panel" aria-labelledby="fail-5" hidden>
+<pre><code>HTTP/1.1 <span class="rk-bad">403 Forbidden</span>
+&lt;Code&gt;ExpiredToken&lt;/Code&gt;
+<span class="rk-key">or 401 from GCS, Azure or Source</span></code></pre>
+              <p>The credentials ran out mid-batch. Karu drops them from the cache, sends the transfer back to a credential worker for fresh ones, and tries once more. Like the region fix, this happens once per transfer and does not use up an attempt.</p>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-retry">refresh</span> credentials, then retry</p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="fail-6-panel" aria-labelledby="fail-6" hidden>
+<pre><code>HTTP/1.1 <span class="rk-bad">403 Forbidden</span>
+&lt;Code&gt;AccessDenied&lt;/Code&gt;</code></pre>
+              <p>A retry would receive the same answer. After <code>karu_batch_next</code> returns this completion, <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L53"><code>karu_last_error</code></a> gives a short message with the server's reason, with query strings removed so no signature reaches application logs.</p>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-error">KARU_ERR_AUTH</span></p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="fail-7-panel" aria-labelledby="fail-7" hidden>
+<pre><code>HTTP/1.1 <span class="rk-bad">404 Not Found</span></code></pre>
+              <p>The object is not there. No retry; the read fails and the rest of the batch goes on.</p>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-error">KARU_ERR_NOT_FOUND</span></p>
+            </div>
+            <div class="rk-panel" role="tabpanel" id="fail-8-panel" aria-labelledby="fail-8" hidden>
+<pre><code>HTTP/1.1 <span class="rk-bad">302 Found</span>
+Location: https://cdn.example/scene.tif</code></pre>
+              <p>Unsigned requests follow redirects, which covers plain HTTP, Hugging Face and public buckets read without credentials. <strong>Signed S3, GCS, Azure and Source requests never do</strong>, because replaying a signed request somewhere else would hand its authorization to a server it was not meant for. With <a href="configuration.html#http-and-hugging-face"><code>KARU_HTTP_HEADERS</code></a> set, Karu also refuses redirects to another scheme, host or port, so the configured headers are never sent to another server.</p>
+              <p class="rk-out"><b>Karu</b><span class="rk-status is-ok">follow</span> when unsigned, <span class="rk-status is-error">KARU_ERR_HTTP</span> when signed</p>
+            </div>
+          </div>
+        </div>
       </div>
-      <p>Connection refusal, name resolution failure, timeout, partial transfer, send or receive failure, and selected TLS or HTTP 2 failures are retryable transport results. HTTP status 408, 425, 429, and server errors are also retryable. The retry decision uses structured result codes rather than wording from platform dependent error messages.</p>
-      <p>The outer request timeout defaults to 120 seconds. A separate 30 second connect timeout bounds connection establishment. Low speed protection aborts a connection that remains open but transfers fewer than 1,024 bytes per second for 60 seconds. Before sleeping, Karu verifies that enough outer deadline remains for another attempt.</p>
-      <h3>Failure bodies are bounded</h3>
-      <p>Karu retains only the first 4 KiB of an error body for classification and diagnostics. It can drain up to 256 KiB of unwanted response data to preserve a reusable connection, but aborts beyond that point. Human readable messages collapse whitespace, limit the body summary, and redact query strings before reaching logs.</p>
-      <div class="takeaway note"><b>Recovery remains observable</b><p>Retries are bounded by attempts and time. Permanent failures return a stable status and a redacted message.</p></div>
-
+      <p><strong>Retrying is safe because a read changes nothing</strong>. Doing it twice has the same effect as doing it once, which is what <a href="https://en.wikipedia.org/wiki/Idempotence">idempotent</a> means. Karu retries timeouts, dropped connections, failed lookups, empty replies, partial transfers and a few TLS and HTTP/2 errors, plus HTTP 408, 425, 429, every 5xx, and S3's 400 <code>RequestTimeout</code>. It decides from libcurl's result codes and the HTTP status, plus a few error codes that S3 puts in the body, never from the wording of a message. Everything else, such as a bad path, denied access, a failed precondition or a malformed response, is returned to the caller immediately.</p>
+      <p><strong>All attempts of a read share one deadline</strong>, <a href="configuration.html#runtime"><code>KARU_REQUEST_TIMEOUT</code></a>, 120 s by default, waits included. For cloud reads the clock starts when a credential worker picks the transfer up, and for plain HTTP and Hugging Face when an I/O thread does; time spent queued before that does not count. Connecting has its own 30 s limit, and a connection that moves less than 1,024 bytes per second for 60 seconds is dropped. Karu never starts a wait that would end after the deadline.</p>
+      <p>An interrupted read resumes where it stopped when Karu can pin the rest to one version, either with the caller's <code>if_match</code>, if it is a single strong ETag, or else with the strong ETag the server sent. Otherwise, including a wildcard or a list in <code>if_match</code>, the range starts over. If the saved ETag stops matching, Karu discards the partial data and starts again, unless the caller supplied the ETag, in which case the read fails.</p>
+      <p>S3 signs with <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html">Signature Version 4</a>, which covers the method, path, headers, time, service and region. That is why the region and expired-credential cases get their own one-time correction instead of an ordinary retry. The next request has to be different, not repeated. Karu keeps only the first 4 KiB of an error body for these decisions and for the message.</p>
 
       <h2 class="part" id="credentials">Credentials are reused only where they are valid</h2>
-      <p class="section-intro">Cloud reads may need temporary proof of identity. Karu obtains that proof outside the network event loop, scopes its reuse to matching resources, and refreshes it before it expires.</p>
-      <h3>Different providers discover different credentials</h3>
-      <p>Credentials can come from explicit options, profiles, files, metadata services, or an application callback. Karu caches a usable result by its effective path scope and refreshes it near expiry. Concurrent requests for the same cold scope share one lookup instead of starting many identical ones.</p>
-      <div class="credential-sources">
-        <div><b>AWS and S3</b><p>Explicit keys come first, followed by profiles, credential processes, web identity, container credentials, and instance metadata when discovery is enabled.</p></div>
-        <div><b>Google Cloud</b><p>Static tokens or interoperable keys come before Application Default Credentials and the compute metadata service.</p></div>
-        <div><b>Azure</b><p>A connection string, shared key, SAS, or token can authenticate directly. Service principals, workload identity, and managed identity provide renewable access.</p></div>
-        <div><b>Hugging Face and Source</b><p>Hugging Face uses an environment token or CLI token file. Source is anonymous for public data and can use its own profile or callback for signed access.</p></div>
-      </div>
-      <div class="technical-note">
-        <span>How the credential key is formed</span>
-        <p>Native discovery keys the cache by provider family and by the configuration origins that supplied credential options for the canonical path. Two paths share a credential only when those origins resolve to the same scope.</p>
-        <p>A custom callback may return a canonical path prefix that states where its value is valid. Karu checks that the requested path is inside that prefix before caching it. Without a prefix, the callback runs for every request, which is useful when an external SDK already owns its cache.</p>
-      </div>
-      <p>Refresh is lazy and proactive. A temporary credential becomes refreshable during the final tenth of its lifetime, with that margin bounded between one and sixty seconds. The first request inside the window performs the refresh while matching requests wait for the same result. A failed lookup is returned but never stored as a negative cache entry.</p>
-      <p>An application callback can provide credentials from a vendor SDK or secret manager. It receives the canonical path and may return an expiry and a canonical cache prefix. Calls for different paths may run concurrently, so the callback must be thread safe and must place its own bound on external input and output.</p>
+      <p class="section-intro">Cloud reads need proof of identity. Karu loads it on the credential workers, away from the I/O threads, reuses it only where it is valid, and refreshes it before it runs out.</p>
+      <p>Each provider has its own sources, such as keys, profiles, helper programs, metadata services or an application callback. The configuration reference lists the order Karu tries them in for <a href="configuration.html#aws-s3">AWS</a>, <a href="configuration.html#source-cooperative">Source Cooperative</a>, <a href="configuration.html#google-cloud-storage">Google Cloud Storage</a> and <a href="configuration.html#azure-storage">Azure</a>. Hugging Face is simpler. The token comes from <code>HF_TOKEN</code>, or is read again from its file for every request, so a new login takes effect at once.</p>
       <figure class="diagram wide story-figure compact">
         <svg viewBox="0 0 760 198" role="img" aria-labelledby="credential-title credential-desc">
           <title id="credential-title">One credential lookup serves matching paths</title><desc id="credential-desc">Three requests under one path scope converge on one credential load and reuse the result.</desc>
@@ -437,52 +471,33 @@
           <text class="flow-stage" x="8" y="18">MATCHING PATHS</text><g class="path-pill"><rect x="8" y="36" width="208" height="28"/><text x="112" y="54">bucket / imagery / a</text></g><g class="path-pill"><rect x="8" y="75" width="208" height="28"/><text x="112" y="93">bucket / imagery / b</text></g><g class="path-pill"><rect x="8" y="114" width="208" height="28"/><text x="112" y="132">bucket / imagery / c</text></g>
           <path class="flow-arrow" style="marker-end:url(#arrow-credential)" d="M216 50H282V89H330"/><path class="flow-arrow" style="marker-end:url(#arrow-credential)" d="M216 89H330"/><path class="flow-arrow" style="marker-end:url(#arrow-credential)" d="M216 128H282V89H330"/><g class="flow-card accent"><rect x="338" y="58" width="170" height="62"/><text x="423" y="82">Single flight</text><text class="sub" x="423" y="99">one loader, shared result</text></g><path class="flow-arrow" style="marker-end:url(#arrow-credential)" d="M508 89H566"/><g class="flow-card"><rect x="574" y="58" width="178" height="62"/><text x="663" y="82">Scoped cache</text><text class="sub" x="663" y="99">refresh near expiry</text></g><text class="flow-note" x="380" y="174">A different credential scope starts a different lookup</text>
         </svg>
-        <figcaption>Scope prevents accidental sharing across paths while single flight prevents a cold batch from overwhelming a profile helper or metadata service.</figcaption>
+        <figcaption>Three reads under one scope cause one lookup. A path with a different scope gets its own.</figcaption>
       </figure>
-      <div class="takeaway note"><b>Scope is the safety boundary</b><p>A reusable credential must match the requested path and remain valid long enough for the next attempt.</p></div>
+      <p>Karu caches credentials by scope, which is the provider plus where each credential option came from for that path. Two paths share credentials only when they resolve to the same scope. <strong>When many reads hit a cold scope at once, one lookup runs and the others wait for its answer</strong>, so a big batch does not start a hundred <code>credential_process</code> helpers or flood a metadata service.</p>
+      <p>Refreshing is lazy. In the last tenth of a credential's lifetime, between 1 and 60 seconds before it expires, the next request fetches a new one while the others for that scope wait. Keys without an expiry are read again every minute, so a rotated profile is picked up. A failed lookup is reported but not remembered, and the next request tries again.</p>
+      <p>With a <a href="configuration.html#custom-providers">custom provider</a> the callback chooses the scope. It returns a <code>cache_prefix</code> covering the paths the credentials are valid for, or none to be called for every request. Before the first answer arrives, Karu only knows the exact path, so cold reads of different objects under one prefix each call the provider once.</p>
 
-
-      <h2 class="part" id="operate">Keep the engine alive and tune from evidence</h2>
-      <p class="section-intro">Most remote range workloads are limited by latency rather than local compute. Reuse one client for related work, then tune the amount of active work, the planner trade, and the recovery budget from measurements.</p>
-      <h3>Use one client for related work</h3>
-      <p>A client owns the engine, handle pool, connection reuse, and credential cache. Creating one client per read throws away the state that makes remote reads efficient. Share a client across threads and submit meaningful batches.</p>
-      <div class="technical-note">
-        <span>Configuration becomes a snapshot</span>
-        <p>The client captures an immutable configuration snapshot when it is created. Reads can share the client without observing a builder that changes underneath them. Path rules are resolved against each canonical path, while network and planner defaults stay stable for the lifetime of that client.</p>
-        <p>This is why changing a configuration builder does not mutate an existing client. Create a new client when transport policy or provider configuration must change.</p>
-      </div>
-      <h3>Tune only after reuse is working</h3>
-      <div class="control-stack"><div><span>Concurrency</span><p>Controls how many remote transfers may be active. The default is 64.</p><small>Raise it when latency leaves the connection idle. Lower it when the service or process needs a tighter bound.</small></div><div><span>Coalescing</span><p>Controls the trade between request count and extra bytes.</p><small>Measure fetched bytes as well as requested bytes. High useful throughput can hide wasteful merging.</small></div><div><span>Timeout and attempts</span><p>Bound the lifetime of one logical read and the number of tries inside it.</p><small>A retry is useful only when enough deadline remains for it to finish.</small></div></div>
-      <h3>Path rules make one client useful for many resources</h3>
-      <p>Configuration lookup begins with the longest matching canonical path. A bucket rule therefore wins over a global option for objects inside that bucket, and a deeper prefix can override the bucket rule for one subtree. If no path rule supplies a value, Karu checks the global option, then the captured environment value, then the built in default.</p>
-      <p>The same canonical path also limits credential reuse. This alignment prevents an option selected for one resource from silently authorizing another resource with a different scope.</p>
-      <h3>Forked processes rebuild safely</h3>
-      <p>A child process does not inherit the parent engine threads in a usable form. Karu detects the process change on first use and creates a fresh engine. The child gets its own connections and workers without touching stale thread state.</p>
-      <p>Submit batches in the process that will consume them. Inherited batches return <code>KARU_ERR_INVALID</code> in the child, and freeing one leaves it allocated until process exit.</p>
-      <h3>The C ABI and the C++ facade</h3>
-      <p>The stable public boundary is a C application binary interface. Opaque pointers hide the C++ implementation, numeric status values cross the boundary without exceptions, and callers release objects through matching Karu functions. This shape is suitable for language bindings because it does not expose the C++ standard library in the binary contract.</p>
-      <p>The C++ facade adds move only ownership, spans, optional planner overrides, expected results, and automatic cleanup. It does not create another engine. Both interfaces reach the same client, locator, batch, and completion machinery.</p>
-      <h3>What Karu deliberately does not cache</h3>
-      <p>Karu reuses connections, TLS sessions, and credentials because they support many reads. It does not cache object bytes or remote size results. A data cache would need eviction, invalidation, memory budgets, and a workload specific policy. Keeping it outside Karu lets the format reader or application choose whether caching is useful.</p>
-      <h3>Measure the two sides of performance</h3>
-      <p>Planner benchmarks should report transfer count, fetched bytes, requested bytes, and planning time. Network benchmarks should separate cold connection setup from steady state and use a real remote endpoint. A local server removes the latency that batching and concurrency are designed to hide.</p>
-      <h3>Concepts at a glance</h3>
-      <dl class="guide-glossary">
-        <div><dt>Backend</dt><dd>The provider specific component that converts one resolved object and range into a prepared request.</dd></div>
-        <div><dt>Backpressure</dt><dd>A bound that lets a large batch wait in queues instead of becoming unlimited active network work.</dd></div>
-        <div><dt>Completion</dt><dd>The result of one original read with its tag, status, received byte count, and destination.</dd></div>
-        <div><dt>Canonical path</dt><dd>The normalized object identity used for configuration matching, grouping, and credential scope.</dd></div>
-        <div><dt>Concurrency</dt><dd>The number of remote transfers allowed to make progress at the same time.</dd></div>
-        <div><dt>ETag</dt><dd>A remote object version identifier that can make several reads fail if the object no longer matches.</dd></div>
-        <div><dt>Event loop</dt><dd>One loop that advances many nonblocking network operations when their sockets become ready.</dd></div>
-        <div><dt>Half open range</dt><dd>An interval that includes its first byte and excludes its end, written as offset through offset plus length.</dd></div>
-        <div><dt>Idempotent</dt><dd>Safe to repeat without changing stored data. Karu reads have this property.</dd></div>
-        <div><dt>Latency</dt><dd>The waiting time between sending a request and receiving its response.</dd></div>
-        <div><dt>Round trip</dt><dd>One journey from client to server and back. Network setup and requests require one or more of them.</dd></div>
-        <div><dt>Single flight</dt><dd>One shared lookup used to satisfy multiple simultaneous requests for the same credential scope.</dd></div>
-        <div><dt>Stateless read</dt><dd>A read whose position is carried in the operation rather than stored in a shared cursor.</dd></div>
-        <div><dt>Transfer</dt><dd>One local read or HTTP request that may serve several original caller reads.</dd></div>
-      </dl>
+      <h2 class="part" id="operate">One client, tuned from measurements</h2>
+      <p class="section-intro">Remote reads are usually limited by latency rather than CPU. Reuse one client, submit real batches and tune only what a measurement identifies.</p>
+      <h3>One client</h3>
+      <p>A client owns the engine, its threads, the connection pools, the credential cache and the S3 regions it has learned. <strong>A client per read throws all of that away every time.</strong> Create one with <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L118"><code>karu_client_create</code></a>, share it across threads, and keep it.</p>
+      <p><strong>The client keeps a frozen copy of its configuration.</strong> Changing the config object afterwards does not affect it; create a new client when different settings are needed.</p>
+      <h3>What to tune</h3>
+      <table class="spec"><thead><tr><th>Option</th><th>Default</th><th>When to change it</th></tr></thead><tbody>
+        <tr><td><code>KARU_CONCURRENCY</code></td><td><code>64</code></td><td>Raise it when the network sits idle waiting on latency. Lower it to go easier on a server or on the process.</td></tr>
+        <tr><td><code>KARU_COALESCE_*</code></td><td>1 MiB, 64 MiB, 1,024, 16</td><td>Watch fetched bytes as well as requests. A fast batch can hide wasteful merging, and a slow link may prefer a smaller gap.</td></tr>
+        <tr><td><code>KARU_IO_THREADS</code></td><td><code>4</code></td><td>Compare 1 and 4 with several worker processes.</td></tr>
+        <tr><td><code>KARU_REQUEST_TIMEOUT</code>, <code>KARU_MAX_ATTEMPTS</code></td><td>120 s, 8</td><td>A retry only helps if there is time left for it to finish.</td></tr>
+      </tbody></table>
+      <p>Path options let one client serve many buckets with different settings. The longest matching prefix wins over a client-wide value, which wins over the environment and the default, as the <a href="configuration.html">configuration reference</a> explains. The same canonical path scopes credentials, so a setting chosen for one bucket can never authorize another.</p>
+      <h3>After fork</h3>
+      <p>A forked child cannot use its parent's threads. Karu notices the new process on first use and builds a fresh engine with its own connections, which is what PyTorch DataLoader workers need. <strong>Submit batches in the process that drains them</strong>. A batch inherited across <code>fork()</code> returns <code>KARU_ERR_INVALID</code> in the child, and freeing it there leaves it allocated until the process exits.</p>
+      <h3>C and C++</h3>
+      <p>The stable boundary is the C ABI in <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h"><code>karu.h</code></a>, with opaque handles, numeric statuses, and no exceptions or C++ types across it, which keeps language bindings simple. <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.hpp"><code>karu.hpp</code></a> wraps it for C++ with owning handles, spans, <code>std::expected</code> results and per-batch overrides. Both reach the same engine.</p>
+      <h3>What Karu does not cache</h3>
+      <p>Karu keeps connections, TLS sessions, DNS answers, credentials and bucket regions, because each serves many reads. <strong>It never caches object bytes or sizes.</strong> A data cache needs eviction, invalidation and a memory budget that depend on the workload, so it belongs in the layer that knows the data.</p>
+      <h3>Measuring</h3>
+      <p>Planner benchmarks should report requests, fetched bytes, requested bytes and planning time. <a href="https://github.com/asterisk-labs/karu/blob/v0.5.0/include/karu/karu.h#L332"><code>karu_batch_get_stats</code></a> counts transfers, requested and received bytes, retries and new connections; planning time has to be measured separately. Network benchmarks should keep the first cold batch apart from steady state and use a real remote endpoint, because a local server hides exactly the latency that batching and concurrency are meant to hide.</p>
 
 
       <nav class="pager" aria-label="Pages">
@@ -495,14 +510,14 @@
       <ol class="toc-sections">
         <li><a href="#start"><span class="toc-no">01</span><span>One read, seen from end to end</span></a></li>
         <li><a href="#address"><span class="toc-no">02</span><span>A read is a location, not a cursor</span></a></li>
-        <li><a href="#batch"><span class="toc-no">03</span><span>Give Karu the reads you already know</span></a></li>
+        <li><a href="#batch"><span class="toc-no">03</span><span>Reads are submitted in batches</span></a></li>
         <li><a href="#plan"><span class="toc-no">04</span><span>Fewer requests can move the same useful bytes</span></a></li>
         <li><a href="#move"><span class="toc-no">05</span><span>Local and remote reads share a contract</span></a></li>
         <li><a href="#network"><span class="toc-no">06</span><span>A remote read becomes an HTTP exchange</span></a></li>
         <li><a href="#trust"><span class="toc-no">07</span><span>A successful response must prove what it contains</span></a></li>
         <li><a href="#recover"><span class="toc-no">08</span><span>Different failures need different next steps</span></a></li>
         <li><a href="#credentials"><span class="toc-no">09</span><span>Credentials are reused only where they are valid</span></a></li>
-        <li><a href="#operate"><span class="toc-no">10</span><span>Keep the engine alive and tune from evidence</span></a></li>
+        <li><a href="#operate"><span class="toc-no">10</span><span>One client, tuned from measurements</span></a></li>
       </ol>
     </nav>
   </main>
@@ -518,5 +533,6 @@
 </div>
 <script src="assets/js/toc.js" defer></script>
 <script src="assets/js/code.js?v=1" defer></script>
+<script src="assets/js/reads.js?v=5" defer></script>
 </body>
 </html>
