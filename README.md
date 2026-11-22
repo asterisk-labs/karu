@@ -1,4 +1,6 @@
-# karu
+<p align="center">
+  <img src="docs/brand/assets/svg/logo-horizontal-animated.svg" alt="karu" width="420">
+</p>
 
 *karu is the Quechua word for far.*
 
