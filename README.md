@@ -1,7 +1,7 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/assets/svg/karu-banner-dark.svg">
-    <img src="docs/brand/assets/svg/karu-banner-light.svg" alt="karu" width="720">
+    <img src="docs/brand/assets/svg/karu-banner-light.svg" alt="karu" width="725">
   </picture>
   <p>
     <a href="https://github.com/asterisk-labs/karu/actions/workflows/ci.yml"><img src="https://github.com/asterisk-labs/karu/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"/></a>
