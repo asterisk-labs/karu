@@ -95,17 +95,16 @@ count (round trips) with fetched bytes (bandwidth) for the real access pattern.
   Hugging Face transfers go straight to the HTTP queue. Anything that can block
   (profiles, helper processes, metadata services, callbacks) stays off the event loops.
 - `KARU_CONCURRENCY` is split between the loops (64 over 4 gives 16 each). A loop takes
-  transfers from the shared HTTP queue while it has room, and leaves them to a lower
-  loop that has room, so loops fill in index order across every batch of the client.
-  The rest wait in the queue: a batch can describe millions of reads while active
-  network work stays bounded.
+  transfers from the shared HTTP queue while it has room. Loops with lower indexes
+  take transfers first. The rest wait in the queue: a batch can describe millions of
+  reads while active network work stays bounded.
 - Retries, region corrections and pooled handles stay with the loop that started the
   transfer, so a retry can reuse that loop's connection. TLS sessions are shared by all
   loops.
-- A producer wakes the lowest loop with a free slot, and a loop that fills up wakes the
-  next one while work is left. Serial batches smaller than one loop's share therefore
-  return to the same loop and its warm connections. File and credential queues wake
-  only their own workers. Freeing a completed batch requires no worker notifications.
+- Producers wake the lowest loop with room. A full loop wakes the next one while work
+  remains. Serial batches that fit on one loop can reuse its connections. File and
+  credential queues wake only their own workers. Freeing a completed batch requires
+  no worker notifications.
 - Each batch has its own completion queue. `karu_batch_next` wakes when a completion
   arrives, when the batch is fully drained, or when it is cancelled.
 - Cancellation (`karu_batch_free`) removes queued transfers of that batch, asks every
@@ -211,9 +210,8 @@ Delays:
 Corrections that do not consume attempts, each at most once per transfer:
 
 - S3 region: a response naming another region (`x-amz-bucket-region` or `<Region>` in the
-  error body) re-signs the request for it. The region is remembered for that bucket for
-  the life of the client. A region with characters outside letters, digits and `-` is
-  ignored.
+  error body) re-signs the request for it. The client remembers the region by endpoint
+  and bucket. Regions containing characters other than letters, digits or `-` are ignored.
 - Credentials: an authentication rejection that the provider marks as expired
   invalidates the cached credentials and sends the transfer back to a credential worker.
 

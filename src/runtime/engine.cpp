@@ -356,10 +356,7 @@ void Engine::publish_occupied(IoLoop& loop) noexcept {
 }
 
 void Engine::wake_for_backlog(const IoLoop* except) noexcept {
-    // One loop is woken and take_http() wakes the next while work is left, so
-    // loops fill in index order and serial batches return to the loop that
-    // holds their warm connections. That loop is often still finishing the
-    // previous batch and not marked idle; the wakeup is kept for its next poll.
+    // Wake the first loop with room. A full loop wakes the next one.
     for (auto& loop : loops_) {
         if (loop.get() == except || loop->occupied.load(std::memory_order_seq_cst) >= loop->limit) {
             continue;
@@ -368,7 +365,7 @@ void Engine::wake_for_backlog(const IoLoop* except) noexcept {
         curl_multi_wakeup(loop->multi.get());
         return;
     }
-    // Every published count is full, but one may lag behind a loop with room.
+    // Counts can lag behind the loops.
     wake_idle_loop();
 }
 
@@ -402,8 +399,7 @@ void Engine::queue_http(std::unique_ptr<Transfer> transfer) {
 void Engine::take_http(IoLoop& loop) {
     if (http_backlog_.load(std::memory_order_acquire) == 0)
         return;
-    // Leave the queue to a lower loop with room. It was woken for this work or
-    // is about to look for it, and it hands over what it cannot take.
+    // Let a lower loop with room take the queue first.
     for (const auto& lower : loops_) {
         if (lower.get() == &loop)
             break;
@@ -422,7 +418,7 @@ void Engine::take_http(IoLoop& loop) {
         http_backlog_.store(left, std::memory_order_seq_cst);
     }
     publish_occupied(loop);
-    // This loop is full, so another one takes over.
+    // Wake another loop if transfers remain.
     if (left > 0)
         wake_for_backlog(&loop);
 }
@@ -728,7 +724,7 @@ void Engine::io_loop(IoLoop& loop) {
                 continue;
             curl_multi_remove_handle(multi, easy);
             std::unique_ptr<Transfer> transfer = std::move(node.mapped());
-            // Publish the free slot before the completion can prompt a new batch.
+            // Publish the free slot before delivering the completion.
             publish_occupied(loop);
 
             if (transfer->http_status == 0) {
@@ -825,8 +821,7 @@ void Engine::io_loop(IoLoop& loop) {
         }
 
         publish_occupied(loop);
-        // A producer may have chosen this loop from an older count. Now that
-        // it shows as full, another loop has to take the queue.
+        // Redirect queued work if the count was stale.
         if (loop.occupied.load(std::memory_order_relaxed) >= loop.limit &&
             http_backlog_.load(std::memory_order_seq_cst) != 0) {
             wake_for_backlog(&loop);

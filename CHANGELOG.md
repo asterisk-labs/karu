@@ -17,15 +17,12 @@ Notable user-visible changes are recorded here.
 
 - Reduce DNS queries and certificate loading during concurrent HTTPS reads.
   DNS lookups run off the I/O threads and cached addresses expire after a minute.
-- A client remembers the region S3 names for a bucket. Without `AWS_REGION`, every
-  object of a bucket outside `us-east-1` repeated one misrouted request per transfer in
-  each batch and size probe.
-- A malformed region in an S3 response is ignored instead of failing the read with
-  `KARU_ERR_CONFIG`.
-- A credential helper no longer inherits the output pipe of a helper started by
-  another thread, which delayed that result until both had exited.
-- I/O threads fill in index order. Any thread could take a batch smaller than its
-  share, so serial batches often reconnected on a thread without open connections.
+- Reuse a bucket's reported S3 region across reads and size probes on one client.
+  Without `AWS_REGION`, later batches could repeat a request to the wrong region.
+- Ignore malformed S3 response regions instead of returning `KARU_ERR_CONFIG`.
+- Keep credential helper pipes from being inherited by other helpers on Linux.
+- Assign HTTP transfers to I/O threads in index order so serial batches can reuse
+  open connections.
 
 ## [0.4.0] - 2026-09-27
 

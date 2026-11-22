@@ -44,8 +44,7 @@ class RequestBuilder {
 
     void invalidate_credentials(const Locator& locator);
 
-    // The region S3 named for the locator's bucket, or empty. It outlives the
-    // batch, so one wrong-region answer serves every later transfer and probe.
+    // Cache S3 regions by endpoint and bucket for this client.
     [[nodiscard]] std::string known_region(const Locator& locator);
     void remember_region(const Locator& locator, std::string_view region);
 
